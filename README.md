@@ -4,7 +4,8 @@ KV 存储压力感知调度（KV Storage Pressure-Aware Cross-Layer Inference Sc
 
 ## 目录
 
-- `docs/` — 调研记录、[仿真设计文档](docs/KV存储压力感知调度仿真设计-20260901.md)、实验结果
+- `docs/` — 调研记录、[仿真设计文档](docs/KV存储压力感知调度仿真设计-20260901.md)
+- [实验结果-E1E4-20260901.md](实验结果-E1E4-20260901.md) — E1–E4 实验结论与图表
 - `sim/` — 离散事件仿真器（Python + SimPy）
 - `tests/` — 不变量单元测试（解析解吻合 / 字节守恒 / 确定性 / 策略单调性）
 - `results/` — 实验输出（gitignored）
