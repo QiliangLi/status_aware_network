@@ -59,6 +59,45 @@ class WorkloadConfig:
 
 
 @dataclass(frozen=True)
+class NodeConfig:
+    """存储节点：内存/固态盘两个服务层（各自独立带宽与背景负载），容量用于容量压力状态。"""
+    name: str
+    mem: StorageConfig = StorageConfig()
+    ssd: StorageConfig = StorageConfig(b_total=30.0)
+    cap_gb: float = 512.0
+
+
+@dataclass(frozen=True)
+class TopoConfig:
+    """v2 共享分布式 KV 存储拓扑（对应架构图：计算节点+本地缓存 / 高速网络 / 多存储节点+元数据目录）。"""
+    n_workers: int = 4
+    nodes: tuple = (NodeConfig("n0"), NodeConfig("n1"), NodeConfig("n2"))
+    fabric: StorageConfig = StorageConfig(b_total=120.0)
+    # 路径延迟矩阵 W×N（秒），worker->node 的静态路径差异
+    path_lat: tuple = ((0.002, 0.004, 0.008),) * 4
+    local_cache_gb: float = 12.0
+    # 初始副本放置：((cls, ((node_idx, "mem"|"ssd"), ...)), ...)；未列出的类视为无副本（只能重算/prefill）
+    replicas: tuple = ()
+    # 复制控制器（Q4）：None 表示不启用运行时复制
+    ctrl: "CtrlConfig | None" = None
+    # 每 worker 的 GPU 背景负载（分段常数表）；空 = 全部用 GpuConfig.bg_schedule
+    gpu_bgs: tuple = ()
+    # t=0 时预置进 worker 本地缓存的 (worker, cls)
+    seed_local: tuple = ()
+
+
+@dataclass(frozen=True)
+class CtrlConfig:
+    interval: float = 0.5        # 控制器评估周期（秒）
+    hot_util: float = 0.85       # 进入 HOT 的利用率阈值（对可观测 util）
+    exit_util: float = 0.65      # 退出 HOT 的阈值（滞回）
+    hold_s: float = 2.0          # 持续该状态多久才触发
+    min_demand: float = 1.0      # 类的滚动到达率（req/s）高于此才值得复制
+    predictive: bool = False     # True: 用 EMA 斜率提前触发（更低阈值）
+    max_replicas: int = 3        # 单类最大副本数
+
+
+@dataclass(frozen=True)
 class ObsConfig:
     interval: float = 0.05        # 状态采样间隔；0 表示 live（每次读取实时真值）
     ema_halflife: float = 0.1
@@ -88,6 +127,7 @@ class RunSpec:
     pol: PolicyConfig = PolicyConfig()
     burst: tuple = None                           # (t0, n, dur_s, cls_name)
     window: tuple = None                          # (t0, t1) 窗口指标，如 E4 burst 窗口
+    topo: "TopoConfig | None" = None              # v2 共享分布式存储拓扑；None = v1 单/多 backend 模式
     collect_ts: bool = False
     save_requests: bool = False
     save_ts: bool = False

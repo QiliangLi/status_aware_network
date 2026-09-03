@@ -16,9 +16,16 @@ class Request:
     ttft_slo: float
     prompt_tokens: int = 0
     worker: int = -1
-    action: str = ""        # fetch | recompute | prefill(miss/no-hold)
+    action: str = ""        # v1: fetch | recompute | prefill；v2 另有 local | partial
     t_fetch_done: float = -1.0
     t_prefill_done: float = -1.0
+    # ---- v2 ----
+    node: int = -1
+    tier: str = ""
+    fetch_tokens: int = 0       # partial 动作取回的前缀 token 数
+    fetch_gb: float = 0.0
+    quote_est: float = -1.0     # 决策时的访问成本查询估计（秒），用于接口误差统计
+    local_avail: bool = False   # 到达时是否有 worker 本地缓存持有该前缀
 
     @property
     def ttft(self) -> float:

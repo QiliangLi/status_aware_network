@@ -27,6 +27,8 @@ def get_trace(spec: RunSpec) -> list:
 
 
 def run_once(spec: RunSpec) -> dict:
+    if spec.topo is not None:
+        return run_once_v2(spec)
     trace = get_trace(spec)
     env = simpy.Environment()
     curve = PrefillCurve(spec.gpu.prefill_table)
@@ -141,3 +143,170 @@ def run_once(spec: RunSpec) -> dict:
 def _run_job(job):
     meta, spec = job
     return {**meta, **run_once(spec)}
+
+
+# ==================== v2：共享分布式 KV 存储拓扑 ====================
+
+def _ctrl_loop(env, world, quote, ctrl, metrics, spec):
+    """Q4 复制控制器：源副本持续高压 + 类需求高 -> 向低压节点复制（复制流量本身消耗带宽）。"""
+    hot_since = {}
+    op_id = [0]
+
+    def _do_replicate(cls, src, dst, nbytes):
+        op_id[0] += 1
+        rid = -(10 ** 6 + op_id[0])
+        t0 = env.now
+        e1 = world.res(*src).submit(rid, nbytes)
+        e2 = world.res(*dst).submit(rid, nbytes)
+        yield e1 & e2
+        world.dir.add(cls, dst, nbytes)
+        metrics.on_replication(cls, src, dst, nbytes, env.now - t0)
+
+    while True:
+        yield env.timeout(ctrl.interval)
+        if env.now < spec.warmup:
+            continue
+        demand = metrics.demand_rates(env.now)
+        enter = ctrl.hot_util - (0.10 if ctrl.predictive else 0.0)
+        hold = ctrl.hold_s / (2.0 if ctrl.predictive else 1.0)
+        # 更新各副本层资源的高压计时（fabric 不承载副本）
+        for ri in range(len(world.resources) - 1):
+            u = quote.util_of(ri)
+            if u >= enter:
+                hot_since.setdefault(ri, env.now)
+            elif u < ctrl.exit_util:
+                hot_since.pop(ri, None)
+        for cls, rate in sorted(demand.items()):
+            if rate < ctrl.min_demand or len(world.dir.holders(cls)) >= ctrl.max_replicas:
+                continue
+            holders = world.dir.holders(cls)
+            src = next(((n, t) for (n, t) in holders
+                        if world.res_idx(n, t) in hot_since
+                        and env.now - hot_since[world.res_idx(n, t)] >= hold), None)
+            if src is None:
+                continue
+            tier_pref = src[1]                      # 复制到同类型层
+            best_dst, best_key = None, None
+            for n in range(world.n_nodes):
+                dst = (n, tier_pref)
+                if dst in holders:
+                    continue
+                ri = world.res_idx(n, tier_pref)
+                key = (quote.util_of(ri), world.dir.capacity_pressure(n))
+                if best_dst is None or key < best_key:
+                    best_dst, best_key = dst, key
+            nbytes = world.cls_bytes.get(cls, 0.0)
+            if best_dst is not None and nbytes > 0:
+                env.process(_do_replicate(cls, src, best_dst, nbytes))
+
+
+def run_once_v2(spec: RunSpec) -> dict:
+    import numpy as np
+
+    trace = get_trace(spec)
+    env = simpy.Environment()
+    from .topology import World
+    from .quote import AccessCostQuery
+    from .engine2 import EngineV2
+    from .policies2 import V2Ctx, make_v2_policy
+
+    world = World(env, spec)
+    quote = AccessCostQuery(world, spec.obs)
+    metrics = Collector(spec, (), None)
+    rng = np.random.default_rng([spec.seed, 9, 7])
+    ctx = V2Ctx(world=world, quote=quote, margin=spec.pol.margin,
+                kv_gb_per_token=spec.model.kv_gb_per_token, rng=rng)
+    policy = make_v2_policy(spec.policy, ctx)
+
+    for (w, cls) in spec.topo.seed_local:
+        world.locals[w].insert(cls, world.cls_bytes.get(cls, 0.0))
+
+    engines = [EngineV2(env, w, world, metrics) for w in range(world.n_workers)]
+
+    # ---------- 世界快照（ticker 用） ----------
+    n_res = len(world.resources)
+    last_bytes = [0.0] * n_res
+    last_busy = [0.0] * world.n_workers
+    last_tick = [env.now]
+
+    def world_now(t):
+        dt = max(t - last_tick[0], 1e-9)
+        stw = []
+        for i, r in enumerate(world.resources):
+            fg = (r.bytes_served - last_bytes[i]) / dt
+            last_bytes[i] = r.bytes_served
+            stw.append(dict(qdepth=len(r.active), inflight=sum(tr.remaining for tr in r.active),
+                            fg_gbps=fg, util=min(1.0, (r.bg_at(t) + fg) / r.b_total)))
+        gpw = []
+        for w, g in enumerate(world.gpus):
+            gpw.append(dict(qjobs=len(g.queue), util_win=(g.busy_time - last_busy[w]) / dt))
+            last_busy[w] = g.busy_time
+        last_tick[0] = t
+        return dict(storages=stw, gpus=gpw)
+
+    def _tickers():
+        def coarse():
+            while True:
+                yield env.timeout(0.1)
+                for r in world.resources:
+                    r.advance_to(env.now)
+                for g in world.gpus:
+                    g.advance_to(env.now)
+                metrics.coarse_tick(env.now, world_now(env.now))
+
+        env.process(coarse())
+        if spec.collect_ts:
+            metrics.enable_ts(n_workers=world.n_workers, n_res=n_res)
+
+            def fine():
+                while True:
+                    yield env.timeout(0.01)
+                    for r in world.resources:
+                        r.advance_to(env.now)
+                    for g in world.gpus:
+                        g.advance_to(env.now)
+                    metrics.ts_tick(env.now, world_now(env.now))
+
+            env.process(fine())
+
+    _tickers()
+    if spec.topo.ctrl is not None:
+        env.process(_ctrl_loop(env, world, quote, spec.topo.ctrl, metrics, spec))
+
+    def _arrivals():
+        for rid, (t, cls, hit) in enumerate(trace):
+            yield env.timeout(max(0.0, t - env.now))
+            req = build_request(rid, t, cls, hit, spec.wl, spec.model)
+            req.local_avail = bool(hit) and any(l.holds(cls) for l in world.locals)
+            metrics.on_arrival(req)
+            dec = policy.decide(req)
+            req.worker = dec.worker
+            req.action = dec.action
+            req.node, req.tier = dec.node, dec.tier
+            req.fetch_tokens = dec.fetch_tokens
+            metrics.on_decision_v2(req, dec)
+            engines[dec.worker].handle(req, dec)
+
+    env.process(_arrivals())
+    env.run(until=spec.duration + spec.margin)
+    summary = metrics.finalize()
+    summary["res_names"] = ",".join(world.res_names)
+
+    if spec.out_dir:
+        os.makedirs(spec.out_dir, exist_ok=True)
+        if spec.save_requests:
+            import pandas as pd
+            rows = [{
+                "rid": r.rid, "t_arr": r.arrival, "cls": r.cls, "hit": r.hit,
+                "worker": r.worker, "action": r.action, "node": r.node, "tier": r.tier,
+                "fetch_tokens": r.fetch_tokens, "t_fetch_done": r.t_fetch_done,
+                "t_prefill_done": r.t_prefill_done, "ttft": r.ttft if r.ttft else np.nan,
+                "slo_met": (r.ttft is not None and r.ttft <= r.ttft_slo),
+            } for r in metrics.reqs.values()]
+            pd.DataFrame(rows).to_csv(
+                os.path.join(spec.out_dir, f"requests_{spec.policy}_s{spec.seed}.csv"), index=False)
+        if spec.save_ts and metrics.ts:
+            import pandas as pd
+            pd.DataFrame(metrics.ts).to_csv(
+                os.path.join(spec.out_dir, f"ts_{spec.policy}_s{spec.seed}.csv"), index=False)
+    return summary
