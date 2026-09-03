@@ -9,6 +9,7 @@ KV 存储压力感知调度（KV Storage Pressure-Aware Cross-Layer Inference Sc
 - [实验结果-E1E4-20260901.md](实验结果-E1E4-20260901.md) — v1 实验结论与图表
 - [实验结果-E5E9-20260904.md](实验结果-E5E9-20260904.md) — v2 实验结论与图表（Q1–Q5，含 rate-aware 修正补记）
 - [实验结果-E9bE10E11E12-20260904.md](实验结果-E9bE10E11E12-20260904.md) — 改进方案四实验（问题②③④⑤）
+- [实验结果-E13E14E15E16-20260904.md](实验结果-E13E14E15E16-20260904.md) — 改进方案 II 四实验（问题⑥⑦⑧⑨，含参数现实性核查）
 - `tools/calibrate.py` — 真实系统标定脚手架（LMCache 指标 / prefill 曲线 / RDMA 路径）
 - `sim/` — 离散事件仿真器（Python + SimPy），v1 与 v2 两套拓扑
 - `tests/` — 不变量单元测试（解析解吻合 / 字节守恒 / 确定性 / 策略单调性 / v2 拓扑与策略）
@@ -24,6 +25,7 @@ python3 -m venv .venv
 .venv/bin/python -m sim.run --exp all --seeds 10      # v1: E1–E4
 .venv/bin/python -m sim.run --exp v2  --seeds 8       # v2: E5–E9（共享分布式 KV 存储拓扑）
 .venv/bin/python -m sim.run --exp v3  --seeds 8       # v3: E9b/E10/E11/E12（改进方案实验）
+.venv/bin/python -m sim.run --exp v4  --seeds 8       # v4: E13–E16（改进方案 II 实验）
 .venv/bin/python -m sim.run --exp smoke               # 快速冒烟
 ```
 
