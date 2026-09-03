@@ -84,6 +84,17 @@ class TopoConfig:
     gpu_bgs: tuple = ()
     # t=0 时预置进 worker 本地缓存的 (worker, cls)
     seed_local: tuple = ()
+    # 预取/回写控制器（问题②）：None 表示不启用
+    prefetch: "PrefetchConfig | None" = None
+    # 本地缓存放置：lru（被动）| coord（类->偏好worker一致性哈希准入）
+    cache_mode: str = "lru"
+
+
+@dataclass(frozen=True)
+class PrefetchConfig:
+    """Q4 预取（问题②）：会话续写预取 + 重算后回写。"""
+    mode: str = "gated"          # none | always | gated（gated=quote压力<=WARM才预取）
+    writeback: bool = False      # 重算完成后把完整 KV 异步回写到低压共享存储节点
 
 
 @dataclass(frozen=True)
@@ -132,6 +143,7 @@ class RunSpec:
     pol: PolicyConfig = PolicyConfig()
     burst: tuple = None                           # (t0, n, dur_s, cls_name)
     window: tuple = None                          # (t0, t1) 窗口指标，如 E4 burst 窗口
+    sessions: tuple = None                        # (session_rate, mean_turns, gap_mean) 会话型负载
     topo: "TopoConfig | None" = None              # v2 共享分布式存储拓扑；None = v1 单/多 backend 模式
     collect_ts: bool = False
     save_requests: bool = False

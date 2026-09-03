@@ -16,35 +16,74 @@ from .storage import SharedKVStorage, StorageObservable
 
 
 class LocalKVCache:
-    """单 worker 的本地 KV 缓存：class -> bytes，LRU 淘汰，总容量有限。"""
+    """单 worker 的本地 KV 缓存：class -> [bytes, source, used]，LRU 淘汰，总容量有限。
 
-    def __init__(self, cap_gb: float):
+    source: "serve"（服务后写入，已使用）| "prefetch"（预取写入，未使用直到被 local 命中）。
+    coord 模式：仅偏好 worker（一致性哈希）或已有条目可写入，降低跨 worker 冗余。
+    """
+
+    def __init__(self, cap_gb: float, worker_id: int = 0, n_workers: int = 1,
+                 coord: bool = False):
+        import zlib
         self.cap = cap_gb
+        self.worker_id = worker_id
+        self.coord = coord
+        self._pref = lambda cls: zlib.crc32(cls.encode()) % max(1, n_workers)
         self.used = 0.0
-        self._items: OrderedDict[str, float] = OrderedDict()
+        self._items: OrderedDict[str, list] = OrderedDict()
+        self.prefetch_wasted_gb = 0.0
+        self.prefetch_gb = 0.0
+        self.n_prefetch = 0
 
     def holds(self, cls: str) -> bool:
         return cls in self._items
 
-    def insert(self, cls: str, nbytes: float) -> None:
+    def _allowed(self, cls: str) -> bool:
+        return (not self.coord) or self._pref(cls) == self.worker_id or cls in self._items
+
+    def _coord_target(self, cls: str):
+        """coord 模式下该类的偏好 worker；非 coord 返回 None。"""
+        return self._pref(cls) if self.coord else None
+
+    def insert(self, cls: str, nbytes: float, source: str = "serve") -> None:
         if self.cap <= 1e-9:      # 容量 0 = 不启用本地缓存
             return
         if cls in self._items:
             self._items.move_to_end(cls)
+            if source == "serve":
+                self._items[cls][2] = True
             return
-        self._items[cls] = nbytes
+        if not self._allowed(cls):
+            return
+        self._items[cls] = [nbytes, source, source == "serve"]
         self.used += nbytes
+        if source == "prefetch":
+            self.prefetch_gb += nbytes
+            self.n_prefetch += 1
         while self.used > self.cap + 1e-9 and len(self._items) > 1:
-            victim, b = self._items.popitem(last=False)
-            self.used -= b
+            victim, rec = self._items.popitem(last=False)
+            self.used -= rec[0]
+            if rec[1] == "prefetch" and not rec[2]:
+                self.prefetch_wasted_gb += rec[0]
 
     def evict(self, cls: str) -> None:
-        b = self._items.pop(cls, None)
-        if b is not None:
-            self.used -= b
+        rec = self._items.pop(cls, None)
+        if rec is not None:
+            self.used -= rec[0]
+            if rec[1] == "prefetch" and not rec[2]:
+                self.prefetch_wasted_gb += rec[0]
+
+    def mark_used(self, cls: str) -> None:
+        rec = self._items.get(cls)
+        if rec is not None:
+            rec[2] = True
 
     def size(self, cls: str) -> float:
-        return self._items.get(cls, 0.0)
+        rec = self._items.get(cls)
+        return rec[0] if rec else 0.0
+
+    def classes_held(self) -> set:
+        return set(self._items.keys())
 
 
 class MetadataDirectory:
@@ -100,7 +139,11 @@ class World:
             if topo.gpu_bgs:
                 gcfg = _replace(spec.gpu, bg_schedule=topo.gpu_bgs[w])
             self.gpus.append(GpuPool(env, w, self.curve, gcfg))
-        self.locals = [LocalKVCache(topo.local_cache_gb) for _ in range(self.n_workers)]
+        self.locals = [
+            LocalKVCache(topo.local_cache_gb, worker_id=w, n_workers=self.n_workers,
+                         coord=(topo.cache_mode == "coord"))
+            for w in range(self.n_workers)
+        ]
 
         # 存储侧：每节点 mem/ssd 两个流体资源 + 共享 fabric
         self.nodes = []           # [(mem_res, ssd_res, NodeConfig)]

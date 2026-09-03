@@ -20,9 +20,13 @@ _TRACE_CACHE: dict = {}
 
 
 def get_trace(spec: RunSpec) -> list:
-    key = (spec.seed, spec.duration, spec.wl, spec.burst)
+    key = (spec.seed, spec.duration, spec.wl, spec.burst, spec.sessions)
     if key not in _TRACE_CACHE:
-        _TRACE_CACHE[key] = workload.gen_full_trace(spec.wl, spec.duration, spec.seed, spec.burst)
+        if spec.sessions:
+            _TRACE_CACHE[key] = workload.gen_full_trace_session(
+                spec.wl, spec.duration, spec.seed, spec.burst, spec.sessions)
+        else:
+            _TRACE_CACHE[key] = workload.gen_full_trace(spec.wl, spec.duration, spec.seed, spec.burst)
     return _TRACE_CACHE[key]
 
 
@@ -247,6 +251,12 @@ def run_once_v2(spec: RunSpec) -> dict:
         world.locals[w].insert(cls, world.cls_bytes.get(cls, 0.0))
 
     engines = [EngineV2(env, w, world, metrics) for w in range(world.n_workers)]
+    prefetcher = None
+    if spec.topo.prefetch is not None:
+        from .prefetch import Prefetcher
+        prefetcher = Prefetcher(env, world, quote, metrics, spec.topo.prefetch)
+        for e in engines:
+            e.on_complete_hook = prefetcher.on_complete
 
     # ---------- 世界快照（ticker 用） ----------
     n_res = len(world.resources)
@@ -310,12 +320,25 @@ def run_once_v2(spec: RunSpec) -> dict:
             req.node, req.tier = dec.node, dec.tier
             req.fetch_tokens = dec.fetch_tokens
             metrics.on_decision_v2(req, dec)
+            if prefetcher is not None:
+                prefetcher.on_dispatch(req, dec)
             engines[dec.worker].handle(req, dec)
 
     env.process(_arrivals())
     env.run(until=spec.duration + spec.margin)
     summary = metrics.finalize()
     summary["res_names"] = ",".join(world.res_names)
+    # 缓存与预取统计
+    held = [c.classes_held() for c in world.locals]
+    all_cls = {c.name for c in spec.wl.classes}
+    counts = {c: sum(1 for h in held if c in h) for c in all_cls}
+    distinct = sum(1 for v in counts.values() if v > 0)
+    summary["cache_redundancy"] = sum(counts.values()) / max(1, distinct)
+    summary["cache_coverage"] = distinct / max(1, len(all_cls))
+    if prefetcher is not None:
+        summary.update(prefetcher.stats())
+        summary["prefetch_waste_frac"] = (
+            summary["prefetch_wasted_gb"] / max(1e-9, summary["prefetch_gb"]))
 
     if spec.out_dir:
         os.makedirs(spec.out_dir, exist_ok=True)

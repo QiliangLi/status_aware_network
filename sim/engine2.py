@@ -13,6 +13,7 @@ class EngineV2:
         self.worker_id = worker_id
         self.world = world
         self.metrics = metrics
+        self.on_complete_hook = None   # simrun 注入（预取/回写）
 
     def handle(self, req, dec):
         self.env.process(self._run(req, dec))
@@ -57,7 +58,11 @@ class EngineV2:
                 yield gpu.submit(req.rid, req.prompt_tokens - dec.fetch_tokens)
         else:
             raise ValueError(f"unknown action {act}")
+        if act == "local":
+            self.world.locals[self.worker_id].mark_used(req.cls)
         if req.hit:
             self.world.locals[self.worker_id].insert(req.cls, req.kv_gb)
         req.t_prefill_done = self.env.now
         self.metrics.on_complete(req, act)
+        if self.on_complete_hook is not None:
+            self.on_complete_hook(req)

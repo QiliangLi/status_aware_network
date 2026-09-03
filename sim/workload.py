@@ -30,3 +30,31 @@ def gen_full_trace(wl, duration: float, seed: int, burst) -> list:
     if burst is not None:
         trace = sorted(trace + gen_burst(burst, seed))
     return trace
+
+
+def gen_session_trace(wl, duration: float, seed: int, sessions) -> list:
+    """会话型负载：会话 Poisson 到达，会话内多轮复用同一前缀（首轮 miss，后续 hit）。"""
+    srate, mean_turns, gap_mean = sessions
+    rng = np.random.default_rng(seed + 555)
+    names = np.array([c.name for c in wl.classes])
+    shares = np.array([c.share for c in wl.classes])
+    trace = []
+    t = float(rng.exponential(1.0 / srate))
+    while t < duration:
+        cls = str(rng.choice(names, p=shares))
+        turns = min(20, 1 + int(rng.geometric(1.0 / max(1.0, mean_turns))))
+        tt = t
+        for k in range(turns):
+            if tt >= duration:
+                break
+            trace.append((tt, cls, k > 0))
+            tt += float(rng.exponential(gap_mean))
+        t += float(rng.exponential(1.0 / srate))
+    return sorted(trace)
+
+
+def gen_full_trace_session(wl, duration: float, seed: int, burst, sessions) -> list:
+    trace = gen_session_trace(wl, duration, seed, sessions)
+    if burst is not None:
+        trace = sorted(trace + gen_burst(burst, seed))
+    return trace

@@ -43,14 +43,16 @@ def offset_square(mean: float, amp: float, period: float, until: float, phase: f
 
 
 def mk_topo(replicas=(), gpu_bgs=(), ctrl=None, seed_local=(), nodes=NODES,
-            fabric=FABRIC, local_cache_gb=12.0):
+            fabric=FABRIC, local_cache_gb=12.0, prefetch=None, cache_mode="lru"):
     return TopoConfig(n_workers=4, nodes=nodes, fabric=fabric, path_lat=PATH_LAT,
                       local_cache_gb=local_cache_gb, replicas=replicas, ctrl=ctrl,
-                      gpu_bgs=gpu_bgs, seed_local=seed_local)
+                      gpu_bgs=gpu_bgs, seed_local=seed_local,
+                      prefetch=prefetch, cache_mode=cache_mode)
 
 
 def mk_spec(exp, policy, seed, topo, duration=400.0, lam=5.0, classes=None,
             obs=None, margin=0.10, slo=1.0, gpu_bg=0.0, hit_ratio=None, burst=None, guardband=1.2,
+            sessions=None,
             window=None, collect_ts=False, save_ts=False, save_requests=False, out_dir=None):
     kw = dict(lam=lam, ttft_slo=slo)
     if hit_ratio is not None:
@@ -63,7 +65,7 @@ def mk_spec(exp, policy, seed, topo, duration=400.0, lam=5.0, classes=None,
         topo=topo, gpu=GpuConfig(bg_schedule=stable(gpu_bg)), wl=wl,
         obs=obs if obs is not None else ObsConfig(),
         pol=PolicyConfig(margin=margin, guardband=guardband),
-        burst=burst, window=window,
+        burst=burst, window=window, sessions=sessions,
         collect_ts=collect_ts, save_ts=save_ts, save_requests=save_requests,
         out_dir=out_dir,
     )
