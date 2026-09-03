@@ -15,7 +15,7 @@ LABELS = {"p0": "P0 AlwaysFetch", "p1": "P1 StaticCost", "p2": "P2 Dynamic",
 COLORS = {"p0": "#8c8c8c", "p1": "#c44e52", "p2": "#4c72b0", "p3": "#55a868", "p4": "#cca64c"}
 
 
-def main(seeds, procs=None):
+def main(seeds, procs=None, duration=DURATION):
     import pandas as pd
     jobs = build_e4(seeds)
     print(f"[e4] {len(jobs)} runs ...")
