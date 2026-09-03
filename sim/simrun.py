@@ -20,9 +20,11 @@ _TRACE_CACHE: dict = {}
 
 
 def get_trace(spec: RunSpec) -> list:
-    key = (spec.seed, spec.duration, spec.wl, spec.burst, spec.sessions)
+    key = (spec.seed, spec.duration, spec.wl, spec.burst, spec.sessions, spec.drift)
     if key not in _TRACE_CACHE:
-        if spec.sessions:
+        if spec.drift:
+            _TRACE_CACHE[key] = workload.gen_drift_trace(spec.wl, spec.duration, spec.seed, spec.drift)
+        elif spec.sessions:
             _TRACE_CACHE[key] = workload.gen_full_trace_session(
                 spec.wl, spec.duration, spec.seed, spec.burst, spec.sessions)
         else:
@@ -152,11 +154,20 @@ def _run_job(job):
 # ==================== v2：共享分布式 KV 存储拓扑 ====================
 
 def _ctrl_loop(env, world, quote, ctrl, metrics, spec):
-    """Q4 复制控制器：源副本持续高压 + 类需求高 -> 向低压节点复制（复制流量本身消耗带宽）。"""
+    """存储侧控制器：复制（跨层降级）/ 迁移（冷类回收 mem）/ 容量淘汰（防孤儿）。
+
+    问题④扩展后的行为：
+    - 源副本持续高压 + 类需求高 -> 复制到 (util, 容量压力) 最小的目标；
+      cross_tier=True 时目标层含 ssd（mem 拥堵而 ssd 空闲时降层）。
+    - 类需求低于 cold_demand 且源在 mem -> 迁移（复制完成后淘汰源，回收快层容量）。
+    - 节点容量压力 > cap_evict -> 淘汰该节点上需求率最低的类至 evict_target，
+      仅当该类在别处仍有副本（Directory.remove 内建孤儿检查）。
+    """
     hot_since = {}
     op_id = [0]
+    last_op = {}   # cls -> 上次复制/迁移时刻（冷却）
 
-    def _do_replicate(cls, src, dst, nbytes):
+    def _do_transfer(cls, src, dst, nbytes, evict_src):
         op_id[0] += 1
         rid = -(10 ** 6 + op_id[0])
         t0 = env.now
@@ -165,6 +176,8 @@ def _ctrl_loop(env, world, quote, ctrl, metrics, spec):
         yield e1 & e2
         world.dir.add(cls, dst, nbytes)
         metrics.on_replication(cls, src, dst, nbytes, env.now - t0)
+        if evict_src:
+            world.dir.remove(cls, src, nbytes)
 
     while True:
         yield env.timeout(ctrl.interval)
@@ -173,15 +186,37 @@ def _ctrl_loop(env, world, quote, ctrl, metrics, spec):
         demand = metrics.demand_rates(env.now)
         enter = ctrl.hot_util - (0.10 if ctrl.predictive else 0.0)
         hold = ctrl.hold_s / (2.0 if ctrl.predictive else 1.0)
-        # 更新各副本层资源的高压计时（fabric 不承载副本）
-        for ri in range(len(world.resources) - 1):
+        for ri in range(len(world.resources) - 1):   # fabric 不承载副本
             u = quote.util_of(ri)
             if u >= enter:
                 hot_since.setdefault(ri, env.now)
             elif u < ctrl.exit_util:
                 hot_since.pop(ri, None)
+        demand = metrics.demand_rates(env.now)
+
+        # ---- 容量淘汰（防孤儿，内建检查）----
+        for n in range(world.n_nodes):
+            while world.dir.capacity_pressure(n) > ctrl.cap_evict:
+                victims = sorted(world.dir.replicas.items(),
+                                 key=lambda kv: demand.get(kv[0], 0.0))
+                evicted = False
+                for cls, hs in victims:
+                    if demand.get(cls, 0.0) >= ctrl.evict_demand:
+                        continue   # 只淘汰真正冷的类
+                    for (nn, t_) in list(hs):
+                        if nn == n and world.dir.remove(cls, (nn, t_), world.cls_bytes.get(cls, 0.0)):
+                            evicted = True
+                            break
+                    if evicted:
+                        break
+                if not evicted:
+                    break
+
+        # ---- 复制 / 迁移 ----
         for cls, rate in sorted(demand.items()):
-            if rate < ctrl.min_demand or len(world.dir.holders(cls)) >= ctrl.max_replicas:
+            if len(world.dir.holders(cls)) >= ctrl.max_replicas:
+                continue
+            if env.now - last_op.get(cls, -1e9) < ctrl.cooldown_s:
                 continue
             holders = world.dir.holders(cls)
             src = next(((n, t) for (n, t) in holders
@@ -189,19 +224,23 @@ def _ctrl_loop(env, world, quote, ctrl, metrics, spec):
                         and env.now - hot_since[world.res_idx(n, t)] >= hold), None)
             if src is None:
                 continue
-            tier_pref = src[1]                      # 复制到同类型层
+            migrate = (rate < ctrl.cold_demand and src[1] == "mem"
+                       and len(holders) >= 1)
+            tiers = ("mem", "ssd") if ctrl.cross_tier else (src[1],)
             best_dst, best_key = None, None
             for n in range(world.n_nodes):
-                dst = (n, tier_pref)
-                if dst in holders:
-                    continue
-                ri = world.res_idx(n, tier_pref)
-                key = (quote.util_of(ri), world.dir.capacity_pressure(n))
-                if best_dst is None or key < best_key:
-                    best_dst, best_key = dst, key
+                for t_ in tiers:
+                    dst = (n, t_)
+                    if dst in holders:
+                        continue
+                    ri = world.res_idx(n, t_)
+                    key = (quote.util_of(ri), world.dir.capacity_pressure(n))
+                    if best_dst is None or key < best_key:
+                        best_dst, best_key = dst, key
             nbytes = world.cls_bytes.get(cls, 0.0)
             if best_dst is not None and nbytes > 0:
-                env.process(_do_replicate(cls, src, best_dst, nbytes))
+                last_op[cls] = env.now
+                env.process(_do_transfer(cls, src, best_dst, nbytes, evict_src=migrate))
 
 
 def run_once_v2(spec: RunSpec) -> dict:
@@ -339,6 +378,12 @@ def run_once_v2(spec: RunSpec) -> dict:
         summary.update(prefetcher.stats())
         summary["prefetch_waste_frac"] = (
             summary["prefetch_wasted_gb"] / max(1e-9, summary["prefetch_gb"]))
+    d = world.dir
+    for n in range(world.n_nodes):
+        summary[f"node{n}_occup"] = d.held[n] / max(1e-9, d.cap[n])
+    summary["orphan_events"] = d.orphan_events
+    summary["n_evictions"] = d.n_evictions
+    summary["cross_tier_replicas"] = sum(1 for cls, hs in d.replicas.items() for (_, t) in hs if t == "ssd")
 
     if spec.out_dir:
         os.makedirs(spec.out_dir, exist_ok=True)

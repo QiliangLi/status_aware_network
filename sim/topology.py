@@ -93,6 +93,8 @@ class MetadataDirectory:
         self.n_nodes = len(topo.nodes)
         self.cap = [n.cap_gb for n in topo.nodes]
         self.held = [0.0] * self.n_nodes
+        self.orphan_events = 0
+        self.n_evictions = 0
         self.replicas: dict[str, set] = {c: set() for c in cls_names}
         for cls, placements in topo.replicas:
             if cls not in self.replicas:
@@ -109,6 +111,16 @@ class MetadataDirectory:
             return
         self.replicas.setdefault(cls, set()).add(placement)
         self.held[placement[0]] += nbytes
+
+    def remove(self, cls: str, placement: tuple, nbytes: float) -> bool:
+        """删除副本；若使该类无任何副本则拒绝（防孤儿）并返回 False。"""
+        hs = self.replicas.get(cls, set())
+        if placement not in hs or len(hs) <= 1:
+            return False
+        hs.discard(placement)
+        self.held[placement[0]] = max(0.0, self.held[placement[0]] - nbytes)
+        self.n_evictions += 1
+        return True
 
     def capacity_pressure(self, node_idx: int) -> float:
         return min(1.0, self.held[node_idx] / max(1e-9, self.cap[node_idx]))

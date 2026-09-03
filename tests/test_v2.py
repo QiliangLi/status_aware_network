@@ -226,3 +226,46 @@ class TestQuote:
         q = AccessCostQuery(world, ObsConfig(interval=0.0, signal="quote"))
         est = q.estimate(1.0, 0, 0, "mem", noisy=False)
         assert est["time"] >= 0.5
+
+
+class TestImprovements:
+    """改进方案新增组件：会话负载 / 预取 / 回写 / 目录删除 / 漂移。"""
+
+    def test_session_trace_shape(self):
+        from sim.workload import gen_session_trace
+        from sim.config import WorkloadConfig
+        wl = WorkloadConfig()
+        tr = gen_session_trace(wl, 200.0, 0, (10.0, 3.0, 1.0))
+        assert tr and all(t < 200.0 for t, _, _ in tr)
+        # 会话内首轮 miss、后续 hit：按到达序，miss 先于同类 hit 出现
+        seen = set()
+        first_miss_first = True
+        for t, cls, hit in tr:
+            if cls not in seen:
+                if hit:
+                    first_miss_first = False
+                seen.add(cls)
+        assert first_miss_first
+
+    def test_drift_trace_generates(self):
+        from sim.workload import gen_drift_trace
+        from sim.config import WorkloadConfig
+        tr = gen_drift_trace(WorkloadConfig(), 200.0, 1, (50.0,))
+        assert len(tr) > 100
+
+    def test_prefetch_gated_and_waste(self):
+        from sim.config import NodeConfig, PrefetchConfig, StorageConfig, TopoConfig, WorkloadConfig
+        from sim.config import PrefixClass
+        nodes = (NodeConfig("n0", mem=StorageConfig(b_total=60.0, bg_schedule=stable(10.0)),
+                            ssd=StorageConfig(b_total=25.0)),)
+        nodes += (NodeConfig("n1"), NodeConfig("n2"))
+        classes = (PrefixClass("A", 8192, 1.0),)
+        topo = TopoConfig(replicas=(("A", ((0, "mem"),)),), nodes=nodes,
+                          prefetch=PrefetchConfig(mode="gated"), cache_mode="coord",
+                          local_cache_gb=6.0)
+        spec = RunSpec(exp="t", policy="joint2", seed=0, duration=60.0, warmup=5.0, margin=30.0,
+                       topo=topo, wl=WorkloadConfig(lam=4.0, classes=classes),
+                       sessions=(1.0, 3.0, 0.8))
+        out = run_once(spec)
+        assert "prefetch_gb" in out and "cache_redundancy" in out
+        assert out["cache_redundancy"] <= 1.0 + 1e-9   # coord 下同类至多一个偏好 worker……

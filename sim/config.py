@@ -106,6 +106,13 @@ class CtrlConfig:
     min_demand: float = 1.0      # 类的滚动到达率（req/s）高于此才值得复制
     predictive: bool = False     # True: 用 EMA 斜率提前触发（更低阈值）
     max_replicas: int = 3        # 单类最大副本数
+    # ---- 问题④扩展 ----
+    cross_tier: bool = False     # 目标层含 ssd（跨层降级）
+    cold_demand: float = 0.5     # 类需求低于此且源在 mem -> 迁移而非复制（回收快层容量）
+    cap_evict: float = 0.90      # 节点容量压力超过此值触发淘汰
+    evict_target: float = 0.75   # 淘汰到此值以下
+    cooldown_s: float = 30.0     # 同一类两次复制/迁移的最小间隔（防漂移 churn）
+    evict_demand: float = 0.2    # 仅淘汰滚动需求低于此值的类
 
 
 @dataclass(frozen=True)
@@ -144,6 +151,7 @@ class RunSpec:
     burst: tuple = None                           # (t0, n, dur_s, cls_name)
     window: tuple = None                          # (t0, t1) 窗口指标，如 E4 burst 窗口
     sessions: tuple = None                        # (session_rate, mean_turns, gap_mean) 会话型负载
+    drift: tuple = None                           # (period,) 类热度漂移周期（秒）
     topo: "TopoConfig | None" = None              # v2 共享分布式存储拓扑；None = v1 单/多 backend 模式
     collect_ts: bool = False
     save_requests: bool = False

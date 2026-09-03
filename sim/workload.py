@@ -58,3 +58,21 @@ def gen_full_trace_session(wl, duration: float, seed: int, burst, sessions) -> l
     if burst is not None:
         trace = sorted(trace + gen_burst(burst, seed))
     return trace
+
+
+def gen_drift_trace(wl, duration: float, seed: int, drift) -> list:
+    """热度漂移负载：每 period 秒将类份额向量轮转一位（Zipf 式冷热轮换）。"""
+    period = drift[0]
+    rng = np.random.default_rng(seed + 888)
+    names = np.array([c.name for c in wl.classes])
+    shares = np.array([c.share for c in wl.classes])
+    trace = []
+    t = float(rng.exponential(1.0 / wl.lam))
+    while t < duration:
+        phase = int(t // period) % len(shares)
+        w = np.roll(shares, phase)
+        cls = str(rng.choice(names, p=w / w.sum()))
+        hit = bool(rng.random() < wl.hit_ratio)
+        trace.append((t, cls, hit))
+        t += float(rng.exponential(1.0 / wl.lam))
+    return trace
