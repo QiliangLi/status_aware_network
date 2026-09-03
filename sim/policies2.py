@@ -35,6 +35,9 @@ class V2Ctx:
     kv_gb_per_token: float = 0.0
     rng: object = None
     f_grid: tuple = (0.0, 0.25, 0.5, 0.75, 1.0)
+    gpu_obs: object = None              # GpuObservable 列表（None = 真值；仅 oracle 家族保持 None）
+    future: object = None               # callable(cls, t, horizon)->int，未来同类命中到达数（仅先知策略用）
+    guardband: float = 1.2              # cascade2 保守系数 γ
 
 
 F_GRID = (0.0, 0.25, 0.5, 0.75, 1.0)
@@ -49,13 +52,22 @@ class V2Base:
 
     # ---- 通用估计 ----
     def gpu_wait(self, w: int) -> float:
+        obs = self.ctx.gpu_obs
+        if obs is not None:
+            return obs[w].estimate()
         return self.ctx.world.gpus[w].drain_est()
 
-    def prefill_t(self, tokens: int) -> float:
-        return self.ctx.world.curve(tokens)
+    def _rate(self, w: int) -> float:
+        return max(0.02, 1.0 - self.ctx.world.gpus[w].bg_at(self.ctx.world.env.now))
 
-    def suffix_t(self, req) -> float:
-        return self.prefill_t(req.suffix_tokens)
+    def prefill_t(self, tokens: int, w: int = None) -> float:
+        t = self.ctx.world.curve(tokens)
+        if w is not None:
+            t /= self._rate(w)   # 引擎按 (1-bg) 速率执行，估计侧保持一致
+        return t
+
+    def suffix_t(self, req, w: int = None) -> float:
+        return self.prefill_t(req.suffix_tokens, w)
 
     def static_fetch_t(self, nbytes: float, w: int, node: int, tier: str) -> float:
         """nominal 带宽 + 静态路径延迟（AAFLOW+ 式静态成本）。"""
@@ -89,7 +101,7 @@ class V2Base:
 
     def _prefill_dec(self, req):
         w = min(range(self.ctx.world.n_workers), key=lambda i: self.gpu_wait(i))
-        return Decision(worker=w, action="prefill", cost=self.gpu_wait(w) + self.prefill_t(req.prompt_tokens))
+        return Decision(worker=w, action="prefill", cost=self.gpu_wait(w) + self.prefill_t(req.prompt_tokens, w))
 
     def decide(self, req) -> Decision:
         raise NotImplementedError
@@ -106,12 +118,12 @@ class AlwaysFetch2(V2Base):
         locals_ = self.local_holders(req)
         if locals_:
             w = min(locals_, key=lambda i: self.gpu_wait(i))
-            return Decision(worker=w, action="local", cost=self.gpu_wait(w) + self.suffix_t(req))
+            return Decision(worker=w, action="local", cost=self.gpu_wait(w) + self.suffix_t(req, w))
         if self.holders(req):
             w = min(range(self.ctx.world.n_workers), key=lambda i: self.gpu_wait(i))
             _, n, t = self.best_replica(req, w, self.static_fetch_t)
             return Decision(worker=w, action="fetch", node=n, tier=t,
-                            cost=self.gpu_wait(w) + self.static_fetch_t(req.kv_gb, w, n, t) + self.suffix_t(req))
+                            cost=self.gpu_wait(w) + self.static_fetch_t(req.kv_gb, w, n, t) + self.suffix_t(req, w))
         return self._prefill_dec(req)
 
 
@@ -157,12 +169,12 @@ class DefaultServing2(V2Base):
         locals_ = self.local_holders(req)
         if locals_:
             w = min(locals_, key=lambda i: self.gpu_wait(i))
-            return Decision(worker=w, action="local", cost=self.gpu_wait(w) + self.suffix_t(req))
+            return Decision(worker=w, action="local", cost=self.gpu_wait(w) + self.suffix_t(req, w))
         w = min(range(self.ctx.world.n_workers), key=lambda i: self.gpu_wait(i))
         n, t = self._credit_pick(req, w)
         if n >= 0:
             return Decision(worker=w, action="fetch", node=n, tier=t,
-                            cost=self.gpu_wait(w) + self.static_fetch_t(req.kv_gb, w, n, t) + self.suffix_t(req))
+                            cost=self.gpu_wait(w) + self.static_fetch_t(req.kv_gb, w, n, t) + self.suffix_t(req, w))
         return self._prefill_dec(req)
 
 
@@ -200,12 +212,12 @@ class NearestReplica2(V2Base):
         locals_ = self.local_holders(req)
         if locals_:
             w = min(locals_, key=lambda i: self.gpu_wait(i))
-            return Decision(worker=w, action="local", cost=self.gpu_wait(w) + self.suffix_t(req))
+            return Decision(worker=w, action="local", cost=self.gpu_wait(w) + self.suffix_t(req, w))
         if self.holders(req):
             w = min(range(self.ctx.world.n_workers), key=lambda i: self.gpu_wait(i))
             n, t = DefaultServing2(self.ctx)._credit_pick(req, w)
             return Decision(worker=w, action="fetch", node=n, tier=t,
-                            cost=self.gpu_wait(w) + self.static_fetch_t(req.kv_gb, w, n, t) + self.suffix_t(req))
+                            cost=self.gpu_wait(w) + self.static_fetch_t(req.kv_gb, w, n, t) + self.suffix_t(req, w))
         return self._prefill_dec(req)
 
 
@@ -222,11 +234,11 @@ class RRReplica2(V2Base):
         if not req.hit or not hs:
             return Static2(self.ctx)._engine_at(req, w)
         if self.ctx.world.locals[w].holds(req.cls):
-            return Decision(worker=w, action="local", cost=self.gpu_wait(w) + self.suffix_t(req))
+            return Decision(worker=w, action="local", cost=self.gpu_wait(w) + self.suffix_t(req, w))
         n, t = hs[self._i % len(hs)]
         self._i += 1
-        tf = self.static_fetch_t(req.kv_gb, w, n, t) + self.suffix_t(req)
-        tr = self.gpu_wait(w) + self.prefill_t(req.prompt_tokens)
+        tf = self.static_fetch_t(req.kv_gb, w, n, t) + self.suffix_t(req, w)
+        tr = self.gpu_wait(w) + self.prefill_t(req.prompt_tokens, w)
         if tr < tf * (1.0 - self.ctx.margin):
             return Decision(worker=w, action="recompute", cost=tr)
         return Decision(worker=w, action="fetch", node=n, tier=t, cost=tf)
@@ -240,12 +252,12 @@ class Static2(V2Base):
     def _engine_at(self, req, w: int) -> Decision:
         if not req.hit:
             return Decision(worker=w, action="prefill",
-                            cost=self.gpu_wait(w) + self.prefill_t(req.prompt_tokens))
+                            cost=self.gpu_wait(w) + self.prefill_t(req.prompt_tokens, w))
         wait = self.gpu_wait(w)
-        tr = wait + self.prefill_t(req.prompt_tokens)
+        tr = wait + self.prefill_t(req.prompt_tokens, w)
         best_f = None
         if self.ctx.world.locals[w].holds(req.cls):
-            best_f = Decision(worker=w, action="local", cost=wait + self.suffix_t(req))
+            best_f = Decision(worker=w, action="local", cost=wait + self.suffix_t(req, w))
         elif self.holders(req):
             c, n, t = self.best_replica(req, w, self.static_fetch_t)
             if n >= 0:
@@ -278,7 +290,7 @@ class PartialStatic2(V2Base):
                     continue
                 fb = req.kv_gb * F
                 ft = fetch_est(fb, w, n, t)
-                comp = wait + self.prefill_t(req.prompt_tokens - int(req.cached_prefix_tokens * F))
+                comp = wait + self.prefill_t(req.prompt_tokens - int(req.cached_prefix_tokens * F), w)
                 out.append((max(ft, comp), F, n, t))
         return out
 
@@ -287,7 +299,7 @@ class PartialStatic2(V2Base):
         tr_cost = None
         for w in range(self.ctx.world.n_workers):
             wait = self.gpu_wait(w)
-            tr = wait + self.prefill_t(req.prompt_tokens)
+            tr = wait + self.prefill_t(req.prompt_tokens, w)
             if tr_cost is None or tr < tr_cost:
                 tr_cost = tr
             for (c, F, n, t) in self._cand_costs(req, w, fetch_est):
@@ -297,7 +309,7 @@ class PartialStatic2(V2Base):
             w = min(range(self.ctx.world.n_workers), key=lambda i: self.gpu_wait(i))
             return Decision(worker=w, action="prefill", cost=tr_cost)
         c, F, n, t, w = best
-        tr = self.gpu_wait(w) + self.prefill_t(req.prompt_tokens)
+        tr = self.gpu_wait(w) + self.prefill_t(req.prompt_tokens, w)
         if tr < c * (1.0 - self.ctx.margin):   # 纯重算明显更优才放弃取回
             return Decision(worker=w, action="recompute", cost=tr)
         if F is None:
@@ -323,14 +335,14 @@ class DynamicJoint2(PartialStatic2):
         if req.hit and self.holders(req):
             for w in range(self.ctx.world.n_workers):
                 if self.ctx.world.locals[w].holds(req.cls):
-                    c = self.gpu_wait(w) + self.suffix_t(req)
+                    c = self.gpu_wait(w) + self.suffix_t(req, w)
                     if c < dec.cost:
                         dec = Decision(worker=w, action="local", cost=c)
                 else:
                     c0, n, t = self.best_replica(req, w, fetch_est)
                     if n < 0:
                         continue
-                    c = c0 + self.gpu_wait(w) + self.suffix_t(req)
+                    c = c0 + self.gpu_wait(w) + self.suffix_t(req, w)
                     if c < dec.cost:
                         dec = Decision(worker=w, action="fetch", node=n, tier=t, cost=c)
         if dec.action in ("fetch", "partial"):
@@ -349,7 +361,7 @@ class DynamicJointSeq2(DynamicJoint2):
             # 顺序代价重估：取回 + 剩余计算（无重叠收益）
             seq = (fetch_est(dec.fetch_gb, dec.worker, dec.node, dec.tier)
                    + self.gpu_wait(dec.worker)
-                   + self.prefill_t(req.prompt_tokens - dec.fetch_tokens))
+                   + self.prefill_t(req.prompt_tokens - dec.fetch_tokens, dec.worker))
             dec.overlap = False
             dec.cost = seq
         return dec
@@ -390,7 +402,7 @@ class CoordinatedJoint2(DynamicJoint2):
             return dec
         nbytes = dec.fetch_gb if dec.action == "partial" else req.kv_gb
         comp = (self.gpu_wait(dec.worker)
-                + self.prefill_t(req.prompt_tokens - dec.fetch_tokens))
+                + self.prefill_t(req.prompt_tokens - dec.fetch_tokens, dec.worker))
         cands = []
         for (n, t) in hs:
             ft = self.dyn_fetch_t(nbytes, dec.worker, n, t)
@@ -399,7 +411,7 @@ class CoordinatedJoint2(DynamicJoint2):
             if dec.action == "partial":
                 c = max(ft, comp) + shadow
             else:
-                c = ft + self.gpu_wait(dec.worker) + self.suffix_t(req) + shadow
+                c = ft + self.gpu_wait(dec.worker) + self.suffix_t(req, dec.worker) + shadow
             cands.append((c, n, t))
         cands.sort()
         best = cands[0]
@@ -467,6 +479,105 @@ class OracleV2(V2Base):
         return best
 
 
+class ClairvoyantJoint2(OracleV2):
+    """先知上界：真值 + 未来视线（H 秒内同类命中到达数，由 simrun 注入 trace 查询）。
+
+    对同步 burst 做 list-scheduling 平衡分配：当前请求 + m 个未来同类请求视为
+    依次到达的球，每个球放到（当前真值排队 + 已分配球负载）最小的资源上；
+    实际执行第一个球的分配。用于检验"逐请求贪心（即便完美信息）vs 全局分配"的差距。
+    """
+
+    horizon = 5.0
+
+    def __init__(self, ctx):
+        super().__init__(ctx)
+        from collections import deque
+        self.assigned = deque()   # (t_expire, key, seconds)
+
+    def _purge(self, t):
+        while self.assigned and self.assigned[0][0] <= t:
+            self.assigned.popleft()
+
+    def decide(self, req) -> Decision:
+        world = self.ctx.world
+        t = world.env.now
+        self._purge(t)
+        m_future = 0
+        if self.ctx.future is not None:
+            m_future = int(self.ctx.future(req.cls, t, self.horizon))
+        balls = min(1 + m_future, 400)   # 防极端内存
+
+        # 候选（资源键, 完成时间, service 秒, Decision）
+        def options_for_ball():
+            opts = []
+            for w in range(world.n_workers):
+                svc = world.curve(req.prompt_tokens)
+                opts.append(((("g", w)), world.gpus[w].hypothetical(req.prompt_tokens), svc,
+                             Decision(worker=w, action="recompute" if req.hit else "prefill")))
+                for (n, ti) in self.holders(req):
+                    ft = self._hyp_fetch(req.kv_gb, w, n, ti)
+                    tier_svc = req.kv_gb / max(1e-9, world.res(n, ti).b_total)
+                    opts.append(((("s", n, ti)), ft, tier_svc,
+                                 Decision(worker=w, action="fetch", node=n, tier=ti)))
+            return opts
+
+        load = {}
+        first_dec = None
+        for _ in range(balls):
+            best = None
+            for key, base, svc, dec in options_for_ball():
+                c = base + load.get(key, 0.0)
+                if best is None or c < best[0]:
+                    best = (c, key, svc, dec)
+            _, key, svc, dec = best
+            load[key] = load.get(key, 0.0) + svc
+            if first_dec is None:
+                first_dec = dec
+                first_dec.cost = best[0]
+        # 记录已分配球（供后续到达的同类请求决策时叠加）
+        for key, sec in load.items():
+            self.assigned.append((t + self.horizon, key, sec))
+        return first_dec
+
+
+class CascadeLike2(V2Base):
+    """问题⑤：Cascade 边界复刻——request 级优化，无跨 worker/跨副本联合。
+
+    对应调研修正后的 Cascade 定位：单实例内 SLO 预算 + 动态 KV 恢复决策。
+    建模：worker 按最短 GPU 队列选（不与 KV 放置联合，对应单实例定位）；恢复估计读
+    与 joint2 相同的访问成本查询（对等信息，见 E12），差异在于 (a) guardband γ 保守化、
+    (b) 动作空间仅 {local, fetch, recompute/prefill}（无 partial/重叠）、(c) 无跨
+    worker×副本联合搜索。
+    """
+    needs_obs = True
+
+    def decide(self, req) -> Decision:
+        if not req.hit:
+            return self._prefill_dec(req)
+        w = min(range(self.ctx.world.n_workers), key=lambda i: self.gpu_wait(i))
+        wait = self.gpu_wait(w)
+        gamma = getattr(self.ctx, "guardband", 1.2)
+        tr = wait + self.prefill_t(req.prompt_tokens, w)
+        if self.ctx.world.locals[w].holds(req.cls):
+            c_local = wait + self.suffix_t(req, w)
+            if tr < c_local * (1.0 - self.ctx.margin):
+                return Decision(worker=w, action="recompute", cost=tr)
+            return Decision(worker=w, action="local", cost=c_local)
+        best = None
+        for (n, t) in self.holders(req):
+            est = self.ctx.quote.estimate(req.kv_gb, w, n, t)["time"]
+            if best is None or est < best[0]:
+                best = (est, n, t)
+        if best is None:
+            return Decision(worker=w, action="prefill", cost=tr)
+        est, n, t = best
+        # guardband 只作用于不确定的恢复部分（等待与 prefill 时间不加 γ，与 Cascade 语义一致）
+        tf = wait + gamma * (est + self.suffix_t(req, w))
+        if tf < tr:
+            return Decision(worker=w, action="fetch", node=n, tier=t, cost=tf)
+        return Decision(worker=w, action="recompute", cost=tr)
+
+
 V2POLICIES = {
     "alwaysfetch2": AlwaysFetch2,
     "rr2": RoundRobin2,
@@ -480,7 +591,9 @@ V2POLICIES = {
     "joint2": DynamicJoint2,
     "joint2_seq": DynamicJointSeq2,
     "coord2": CoordinatedJoint2,
+    "cascade2": CascadeLike2,
     "oracle2": OracleV2,
+    "clairvoyant2": ClairvoyantJoint2,
 }
 
 V2_NEEDS_OBS = {n for n, c in V2POLICIES.items() if c.needs_obs}

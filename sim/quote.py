@@ -48,15 +48,16 @@ class AccessCostQuery:
         return LEVELS[self._update_level(ri, self._util_of(ri))]
 
     # ---------- 完成时间估计：路径延迟 + tier 服务 + fabric 传输 ----------
-    def _seg_est(self, ri: int, nbytes: float) -> float:
-        return self.world.obs[ri].estimate(nbytes, signal=self.cfg.signal)
+    def _seg_est(self, ri: int, nbytes: float, signal: str = None) -> float:
+        return self.world.obs[ri].estimate(nbytes, signal=signal or self.cfg.signal)
 
-    def estimate(self, nbytes: float, worker: int, node: int, tier: str, noisy: bool = True) -> dict:
+    def estimate(self, nbytes: float, worker: int, node: int, tier: str, noisy: bool = True,
+                 signal: str = None) -> dict:
         ti = self.world.res_idx(node, tier)
         fi = len(self.world.resources) - 1          # fabric 恒为最后一个资源
         lat = self.world.path_lat[worker][node]
-        tier_t = self._seg_est(ti, nbytes)
-        fab_t = self._seg_est(fi, nbytes)
+        tier_t = self._seg_est(ti, nbytes, signal)
+        fab_t = self._seg_est(fi, nbytes, signal)
         t = lat + tier_t + fab_t
         if noisy:
             t *= 1.0  # 噪声已在 Observable.estimate 内按段叠加

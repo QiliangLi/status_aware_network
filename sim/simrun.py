@@ -214,9 +214,34 @@ def run_once_v2(spec: RunSpec) -> dict:
     quote = AccessCostQuery(world, spec.obs)
     metrics = Collector(spec, (), None)
     rng = np.random.default_rng([spec.seed, 9, 7])
+    gpu_obs = None
+    if spec.policy not in ("oracle2", "clairvoyant2"):
+        from .gpu_obs import GpuObservable
+        gpu_obs = [
+            GpuObservable(env, g, spec.obs.gpu_interval, spec.obs.gpu_ema,
+                          spec.obs.gpu_noise, np.random.default_rng([spec.seed, 200 + w, 5]))
+            for w, g in enumerate(world.gpus)
+        ]
     ctx = V2Ctx(world=world, quote=quote, margin=spec.pol.margin,
-                kv_gb_per_token=spec.model.kv_gb_per_token, rng=rng)
+                kv_gb_per_token=spec.model.kv_gb_per_token, rng=rng,
+                gpu_obs=gpu_obs, guardband=spec.pol.guardband)
     policy = make_v2_policy(spec.policy, ctx)
+    if spec.policy == "clairvoyant2":
+        import bisect
+        _future = {}
+        for t_, cls, hit in trace:
+            if hit:
+                _future.setdefault(cls, []).append(t_)
+        for cls in _future:
+            _future[cls].sort()
+
+        def future_count(cls, t, horizon):
+            arr = _future.get(cls)
+            if not arr:
+                return 0
+            return bisect.bisect_right(arr, t + horizon) - bisect.bisect_right(arr, t)
+
+        ctx.future = future_count
 
     for (w, cls) in spec.topo.seed_local:
         world.locals[w].insert(cls, world.cls_bytes.get(cls, 0.0))

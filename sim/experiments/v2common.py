@@ -50,7 +50,7 @@ def mk_topo(replicas=(), gpu_bgs=(), ctrl=None, seed_local=(), nodes=NODES,
 
 
 def mk_spec(exp, policy, seed, topo, duration=400.0, lam=5.0, classes=None,
-            obs=None, margin=0.10, slo=1.0, gpu_bg=0.0, hit_ratio=None, burst=None,
+            obs=None, margin=0.10, slo=1.0, gpu_bg=0.0, hit_ratio=None, burst=None, guardband=1.2,
             window=None, collect_ts=False, save_ts=False, save_requests=False, out_dir=None):
     kw = dict(lam=lam, ttft_slo=slo)
     if hit_ratio is not None:
@@ -62,7 +62,7 @@ def mk_spec(exp, policy, seed, topo, duration=400.0, lam=5.0, classes=None,
         exp=exp, policy=policy, seed=seed, duration=duration, warmup=20.0, margin=60.0,
         topo=topo, gpu=GpuConfig(bg_schedule=stable(gpu_bg)), wl=wl,
         obs=obs if obs is not None else ObsConfig(),
-        pol=PolicyConfig(margin=margin),
+        pol=PolicyConfig(margin=margin, guardband=guardband),
         burst=burst, window=window,
         collect_ts=collect_ts, save_ts=save_ts, save_requests=save_requests,
         out_dir=out_dir,

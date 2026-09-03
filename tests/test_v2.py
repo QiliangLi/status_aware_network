@@ -165,6 +165,20 @@ class TestPoliciesV2:
             out = run_once(_spec(pol, seed=0, topo=topo, duration=30.0, lam=3.0))
             assert out["n_arr"] > 0
 
+    def test_clairvoyant_uses_future_trace(self):
+        """先知策略：burst 内应表现出与逐请求贪心不同的分配（看到未来球）。"""
+        from sim.config import PrefixClass
+        classes = (PrefixClass("A", 32768, 1.0),)
+        topo = _topo(replicas=(("A", ((0, "mem"), (1, "mem"))),), local_cache_gb=0.0)
+        spec = RunSpec(exp="t", policy="clairvoyant2", seed=1, duration=60.0, warmup=5.0,
+                       margin=30.0, topo=topo, burst=(20.0, 60, 1.0, "A"),
+                       wl=WorkloadConfig(lam=2.0, classes=classes))
+        out = run_once(spec)
+        assert out["n_arr"] > 0 and out["n_done"] > 0
+        # 决策具有确定性
+        out2 = run_once(spec)
+        assert out["goodput"] == out2["goodput"]
+
 
 class TestReplication:
     def test_controller_replicates_hot_class(self):

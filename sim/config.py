@@ -103,11 +103,16 @@ class ObsConfig:
     ema_halflife: float = 0.1
     noise_sigma: float = 0.1      # 乘性 lognormal 噪声
     signal: str = "quote"         # util | queue | bw | quote
+    # GPU 侧观测（问题⑤）：默认 0/0 = 真值可见（v1 既定简化，向后兼容），E12 扫描时启用
+    gpu_interval: float = 0.0
+    gpu_noise: float = 0.0
+    gpu_ema: float = 0.1
 
 
 @dataclass(frozen=True)
 class PolicyConfig:
     margin: float = 0.10          # 滞回：切换到 recompute 需估计优势超过该比例
+    guardband: float = 1.2         # cascade2 保守系数 γ（Lr = γ × 估计值）
 
 
 @dataclass(frozen=True)
