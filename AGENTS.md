@@ -30,7 +30,7 @@
 
 - **单位约定**：时间秒、字节 GB（十进制）、带宽 GB/s（见 `sim/config.py` 头注）。
 - 配置一律 `frozen dataclass`；分段常数背景负载用 `((t0, v), ...)` schedule 表示。
-- **双世界铁律**：策略只能读可观测视图（`StorageObservable` / `quote.AccessCostQuery`）；ground truth（资源内部队列、`hypothetical_*`）只有 Oracle 策略允许访问。新增任何决策信息必须走这条边界。
+- **信息边界铁律**：信息边界必须匹配研究问题，且对所有被比较的策略一致。存储侧资源内部状态（队列/带宽/背景负载、`hypothetical_*`）只有 Oracle 策略可访问，其余策略只能读可观测视图（`StorageObservable` / `quote.AccessCostQuery`）；GPU 侧当前为真值可见（`GpuPool.remaining_service/drain_est`，v1 既定简化：计算侧与 GPU 同信任域）。若实验对象涉及 GPU 侧预测误差（如 Cascade 式 budget），须对称引入 GPU observable 层，不得单侧开洞。
 - 新实验必须注册进 `sim/run.py` 的 CLI choices，并保证可单实验冒烟（`--exp X --seeds 2 --duration 120~200`）。
 - 代码注释为中文 docstring，风格与现有模块一致；不引入新依赖除非文档中说明理由。
 
@@ -38,7 +38,7 @@
 
 - 新机制必须配**不变量单元测试**（解析解吻合、守恒、确定性、策略单调性、行为断言），放 `tests/`。
 - 每次提交前跑全量 `.venv/bin/python -m pytest tests/ -q`，全绿才提交。
-- 动了 v1/v2 共享代码（`metrics.py`、`request.py`、`simrun.py` 等）时，**回归验证 v1 实验**（e1a/e2 快速跑一遍，结论方向不变即可）。
+- 改动 v1/v2 共享代码（`metrics.py`、`request.py`、`simrun.py`、`config.py`、`storage.py` 等）时，**以 1–2 种子、缩短 duration 跑全 v1 四件套（e1a/e1b/e2/e3/e4）**，核对结论方向不变。不得按"改了哪个文件"挑选实验子集——文件↔实验的映射会过时且易漏（v2 期间的真实风险源是重写的 `metrics.py`，而非未动的 `storage.py`）。
 
 ## 5. 实验执行与场景调优
 
