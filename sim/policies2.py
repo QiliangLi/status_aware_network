@@ -562,6 +562,29 @@ class ClairvoyantJoint2(OracleV2):
         return first_dec
 
 
+class StaticDynRepl2(Static2):
+    """问题⑪：static2 的唯一升级是副本选择走访问成本查询（quote），
+    fetch/recompute 成本仍按 nominal——用于隔离"副本可见性"这一机制变量。"""
+    needs_obs = True
+
+    def _engine_at(self, req, w: int) -> Decision:
+        if not req.hit:
+            return Decision(worker=w, action="prefill",
+                            cost=self.gpu_wait(w) + self.prefill_t(req.prompt_tokens, w))
+        wait = self.gpu_wait(w)
+        tr = wait + self.prefill_t(req.prompt_tokens, w)
+        best_f = None
+        if self.ctx.world.locals[w].holds(req.cls):
+            best_f = Decision(worker=w, action="local", cost=wait + self.suffix_t(req, w))
+        elif self.holders(req):
+            c, n, t = self.best_replica(req, w, self.dyn_fetch_t)
+            if n >= 0:
+                best_f = Decision(worker=w, action="fetch", node=n, tier=t, cost=c + wait + self.suffix_t(req, w))
+        if best_f is None or tr < best_f.cost * (1.0 - self.ctx.margin):
+            return Decision(worker=w, action="recompute", cost=tr)
+        return best_f
+
+
 class CascadeLike2(V2Base):
     """问题⑤：Cascade 边界复刻——request 级优化，无跨 worker/跨副本联合。
 
@@ -609,6 +632,7 @@ V2POLICIES = {
     "nearest2": NearestReplica2,
     "rrrep2": RRReplica2,
     "static2": Static2,
+    "static2dyn": StaticDynRepl2,
     "partial_static2": PartialStatic2,
     "joint2": DynamicJoint2,
     "joint2_seq": DynamicJointSeq2,

@@ -20,19 +20,25 @@ class Prefetcher:
         self.n_writeback = 0
         self.writeback_gb = 0.0
         self._op = 0
-        self.last_disp = {}     # cls -> 上次命中派发时刻
+        self.last_disp = {}     # cls -> 上次命中派发时刻（类级）
         self.gap_ema = {}       # cls -> 轮间隔 EMA（秒）
+        self.s_last = {}        # sid -> 上次命中派发时刻（会话级）
+        self.s_gap = {}         # sid -> 轮间隔（秒，最近值即可：会话内间隔近似平稳）
         self.horizon = 5.0
 
-    def _update_gap(self, cls: str, t: float) -> None:
+    def _update_gap(self, cls: str, t: float, sid: int = -1) -> None:
         last = self.last_disp.get(cls)
         self.last_disp[cls] = t
-        if last is None:
-            return
-        gap = t - last
-        old = self.gap_ema.get(cls)
-        a = 0.4   # 简单平滑（约 2 轮收敛）
-        self.gap_ema[cls] = gap if old is None else old + a * (gap - old)
+        if last is not None:
+            gap = t - last
+            old = self.gap_ema.get(cls)
+            a = 0.4   # 简单平滑（约 2 轮收敛）
+            self.gap_ema[cls] = gap if old is None else old + a * (gap - old)
+        if sid >= 0:
+            sl = self.s_last.get(sid)
+            if sl is not None:
+                self.s_gap[sid] = t - sl
+            self.s_last[sid] = t
 
     # ---------- 派发钩子（预取） ----------
     def on_dispatch(self, req, dec) -> None:
@@ -44,11 +50,14 @@ class Prefetcher:
         """
         if not req.hit or self.cfg.mode == "none" or not self.world.dir.holders(req.cls):
             return
-        self._update_gap(req.cls, self.env.now)
-        if self.cfg.mode == "predictive":
-            g = self.gap_ema.get(req.cls)
+        self._update_gap(req.cls, self.env.now, req.sid)
+        if self.cfg.mode in ("predictive", "session"):
+            if self.cfg.mode == "session" and req.sid >= 0:
+                g = self.s_gap.get(req.sid)
+            else:
+                g = self.gap_ema.get(req.cls)
             if g is None or g > self.horizon:
-                return   # 该类轮间隔长，预取大概率被淘汰
+                return   # 该会话/类轮间隔长，预取大概率被淘汰
         target = dec.worker
         if self.world.locals[target]._coord_target(req.cls) is not None:
             target = self.world.locals[target]._coord_target(req.cls)

@@ -113,9 +113,11 @@ def run_once(spec: RunSpec) -> dict:
     _tickers()
 
     def _arrivals():
-        for rid, (t, cls, hit) in enumerate(trace):
+        for rid, row in enumerate(trace):
+            t, cls, hit = row[0], row[1], row[2]
+            sid = row[3] if len(row) > 3 else -1
             yield env.timeout(max(0.0, t - env.now))
-            req = build_request(rid, t, cls, hit, spec.wl, spec.model)
+            req = build_request(rid, t, cls, hit, spec.wl, spec.model, sid=sid)
             metrics.on_arrival(req)
             wid, action = scheduler.dispatch(req, views)
             req.worker = wid
@@ -348,9 +350,11 @@ def run_once_v2(spec: RunSpec) -> dict:
         env.process(_ctrl_loop(env, world, quote, spec.topo.ctrl, metrics, spec))
 
     def _arrivals():
-        for rid, (t, cls, hit) in enumerate(trace):
+        for rid, row in enumerate(trace):
+            t, cls, hit = row[0], row[1], row[2]
+            sid = row[3] if len(row) > 3 else -1
             yield env.timeout(max(0.0, t - env.now))
-            req = build_request(rid, t, cls, hit, spec.wl, spec.model)
+            req = build_request(rid, t, cls, hit, spec.wl, spec.model, sid=sid)
             req.local_avail = bool(hit) and any(l.holds(cls) for l in world.locals)
             metrics.on_arrival(req)
             dec = policy.decide(req)

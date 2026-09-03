@@ -40,6 +40,7 @@ def gen_session_trace(wl, duration: float, seed: int, sessions) -> list:
     shares = np.array([c.share for c in wl.classes])
     trace = []
     t = float(rng.exponential(1.0 / srate))
+    sid = 0
     while t < duration:
         cls = str(rng.choice(names, p=shares))
         turns = min(20, 1 + int(rng.geometric(1.0 / max(1.0, mean_turns))))
@@ -48,9 +49,10 @@ def gen_session_trace(wl, duration: float, seed: int, sessions) -> list:
         for k in range(turns):
             if tt >= duration:
                 break
-            trace.append((tt, cls, k > 0))
+            trace.append((tt, cls, k > 0, sid))
             tt += float(rng.exponential(gm))
         t += float(rng.exponential(1.0 / srate))
+        sid += 1
     return sorted(trace)
 
 

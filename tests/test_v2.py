@@ -236,11 +236,11 @@ class TestImprovements:
         from sim.config import WorkloadConfig
         wl = WorkloadConfig()
         tr = gen_session_trace(wl, 200.0, 0, (10.0, 3.0, 1.0))
-        assert tr and all(t < 200.0 for t, _, _ in tr)
+        assert tr and all(r[0] < 200.0 for r in tr)
         # 会话内首轮 miss、后续 hit：按到达序，miss 先于同类 hit 出现
         seen = set()
         first_miss_first = True
-        for t, cls, hit in tr:
+        for t, cls, hit, sid in tr:
             if cls not in seen:
                 if hit:
                     first_miss_first = False
