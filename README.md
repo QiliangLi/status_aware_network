@@ -7,7 +7,9 @@ KV 存储压力感知调度（KV Storage Pressure-Aware Cross-Layer Inference Sc
 - `discussions/` — 调研对话导出与架构图
 - `docs/` — 调研记录、[v1 仿真设计](docs/KV存储压力感知调度仿真设计-20260901.md)、[相关工作对比](docs/五工作的Scheduler-Engine修改与主流默认实现-20260904.md)、[v2 架构与实验](docs/共享KV感知调度仿真v2-架构与实验-20260904.md)、[局限问题分析与改进方案](docs/仿真v2局限问题分析与改进方案-20260904.md)
 - [实验结果-E1E4-20260901.md](实验结果-E1E4-20260901.md) — v1 实验结论与图表
-- [实验结果-E5E9-20260904.md](实验结果-E5E9-20260904.md) — v2 实验结论与图表（Q1–Q5）
+- [实验结果-E5E9-20260904.md](实验结果-E5E9-20260904.md) — v2 实验结论与图表（Q1–Q5，含 rate-aware 修正补记）
+- [实验结果-E9bE10E11E12-20260904.md](实验结果-E9bE10E11E12-20260904.md) — 改进方案四实验（问题②③④⑤）
+- `tools/calibrate.py` — 真实系统标定脚手架（LMCache 指标 / prefill 曲线 / RDMA 路径）
 - `sim/` — 离散事件仿真器（Python + SimPy），v1 与 v2 两套拓扑
 - `tests/` — 不变量单元测试（解析解吻合 / 字节守恒 / 确定性 / 策略单调性 / v2 拓扑与策略）
 - `results/` — 实验输出（gitignored）
@@ -21,10 +23,11 @@ python3 -m venv .venv
 .venv/bin/python -m pytest tests/ -q                  # 不变量测试
 .venv/bin/python -m sim.run --exp all --seeds 10      # v1: E1–E4
 .venv/bin/python -m sim.run --exp v2  --seeds 8       # v2: E5–E9（共享分布式 KV 存储拓扑）
+.venv/bin/python -m sim.run --exp v3  --seeds 8       # v3: E9b/E10/E11/E12（改进方案实验）
 .venv/bin/python -m sim.run --exp smoke               # 快速冒烟
 ```
 
-单实验：`--exp e1a|e1b|e2|e3|e4|e5|e6|e7|e8|e9`，并行度 `--procs N`，仿真时长 `--duration`。
+单实验：`--exp e1a|…|e9|e9b|e10|e11|e12`，并行度 `--procs N`，仿真时长 `--duration`。
 
 ## 核心结构
 
