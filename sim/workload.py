@@ -43,12 +43,13 @@ def gen_session_trace(wl, duration: float, seed: int, sessions) -> list:
     while t < duration:
         cls = str(rng.choice(names, p=shares))
         turns = min(20, 1 + int(rng.geometric(1.0 / max(1.0, mean_turns))))
+        gm = float(rng.choice(gap_mean)) if isinstance(gap_mean, tuple) else float(gap_mean)
         tt = t
         for k in range(turns):
             if tt >= duration:
                 break
             trace.append((tt, cls, k > 0))
-            tt += float(rng.exponential(gap_mean))
+            tt += float(rng.exponential(gm))
         t += float(rng.exponential(1.0 / srate))
     return sorted(trace)
 

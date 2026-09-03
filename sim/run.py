@@ -25,6 +25,10 @@ _MODULES = {
     "e10": ("e10_prefetch", "main", {}),
     "e11": ("e11_tiering", "main", {}),
     "e12": ("e12_gpu_signal", "main", {}),
+    "e16": ("e16_params", "main", {}),
+    "e15": ("e15_prefetch_pred", "main", {}),
+    "e14": ("e14_clair_cap", "main", {}),
+    "e13": ("e13_engine_ctrl", "main", {}),
 }
 
 
@@ -38,7 +42,7 @@ def _run_exp(exp: str, seeds, procs, duration: float):
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--exp", default="all",
-                    choices=["all", "v2", "v3", "all2", *sorted(_MODULES), "smoke", "smoke2"])
+                    choices=["all", "v2", "v3", "v4", "all2", *sorted(_MODULES), "smoke", "smoke2"])
     ap.add_argument("--seeds", type=int, default=10)
     ap.add_argument("--procs", type=int, default=None)
     ap.add_argument("--duration", type=float, default=400.0)
@@ -48,7 +52,8 @@ def main():
     exps = (["e1a", "e1b", "e2", "e3", "e4"] if args.exp in ("all", "all2")
             else ["e5", "e6", "e7", "e8", "e9"] if args.exp == "v2" else
             ["e9b", "e10", "e11", "e12"] if args.exp == "v3"
-            else ["e5", "e6", "e7", "e8", "e9", "e9b", "e10", "e11", "e12"] if args.exp == "all2"
+            else ["e13", "e14", "e15", "e16"] if args.exp == "v4"
+            else ["e5", "e6", "e7", "e8", "e9", "e9b", "e10", "e11", "e12", "e13", "e14", "e15", "e16"] if args.exp == "all2"
             else [args.exp])
     if args.exp == "smoke":
         exps, seeds, args.duration = ["e1a"], seeds[:2], 120.0

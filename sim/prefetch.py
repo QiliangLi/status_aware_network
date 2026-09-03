@@ -20,6 +20,19 @@ class Prefetcher:
         self.n_writeback = 0
         self.writeback_gb = 0.0
         self._op = 0
+        self.last_disp = {}     # cls -> 上次命中派发时刻
+        self.gap_ema = {}       # cls -> 轮间隔 EMA（秒）
+        self.horizon = 5.0
+
+    def _update_gap(self, cls: str, t: float) -> None:
+        last = self.last_disp.get(cls)
+        self.last_disp[cls] = t
+        if last is None:
+            return
+        gap = t - last
+        old = self.gap_ema.get(cls)
+        a = 0.4   # 简单平滑（约 2 轮收敛）
+        self.gap_ema[cls] = gap if old is None else old + a * (gap - old)
 
     # ---------- 派发钩子（预取） ----------
     def on_dispatch(self, req, dec) -> None:
@@ -31,6 +44,11 @@ class Prefetcher:
         """
         if not req.hit or self.cfg.mode == "none" or not self.world.dir.holders(req.cls):
             return
+        self._update_gap(req.cls, self.env.now)
+        if self.cfg.mode == "predictive":
+            g = self.gap_ema.get(req.cls)
+            if g is None or g > self.horizon:
+                return   # 该类轮间隔长，预取大概率被淘汰
         target = dec.worker
         if self.world.locals[target]._coord_target(req.cls) is not None:
             target = self.world.locals[target]._coord_target(req.cls)

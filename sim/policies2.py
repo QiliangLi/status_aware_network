@@ -507,30 +507,52 @@ class ClairvoyantJoint2(OracleV2):
             m_future = int(self.ctx.future(req.cls, t, self.horizon))
         balls = min(1 + m_future, 400)   # 防极端内存
 
-        # 候选（资源键, 完成时间, service 秒, Decision）
+        # 候选（完成时间, [(资源键, service 秒)...], Decision）——动作空间与 oracle 对齐
         def options_for_ball():
             opts = []
             for w in range(world.n_workers):
-                svc = world.curve(req.prompt_tokens)
-                opts.append(((("g", w)), world.gpus[w].hypothetical(req.prompt_tokens), svc,
+                gkey = ("g", w)
+                opts.append((world.gpus[w].hypothetical(req.prompt_tokens),
+                             [(gkey, world.curve(req.prompt_tokens))],
                              Decision(worker=w, action="recompute" if req.hit else "prefill")))
+                if not req.hit:
+                    continue
+                if world.locals[w].holds(req.cls):
+                    opts.append((world.gpus[w].hypothetical(req.suffix_tokens),
+                                 [(gkey, world.curve(req.suffix_tokens))],
+                                 Decision(worker=w, action="local")))
                 for (n, ti) in self.holders(req):
-                    ft = self._hyp_fetch(req.kv_gb, w, n, ti)
-                    tier_svc = req.kv_gb / max(1e-9, world.res(n, ti).b_total)
-                    opts.append(((("s", n, ti)), ft, tier_svc,
-                                 Decision(worker=w, action="fetch", node=n, tier=ti)))
+                    tier_key = ("s", n, ti)
+                    b_tier = max(1e-9, world.res(n, ti).b_total)
+                    for F in (0.5, 1.0):
+                        ftok = int(req.cached_prefix_tokens * F)
+                        fb = req.kv_gb * F
+                        ft = self._hyp_fetch(fb, w, n, ti) if F > 0 else 0.0
+                        loads = [(tier_key, fb / b_tier)]
+                        if F >= 1.0:
+                            comp = world.gpus[w].hypothetical(req.suffix_tokens)
+                            loads.append((gkey, world.curve(req.suffix_tokens)))
+                            opts.append((ft + comp, loads,
+                                         Decision(worker=w, action="fetch", node=n, tier=ti)))
+                        else:
+                            comp = world.gpus[w].hypothetical(req.prompt_tokens - ftok)
+                            loads.append((gkey, world.curve(req.prompt_tokens - ftok)))
+                            opts.append((max(ft, comp), loads,
+                                         Decision(worker=w, action="partial", node=n, tier=ti,
+                                                  fetch_tokens=ftok, fetch_gb=fb)))
             return opts
 
         load = {}
         first_dec = None
         for _ in range(balls):
             best = None
-            for key, base, svc, dec in options_for_ball():
-                c = base + load.get(key, 0.0)
+            for base, loads, dec in options_for_ball():
+                c = base + max((load.get(k, 0.0) for k, _ in loads), default=0.0)
                 if best is None or c < best[0]:
-                    best = (c, key, svc, dec)
-            _, key, svc, dec = best
-            load[key] = load.get(key, 0.0) + svc
+                    best = (c, loads, dec)
+            _, loads, dec = best
+            for k, sec in loads:
+                load[k] = load.get(k, 0.0) + sec
             if first_dec is None:
                 first_dec = dec
                 first_dec.cost = best[0]
