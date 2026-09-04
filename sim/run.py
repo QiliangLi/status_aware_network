@@ -27,6 +27,7 @@ _MODULES = {
     "e12": ("e12_gpu_signal", "main", {}),
     "e16": ("e16_params", "main", {}),
     "e17": ("e17_session_mech", "main", {}),
+    "e18": ("e18_protect_fluid", "main", {}),
     "e15": ("e15_prefetch_pred", "main", {}),
     "e14": ("e14_clair_cap", "main", {}),
     "e13": ("e13_engine_ctrl", "main", {}),
@@ -53,7 +54,7 @@ def main():
     exps = (["e1a", "e1b", "e2", "e3", "e4"] if args.exp in ("all", "all2")
             else ["e5", "e6", "e7", "e8", "e9"] if args.exp == "v2" else
             ["e9b", "e10", "e11", "e12"] if args.exp == "v3"
-            else ["e13", "e14", "e15", "e16", "e17"] if args.exp == "v4"
+            else ["e13", "e14", "e15", "e16", "e17", "e18"] if args.exp == "v4"
             else ["e5", "e6", "e7", "e8", "e9", "e9b", "e10", "e11", "e12", "e13", "e14", "e15", "e16"] if args.exp == "all2"
             else [args.exp])
     if args.exp == "smoke":

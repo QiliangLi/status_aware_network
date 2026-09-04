@@ -585,6 +585,54 @@ class StaticDynRepl2(Static2):
         return best_f
 
 
+class ClairvoyantFluid2(OracleV2):
+    """问题⑬：流体最优批分配——同步 burst 时按车道吞吐比例切分请求。
+
+    GPU 车道吞吐 λ_g = Σ_w rate_w / t_prefill；存储车道吞吐 λ_s = Σ_replicas cap_t / kv_bytes。
+    批内前 x*=λ_g/(λ_g+λ_s) 比例的请求走 GPU（重算），其余走最优副本（真值队列）；
+    两种车道内均按当前真值完成时间选具体资源。非 burst（未来同类 < 20）退化为 OracleV2。
+    大批量下该分配渐近最小化 makespan（流体松弛闭式解）。
+    """
+
+    burst_min = 20
+
+    def __init__(self, ctx):
+        super().__init__(ctx)
+        self._assigned_gpu = 0
+        self._assigned_stor = 0
+
+    def decide(self, req) -> Decision:
+        world = self.ctx.world
+        m = 0
+        if self.ctx.future is not None:
+            m = int(self.ctx.future(req.cls, world.env.now, 5.0))
+        if m < self.burst_min or not req.hit:
+            return super().decide(req)
+        total = m + 1
+        lam_g = sum(max(0.02, 1.0 - world.gpus[w].bg_at(world.env.now))
+                    for w in range(world.n_workers)) / max(1e-9, world.curve(req.prompt_tokens))
+        lam_s = sum(max(0.0, world.res(n, t).cap_at(world.env.now))
+                    for (n, t) in self.holders(req)) / max(1e-9, req.kv_gb)
+        x_star = lam_g / max(1e-9, lam_g + lam_s)
+        n_gpu_target = x_star * total
+        # 已分配计数决定当前请求走哪条车道（比例逼近）
+        if self._assigned_gpu < n_gpu_target:
+            self._assigned_gpu += 1
+            w = min(range(world.n_workers),
+                    key=lambda i: world.gpus[i].hypothetical(req.prompt_tokens))
+            return Decision(worker=w, action="recompute",
+                            cost=world.gpus[w].hypothetical(req.prompt_tokens))
+        self._assigned_stor += 1
+        best = None
+        for w in range(world.n_workers):
+            for (n, t) in self.holders(req):
+                ft = self._hyp_fetch(req.kv_gb, w, n, t)
+                if best is None or ft + world.gpus[w].hypothetical(req.suffix_tokens) < best[0]:
+                    best = (ft + world.gpus[w].hypothetical(req.suffix_tokens),
+                            Decision(worker=w, action="fetch", node=n, tier=t))
+        return best[1]
+
+
 class CascadeLike2(V2Base):
     """问题⑤：Cascade 边界复刻——request 级优化，无跨 worker/跨副本联合。
 
@@ -640,6 +688,7 @@ V2POLICIES = {
     "cascade2": CascadeLike2,
     "oracle2": OracleV2,
     "clairvoyant2": ClairvoyantJoint2,
+    "clairfluid2": ClairvoyantFluid2,
 }
 
 V2_NEEDS_OBS = {n for n, c in V2POLICIES.items() if c.needs_obs}

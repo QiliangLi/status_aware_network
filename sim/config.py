@@ -93,8 +93,9 @@ class TopoConfig:
 @dataclass(frozen=True)
 class PrefetchConfig:
     """Q4 预取（问题②）：会话续写预取 + 重算后回写。"""
-    mode: str = "gated"          # none | always | gated（gated=quote压力<=WARM才预取）
+    mode: str = "gated"          # none | always | gated | predictive | session
     writeback: bool = False      # 重算完成后把完整 KV 异步回写到低压共享存储节点
+    protect: bool = False        # 问题⑫：活跃会话类驱逐豁免 + 预取准入检查
 
 
 @dataclass(frozen=True)

@@ -31,6 +31,7 @@ class LocalKVCache:
         self._pref = lambda cls: zlib.crc32(cls.encode()) % max(1, n_workers)
         self.used = 0.0
         self._items: OrderedDict[str, list] = OrderedDict()
+        self._protected: set = set()
         self.prefetch_wasted_gb = 0.0
         self.prefetch_gb = 0.0
         self.n_prefetch = 0
@@ -61,10 +62,34 @@ class LocalKVCache:
             self.prefetch_gb += nbytes
             self.n_prefetch += 1
         while self.used > self.cap + 1e-9 and len(self._items) > 1:
-            victim, rec = self._items.popitem(last=False)
+            victim, rec = self._pop_victim()
+            if victim is None:
+                break
             self.used -= rec[0]
             if rec[1] == "prefetch" and not rec[2]:
                 self.prefetch_wasted_gb += rec[0]
+
+    def _pop_victim(self):
+        """驱逐：优先非保护的 LRU；保护仅覆盖"预取且未使用"的活跃条目；
+        serve 条目始终可驱逐；无候选则回退整体 LRU（防死锁）。"""
+        for cls in self._items:
+            rec = self._items[cls]
+            guarded = (cls in self._protected and rec[1] == "prefetch" and not rec[2])
+            if not guarded:
+                return cls, self._items.pop(cls)
+        if self._items:
+            return self._items.popitem(last=False)
+        return None, None
+
+    def set_protected(self, classes) -> None:
+        self._protected = set(classes)
+
+    def free_gb(self) -> float:
+        return self.cap - self.used
+
+    def evictable_unprotected_gb(self) -> float:
+        return sum(rec[0] for c, rec in self._items.items()
+                   if not (c in self._protected and rec[1] == "prefetch" and not rec[2]))
 
     def evict(self, cls: str) -> None:
         rec = self._items.pop(cls, None)

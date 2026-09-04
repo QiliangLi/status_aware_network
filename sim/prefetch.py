@@ -25,6 +25,7 @@ class Prefetcher:
         self.s_last = {}        # sid -> 上次命中派发时刻（会话级）
         self.s_gap = {}         # sid -> 轮间隔（秒，最近值即可：会话内间隔近似平稳）
         self.horizon = 5.0
+        self.fast_cls_t = {}    # cls -> 最近一次被判为"快会话活跃"的时刻
 
     def _update_gap(self, cls: str, t: float, sid: int = -1) -> None:
         last = self.last_disp.get(cls)
@@ -39,6 +40,9 @@ class Prefetcher:
             if sl is not None:
                 self.s_gap[sid] = t - sl
             self.s_last[sid] = t
+        g = self.s_gap.get(sid) if sid >= 0 else None
+        if g is not None and g < self.horizon:
+            self.fast_cls_t[cls] = t
 
     # ---------- 派发钩子（预取） ----------
     def on_dispatch(self, req, dec) -> None:
@@ -62,6 +66,15 @@ class Prefetcher:
         if self.world.locals[target]._coord_target(req.cls) is not None:
             target = self.world.locals[target]._coord_target(req.cls)
         lc = self.world.locals[target]
+        if self.cfg.protect:
+            # 活跃快会话类驱逐豁免（2 x horizon 内见过快轮间隔）
+            tnow = self.env.now
+            protected = {c for c, tt in self.fast_cls_t.items() if tnow - tt < 2 * self.horizon}
+            for w_ in self.world.locals:
+                w_.set_protected(protected & w_.classes_held())
+            # 准入：空闲 + 可回收（非保护）不足则跳过，避免预取触发驱逐连锁
+            if req.kv_gb > lc.free_gb() + lc.evictable_unprotected_gb() + 1e-9:
+                return
         if lc.holds(req.cls):
             return
         if target == dec.worker and dec.action in ("fetch", "partial"):
