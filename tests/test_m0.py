@@ -5,6 +5,7 @@ import pytest
 
 from sim.config import ModelConfig
 from sim.m0 import RecoveryCost, recovery_case_from_tokens, two_request_completion
+from sim.m0sim import run_fetch_path, run_recompute_path, run_two_request
 
 
 def _case(**over) -> RecoveryCost:
@@ -144,3 +145,71 @@ class TestRecoveryCaseFromTokens:
             ell=0.0, bw=1.0,
         )
         assert c.delta_c == pytest.approx(2.0)
+
+
+class TestM0Simulation:
+    """事件级微仿真与解析模型一致（R0：解析值与仿真值误差、守恒、串行不重叠）。"""
+
+    TIMES = (0.2, 2.0)
+    BYTES = 1.0
+    BW = 1.0
+
+    @pytest.mark.parametrize(
+        "allocation,expected",
+        [("both_fetch", 2.0), ("both_recompute", 2.2),
+         ("fetch_first", 2.0), ("fetch_last", 1.0)],
+    )
+    def test_completion_matches_analytic(self, allocation, expected):
+        run = run_two_request(self.TIMES, self.BYTES, self.BW, allocation)
+        assert run.completion == pytest.approx(expected, abs=1e-9)
+        assert run.completion == pytest.approx(
+            two_request_completion(self.TIMES, self.BYTES, self.BW, allocation), abs=1e-9,
+        )
+
+    def test_ledger_conserves_submitted_work(self):
+        # 逐资源账本 = 提交的工作量：I/O 只服务取回，GPU 只服务重算
+        run = run_two_request(self.TIMES, self.BYTES, self.BW, "fetch_last")
+        assert run.ledger["io"] == pytest.approx(self.BYTES / self.BW, abs=1e-9)
+        assert run.ledger["gpu"] == pytest.approx(self.TIMES[0], abs=1e-9)
+
+        run = run_two_request(self.TIMES, self.BYTES, self.BW, "both_recompute")
+        assert run.ledger["io"] == pytest.approx(0.0, abs=1e-12)
+        assert run.ledger["gpu"] == pytest.approx(sum(self.TIMES), abs=1e-9)
+
+    def test_spans_do_not_overlap_per_resource(self):
+        # 串行资源不变量：同一资源上的作业区间两两不重叠
+        for alloc in ("both_fetch", "both_recompute", "fetch_first", "fetch_last"):
+            run = run_two_request(self.TIMES, self.BYTES, self.BW, alloc)
+            by_resource: dict[str, list] = {}
+            for s in run.spans:
+                by_resource.setdefault(s.resource, []).append(s)
+            for spans in by_resource.values():
+                spans.sort(key=lambda s: s.start)
+                for prev, nxt in zip(spans, spans[1:]):
+                    assert nxt.start >= prev.end - 1e-12, (alloc, prev, nxt)
+
+    def test_fetch_path_matches_analytic(self):
+        # 单请求取回路径：完成时间 = ℓ + B/bw + P；账本各归其位
+        case = _case()
+        run = run_fetch_path(case)
+        assert run.completion == pytest.approx(case.fetch_path_time(), abs=1e-9)
+        assert run.ledger["io"] == pytest.approx(case.B / case.bw, abs=1e-9)
+        assert run.ledger["gpu"] == pytest.approx(case.P, abs=1e-9)
+
+    def test_recompute_path_matches_analytic(self):
+        case = _case()
+        run = run_recompute_path(case)
+        assert run.completion == pytest.approx(case.R, abs=1e-9)
+        assert run.ledger["gpu"] == pytest.approx(case.R, abs=1e-9)
+        assert run.ledger.get("io", 0.0) == pytest.approx(0.0, abs=1e-12)
+
+    def test_threshold_crossing_agrees_with_simulation(self):
+        # 阈值两侧的仿真判决与解析 fetch_wins 一致；b* 处两者相等
+        b_star = _case().threshold_bandwidth()
+        for factor, should_win in ((0.75, False), (1.25, True)):
+            case = _case(bw=b_star * factor)
+            run = run_fetch_path(case)
+            sim_wins = run.completion < case.R
+            assert sim_wins == should_win == case.fetch_wins()
+        at_boundary = run_fetch_path(_case(bw=b_star))
+        assert at_boundary.completion == pytest.approx(_case().R)
