@@ -58,7 +58,7 @@
 - Commit message 用中文 conventional 风格（`feat(sim):` / `docs:` / `fix:` / `tests:`），正文说明动机与要点，参照 `git log` 既有风格。
 - 提交粒度示例：v2 仿真器核心与 E5–E9 实验分属两个 commit（`aa9d479`、`8f95cc5`）。
 - `results/` 不入库（gitignored）；`docs/figures/` 入库。**严禁**用少量种子的重跑覆盖已入库的正式图——回归验证后若图被改写，用 `git checkout --` 恢复。
-- 推送走 https 远端（代理 `127.0.0.1:1082`，已配好）；失败时可用 `git push git@github.com:QiliangLi/status_aware_network.git main` 兜底。
+- 推送走 https 远端（代理 `127.0.0.1:6478`，仓库与全局 git config 已配好，20260908 更新）；失败时可用 `git push git@github.com:QiliangLi/status_aware_network.git main` 兜底。
 
 ## 8. 命名与放置速查
 
