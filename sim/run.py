@@ -31,6 +31,8 @@ _MODULES = {
     "e15": ("e15_prefetch_pred", "main", {}),
     "e14": ("e14_clair_cap", "main", {}),
     "e13": ("e13_engine_ctrl", "main", {}),
+    "g1": ("g1_quadrant", "main", {}),
+    "g2": ("g2_mixed", "main", {}),
 }
 
 
@@ -44,7 +46,8 @@ def _run_exp(exp: str, seeds, procs, duration: float):
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--exp", default="all",
-                    choices=["all", "v2", "v3", "v4", "all2", *sorted(_MODULES), "smoke", "smoke2"])
+                    choices=["all", "v2", "v3", "v4", "all2", *sorted(_MODULES),
+                             "smoke", "smoke2", "smokeg"])
     ap.add_argument("--seeds", type=int, default=10)
     ap.add_argument("--procs", type=int, default=None)
     ap.add_argument("--duration", type=float, default=400.0)
@@ -61,6 +64,8 @@ def main():
         exps, seeds, args.duration = ["e1a"], seeds[:2], 120.0
     if args.exp == "smoke2":
         exps, seeds, args.duration = ["e5"], seeds[:2], 120.0
+    if args.exp == "smokeg":
+        exps, seeds, args.duration = ["g1"], seeds[:2], 150.0
 
     for exp in exps:
         _run_exp(exp, seeds, args.procs, args.duration)
