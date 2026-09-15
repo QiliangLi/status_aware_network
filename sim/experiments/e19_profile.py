@@ -147,9 +147,9 @@ def main(seeds, procs=None, duration=150.0, stage="smoke",
                            s=2, alpha=.15, color="#DD8452")
         axes[1, j].set_xlabel("log10(h+1)"); axes[1, j].set_ylabel("log10(u+1)")
         labels.append(TRACE_LABEL[fname])
-        hit_r.append(rep_imp[fname]["hit_ratio_req"])
-        hit_t.append(rep_imp[fname]["hit_ratio_token"])
-        lam0s.append(rep_imp[fname]["lam0"])
+        hit_r.append(rep_imp[fname]["request_hit_ratio"])
+        hit_t.append(rep_imp[fname]["token_hit_ratio"])
+        lam0s.append(rep_imp[fname]["lam0_full_trace"])
     fig.suptitle("E19：Mooncake 三文件导入（命中比 req/tok：" +
                  " / ".join(f"{a:.2f}/{b:.2f}" for a, b in zip(hit_r, hit_t)) +
                  f"；λ0：" + " / ".join(f"{x:.1f}" for x in lam0s) + " req/s）")

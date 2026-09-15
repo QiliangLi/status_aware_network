@@ -169,7 +169,7 @@ def main(seeds, procs=None, duration=150.0, stage="smoke",
     fig.savefig(os.path.join(d, "fig_e23_slo_load.png"), dpi=130)
     plt.close(fig)
     print_progress(f"E23 done -> {d} ({len(recs)} runs)")
-    return {"n_runs": len(recs), "b_star": bstars}
+    return {"n_runs": len(recs), "note": "全 baseline 完整展示,配对收益仅相对 FCFS(D6)"}
 
 
 if __name__ == "__main__":

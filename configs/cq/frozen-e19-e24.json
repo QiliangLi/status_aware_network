@@ -1,5 +1,5 @@
 {
- "schema_version": 1,
+ "schema_version": 2,
  "stage_recorded": "smoke(训练块 0-1)——正式 eval 前须重跑 train 阶段全 5 块",
  "provenance": {
   "generated_by": "tools/make_frozen_manifest(会话内)",
@@ -9,49 +9,68 @@
  "sources": {
   "conversation_trace.jsonl": {
    "sha256": "b8cbb061a85206d729d91cdc2981f43c9e0d99209dce588d3af5f7934408b9df",
-   "lam0_req_s": 6.679822238746074,
+   "lam0_req_s": 8.35,
    "n_catalog": 2121,
    "n_after": 9910,
    "hit_ratio_req": 1.0,
    "hit_ratio_token": 0.12764565127506233,
    "d_raw_s": 3537.0,
    "build_end_ms": 707400,
-   "train_end_ms": 1414800
+   "train_end_ms": 1414800,
+   "lam0_first_seen_req_s": null,
+   "lam0_frozen_req_s": 6.679822238746074
   },
   "toolagent_trace.jsonl": {
    "sha256": "48a2db1a13d3bc05e6330140c64f604ba366df20d3c9e128b5c35a01c1fa5f71",
-   "lam0_req_s": 14.564789068760925,
+   "lam0_req_s": 18.18,
    "n_catalog": 4249,
    "n_after": 19359,
    "hit_ratio_req": 1.0,
    "hit_ratio_token": 0.40763937336836237,
    "d_raw_s": 3537.0,
    "build_end_ms": 707400,
-   "train_end_ms": 1414800
+   "train_end_ms": 1414800,
+   "lam0_first_seen_req_s": null,
+   "lam0_frozen_req_s": 14.564789068760925
   },
   "synthetic_trace.jsonl": {
    "sha256": "bd070915a98fc0ed264d7cfef2ce746002eb3076a695ec31ba2674c0111ec131",
-   "lam0_req_s": 8.663175315987061,
+   "lam0_req_s": 12.65,
    "n_catalog": 744,
    "n_after": 3249,
    "hit_ratio_req": 0.20744844567559248,
    "hit_ratio_token": 0.28924457180775226,
    "d_raw_s": 1022.026,
    "build_end_ms": 204405,
-   "train_end_ms": 408810
+   "train_end_ms": 408810,
+   "lam0_first_seen_req_s": null,
+   "lam0_frozen_req_s": 8.663175315987061
   }
  },
  "splits": {
-  "mooncake": "[0,0.2D) catalog / [0.2D,0.4D) train(块0-4) / [0.4D,D) eval(块100-114)；边界左闭右开",
-  "synthetic": "种子 0-4 训练 / 100-114 评价"
+  "mooncake": "全量打分(变更 v1.4 D4):统一 20 个时间窗口(编号 0..19)全部参与打分,无训练/评价/建目录段",
+  "note": "窗口仅为运行/统计分片;跨窗口缓存历史由派生 hit 字段静态携带"
  },
- "cache_catalog": "frozen_history_catalog：每文件前 20% 请求完整块的前缀 trie，运行期不增删",
+ "cache_catalog": {
+  "model": "first_seen(变更设计 v1.4,文档 docs/MooncakeTrace命中模型首现判定-变更设计-20260915.md)",
+  "algorithm": "D1 连续前缀 + D2 请求内不可见 + D3 尾块参与 + D7 同刻并发不可见",
+  "derived_files": "mooncake_trace/derived/<名>.hit.jsonl(不入库,由 tools/cq_derive_hits.py 可重现)",
+  "fingerprint_token_hit": {
+   "conversation": 0.3736,
+   "toolagent": 0.5705,
+   "synthetic": 0.6512
+  },
+  "frozen_catalog_legacy": "已删除;历史定义见规格 §5.5"
+ },
  "profile_truth": "synthetic-v1：L=32,κ=4.096e-6,N_sat=512,t_launch=50e-6,a=2e-7,b=1e-10",
  "profile_prediction": "最近邻替身：特征 log1p(n,N,Σu²,Σhu,maxu,maxh)；留出 APE 中位 3.2%",
  "reference": {
   "T0": "独立 singleton 重放解析式（B_ref=80、q_max 用协议组连接上限）",
   "SLO": "deadline=arrival+α·T0，默认 α=4",
-  "guard_W": "2×train_P95(T0)（首轮未标定，冒烟阶段 guard 未启用=0）"
+  "guard_W": "2×train_P95(T0)（首轮未标定，冒烟阶段 guard 未启用=0）",
+  "W_guard": "在线滚动:2×已到达请求 T0 的 P95(样本<20 禁用)",
+  "r_ref": "在线滚动:已到达请求正 V/K 的几何均值",
+  "C_ref": "在线滚动:已到达请求 T0 的中位数"
  },
  "limits": {
   "mechanism_group": {
@@ -91,7 +110,8 @@
    "measured"
   ],
   "search_budget_s": 0.002,
-  "max_forecast_events": 20000
+  "max_forecast_events": 20000,
+  "gate": "0(零标定,规格默认)"
  },
  "search": {
   "K_req": 32,
@@ -123,17 +143,7 @@
   "quantile": "numpy.quantile(method='linear')"
  },
  "acceptance": {
-  "headline": "E24 锚点×3 文件、α=4、θ=S、measured：≥2 格点 SLO +5pp 且 CI 下界>0（相对冻结 B*）",
-  "b_star_smoke_train": {
-   "S": [
-    "cq_spt",
-    "ok"
-   ],
-   "T": [
-    "cq_spt",
-    "ok"
-   ]
-  },
-  "note": "冒烟训练块上的 B* 快照；正式评价前须用全部 5 训练块重冻结"
+  "headline": "相对 FCFS(变更 v1.4 D6:B* 取消,全 baseline 完整展示)",
+  "note": "frozen 口径冒烟读数(含旧 B*=cq_spt)见测试报告历史节,两口径不可混用"
  }
 }
