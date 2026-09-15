@@ -73,6 +73,8 @@ def _label(fname: str) -> str:
 
 
 def cell_limits(cap: str) -> HardLimits:
+    if cap == "Cmech":   # 四类机制组能力（8192 token/16 GB，规格 §5.5；§10.3 预案夹具）
+        return HardLimits(8, 8192, F(16))
     n_max = 1 if cap == "A" else TRACE_WIDE_LIMITS.n_max
     return HardLimits(n_max, TRACE_WIDE_LIMITS.token_max,
                       TRACE_WIDE_LIMITS.workspace_gb)
