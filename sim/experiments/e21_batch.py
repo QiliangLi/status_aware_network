@@ -30,8 +30,7 @@ from sim.cq.types import HardLimits, RequestSpec
 def finite_workload(src: MooncakeSource, block_id: int, n_req: int = 128,
                     alpha: float = 4.0):
     """Mooncake 形状驱动有限工作集：前 n 条、arrival=0、deadline=α·T0。"""
-    blocks = src.train_blocks + src.eval_blocks
-    blk = next(b for b in blocks if b.block_id == block_id)
+    blk = src.windows[block_id]   # 统一窗口(0..19,全量打分)
     rows = [r for r in src.imp.rows if blk.start_ms <= r.timestamp_ms < blk.end_ms][:n_req]
     prof = ProfileConfig()
     specs = []

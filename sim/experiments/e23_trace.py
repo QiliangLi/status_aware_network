@@ -26,29 +26,6 @@ THETA_MAIN = {"S": "slo_success", "T": "ttft_mean_lower",
               "R": "ttft_norm_mean_lower"}
 
 
-def select_b_star(train_recs, theta):
-    """B*：训练格点等权平均名次最小的简单策略（§3.3 简化实现）。"""
-    from collections import defaultdict
-    groups = defaultdict(list)
-    for r in train_recs:
-        if r["theta"] != theta:
-            continue
-        groups[(r["file"], r["B"], r["rho"], r["alpha"], r["cost_mode"])].append(r)
-    names = defaultdict(float)
-    counts = defaultdict(int)
-    for _k, rs in groups.items():
-        key = THETA_MAIN[theta]
-        ranked = sorted(rs, key=lambda r: (r[key] if r[key] is not None
-                                           else float("inf")))
-        for i, r in enumerate(ranked):
-            names[r["policy"]] += i
-            counts[r["policy"]] += 1
-    avg = {p: names[p] / counts[p] for p in names if p != "cq_fcfs"}
-    if not avg:
-        return "cq_fcfs", "selection_unresolved"
-    best = min(avg, key=lambda p: (avg[p], p))
-    return best, "ok"
-
 
 def paired_gains(recs, base_pid, cmp_pid, theta):
     """配对收益（同 file/B/rho/alpha/block 配对）。"""
@@ -121,7 +98,7 @@ def main(seeds, procs=None, duration=150.0, stage="smoke",
         thetas = ["S", "T"]
         rho_list = [0.6, 0.9]
         B_list = [20.0, 80.0]
-        blocks = [0, 1]
+        blocks = [0, 1]   # 统一窗口(全量打分,含冷启动)
         cost_modes = ("zero",)
     else:
         files = [f for f, _n, _m, _s in MOONCAKE_FILES]
@@ -129,27 +106,18 @@ def main(seeds, procs=None, duration=150.0, stage="smoke",
         thetas = ["S", "T", "R"]
         rho_list = [0.3, 0.6, 0.9, 1.1]
         B_list = [20.0, 80.0, 320.0]
-        blocks = [100 + i for i in range(15)]
+        blocks = list(range(20))
         cost_modes = ("zero",)
     recs = run_matrix(stage, trace_dir, duration, thetas, policies, files,
                       blocks, rho_list, B_list, cost_modes=cost_modes)
     save_json(os.path.join(d, "e23_records.json"), recs)
-    # B*（训练集内冻结）
-    bstars = {}
-    for th in thetas:
-        bstars[th], note = select_b_star(recs, th)
-        bstars[th] = (bstars[th], note)
-    save_json(os.path.join(d, "e23_bstar.json"), bstars)
-    # 配对收益
+    # 配对收益(仅相对 FCFS;全部 baseline 完整展示,变更设计 v1.4 D6)
     gains = {}
     for th in thetas:
         for pid in policies:
             if pid == "cq_fcfs":
                 continue
             gains[f"{pid}|vs_fcfs|{th}"] = paired_gains(recs, "cq_fcfs", pid, th)
-            bs = bstars[th][0]
-            if bs != pid and bs != "cq_fcfs":
-                gains[f"{pid}|vs_B*|{th}"] = paired_gains(recs, bs, pid, th)
     save_json(os.path.join(d, "e23_gains.json"), gains)
 
     # 图 1：收益总览（相对 FCFS 配对中位数）

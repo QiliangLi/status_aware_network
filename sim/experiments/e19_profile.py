@@ -22,44 +22,41 @@ from sim.cq.types import RequestSpec
 
 
 def import_report(trace_dir: str) -> dict:
-    """三文件导入验收：指纹 + 命中/长度分布 + 容量覆盖。"""
+    """三文件导入验收:first_seen 派生统计 + 原始 SHA 核对(变更设计 v1.4)。"""
     import sim.cq.trace as T
     report = {}
     for fname, n_rows, max_ts, sha in MOONCAKE_FILES:
         src = MooncakeSource(fname, trace_dir)
-        imp = imp_ = src.imp
-        rows_after = src.train_rows + src.eval_rows
-        hs, us, ils = [], [], []
-        for r in rows_after:
-            h, u, _full = imp.h_u_of(r)
-            hs.append(h)
-            us.append(u)
-            ils.append(r.input_length)
-        hs_a, us_a = np.array(hs), np.array(us)
-        # singleton 容量覆盖：trace-wide 必须 100%
+        imp = src.imp
+        hs_a = np.array([r.hit_tokens for r in imp.rows])
+        us_a = np.array([r.u_tokens for r in imp.rows])
         prof = ProfileConfig()
-        specs = [RequestSpec(i, 0, hs[i], us[i], "mooncake", 1, 1)
-                 for i in range(len(hs))]
+        specs = [RequestSpec(i, 0, hs_a[i], us_a[i], "mooncake", 1, 1)
+                 for i in range(len(hs_a))]
         wide_ok = all(is_feasible([s], TRACE_WIDE_LIMITS, prof) for s in specs)
         mech_ok = sum(1 for s in specs if is_feasible([s], MECH_LIMITS, prof))
-        arr_ms = np.array([r.timestamp_ms for r in rows_after], dtype=float)
+        arr_ms = np.array([r.timestamp_ms for r in imp.rows], dtype=float)
         inter = np.diff(np.sort(arr_ms)) / 1000.0
+        ts_groups = len(set(arr_ms.tolist()))
         report[fname] = {
             "label": TRACE_LABEL[fname], "n_rows": n_rows, "max_ts_ms": max_ts,
-            "sha256_ok": T.sha256_file(os.path.join(trace_dir, fname)) == sha,
-            "n_catalog": imp.n_catalog, "n_after": imp.n_after,
-            "hit_ratio_req": imp.hit_ratio_req,
-            "hit_ratio_token": imp.hit_ratio_token,
+            "input_sha256_ok": T.sha256_file(os.path.join(trace_dir, fname)) == sha,
+            "derived_sha256": imp.derived_sha256[:16],
+            "token_hit_ratio": imp.token_hit_ratio,
+            "request_hit_ratio": imp.request_hit_ratio,
             "full_hit_adjusted": imp.full_hit_adjusted,
             "max_u": int(us_a.max()),
             "h_median": float(np.median(hs_a)),
-            "u_p50": float(np.median(us_a)), "u_p95": float(np.percentile(us_a, 95)),
-            "input_len_median": float(np.median(ils)),
+            "u_p50": float(np.median(us_a)),
+            "u_p95": float(np.percentile(us_a, 95)),
             "interarrival_p50_s": float(np.median(inter)) if len(inter) else None,
-            "interarrival_p95_s": float(np.percentile(inter, 95)) if len(inter) else None,
+            "ts_groups": ts_groups,
+            "max_same_ts_group": int(max(
+                sum(1 for x in imp.rows if x.timestamp_ms == t)
+                for t in set(r.timestamp_ms for r in imp.rows))),
             "coverage_wide_100pct": wide_ok,
             "coverage_mech_frac": mech_ok / max(1, len(specs)),
-            "lam0": float(src.lam0),
+            "lam0_full_trace": float(src.lam0),
         }
     return report
 
@@ -138,7 +135,7 @@ def main(seeds, procs=None, duration=150.0, stage="smoke",
     labels, hit_r, hit_t, lam0s = [], [], [], []
     for j, (fname, _n, _m, _s) in enumerate(MOONCAKE_FILES):
         src = MooncakeSource(fname, trace_dir)
-        rows = src.train_rows + src.eval_rows
+        rows = src.imp.rows
         arr = np.array([r.timestamp_ms for r in rows], dtype=float) / 1000.0
         inter = np.diff(np.sort(arr))
         axes[0, j].hist(np.clip(inter, 0, np.percentile(inter, 99)), bins=60,

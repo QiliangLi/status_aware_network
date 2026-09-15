@@ -431,7 +431,10 @@ class MPCPolicy:
 
     def _wait_options(self, snap, scn):
         now = float(snap.now)
-        C_ref = self.c_ref
+        # C_ref 在线化(v1.4):已到达请求 T0 的滚动中位数
+        import numpy as _np
+        t0s = [float(r.T0_s) for r in snap.requests]
+        C_ref = float(_np.median(t0s)) if t0s else self.c_ref
         opts = [now + f * C_ref for f in (0.05, 0.1, 0.2)]
         for f in snap.flows:
             if f.completed:

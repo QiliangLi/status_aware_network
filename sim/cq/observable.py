@@ -69,6 +69,7 @@ class ObservableSnapshot:
     b_ref: object
     q_max: object
     compute_bias: object = 0
+    guard_w: float = 0.0
     oracle: Optional[Dict] = None
     _profile_cfg: object = None      # 预测 profile（真值×(1+e)），不暴露真值世界
     _lam: object = None
@@ -131,6 +132,7 @@ class Observable:
         self.delivered: Optional[Quote] = None
         self.pending_deliveries: List[Tuple[float, Quote]] = []
         self.ledger: Dict[int, dict] = {}     # flow_id -> 公开信息
+        self.t0_history: List[float] = []     # 已到达请求的 T0(在线滚动统计用)
         self.worker_events: Dict[int, list] = {i: [] for i in range(scenario.m_workers)}
         # 预测 profile：真值参数 × (1+e)
         from dataclasses import replace
@@ -220,7 +222,11 @@ class Observable:
             rec["served_reported_gb"] = f.V_gb
 
     def on_arrival(self, rid, t):
-        pass
+        # 在线参数(变更设计 v1.4 §2.1):W_guard = 2×已到达请求 T0 的滚动 P95
+        try:
+            self.t0_history.append(float(self.eng.w.specs[rid].T0_s))
+        except Exception:
+            pass
 
     def on_dispatch(self, b, t):
         evs = self.worker_events[b.worker_id]
@@ -231,6 +237,14 @@ class Observable:
         evs.append((F, "batch_done", tuple(b.members)))
 
     # -- 快照 ---------------------------------------------------------------
+    def guard_w_est(self) -> float:
+        """在线老化阈值:2×已到达请求 T0 的滚动 P95(样本<20 时为 0=禁用)。"""
+        if len(self.t0_history) < 20:
+            return 0.0
+        import numpy as np
+        return 2.0 * float(np.quantile(np.array(self.t0_history), 0.95,
+                                       method="linear"))
+
     def snapshot(self, t, include_oracle=False) -> ObservableSnapshot:
         eng = self.eng
         w = eng.w
@@ -273,7 +287,7 @@ class Observable:
                                       for b in w.batches.values()
                                       if b.next_layer > 0 and b.F_s is None},
             }
-        return ObservableSnapshot(
+        snap = ObservableSnapshot(
             now=t, requests=reqs, workers=workers, flows=flows,
             quote=self.delivered,
             queued=frozenset(r.spec.rid for r in w.requests.values()
@@ -282,3 +296,5 @@ class Observable:
             b_ref=self.num(self.b_ref), q_max=w.storage.q_max,
             compute_bias=self.num(self.compute_bias), oracle=oracle,
             _profile_cfg=self.profile_hat)
+        snap.guard_w = self.guard_w_est()
+        return snap

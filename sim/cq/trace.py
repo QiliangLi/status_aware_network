@@ -48,42 +48,6 @@ def canonical_hash(obj) -> str:
     return hashlib.sha256(s.encode("utf-8")).hexdigest()
 
 
-# ---------------------------------------------------------------------------
-# 前缀 trie 目录
-# ---------------------------------------------------------------------------
-
-
-class PrefixCatalog:
-    """完整块前缀 trie：插入建目录请求的完整 hash 前缀路径；查询沿同一路径走，
-    遇首个缺块停止。只匹配连续前缀，不做集合命中。"""
-
-    def __init__(self):
-        self._children: Dict[int, "PrefixCatalog"] = {}
-        self.size_blocks = 0
-
-    def insert(self, hash_ids: Sequence[int], n_complete: int):
-        node = self
-        for hid in hash_ids[:n_complete]:
-            nxt = node._children.get(hid)
-            if nxt is None:
-                nxt = PrefixCatalog()
-                node._children[hid] = nxt
-            node = nxt
-        node.size_blocks = max(node.size_blocks, n_complete)
-
-    def match(self, hash_ids: Sequence[int], n_complete: int) -> int:
-        """返回连续命中的完整块数 k。"""
-        node = self
-        k = 0
-        for hid in hash_ids[:n_complete]:
-            nxt = node._children.get(hid)
-            if nxt is None:
-                break
-            node = nxt
-            k += 1
-        return k
-
-
 @dataclass
 class RawTraceRow:
     source_file: str
@@ -92,11 +56,15 @@ class RawTraceRow:
     input_length: int
     output_length: int
     hash_ids: Tuple[int, ...]
+    # 首现命中派生字段(原始文件为默认值;派生文件读入后填充)
+    hit_tokens: int = 0
+    u_tokens: int = 0
+    full_hit_adjusted: bool = False
 
 
 def load_mooncake(path: str, fname: str) -> List[RawTraceRow]:
-    """逐行读入并校验：合法 JSON、非负长度、hash 数=ceil(input/512)、按
-    (timestamp,source_line) 稳定排序。"""
+    """逐行读入原始 trace 并校验:合法 JSON、非负长度、hash 数=ceil(input/512)、
+    按 (timestamp,source_line) 稳定排序(不读命中字段,供指纹核对与预处理用)。"""
     rows = []
     with open(path, "r", encoding="utf-8") as f:
         for i, line in enumerate(f, start=1):
@@ -119,80 +87,71 @@ def load_mooncake(path: str, fname: str) -> List[RawTraceRow]:
     return rows
 
 
+# ---------------------------------------------------------------------------
+# 首现命中派生文件的导入(first_seen 单模式,变更设计 v1.4)
+# ---------------------------------------------------------------------------
+
+
 @dataclass
 class TraceImport:
-    """一个 Mooncake 文件的完整导入结果（含冻结目录与区间划分）。"""
+    """一份派生 trace(hit 已预计算)的导入结果与全量统计。"""
 
     fname: str
     rows: List[RawTraceRow]
-    d_raw_s: Fraction
-    catalog: PrefixCatalog
-    build_end_ms: int           # 0.2*D_raw 对应毫秒边界
-    train_end_ms: int           # 0.4*D_raw
-    n_catalog: int
-    n_after: int
-    hit_ratio_req: float
-    hit_ratio_token: float
+    n_rows: int
+    token_hit_ratio: float
+    request_hit_ratio: float
     max_u: int
     full_hit_adjusted: int
-    file_sha256: str
+    d_raw_s: Fraction
+    derived_sha256: str
 
     def h_u_of(self, row: RawTraceRow) -> Tuple[int, int, bool]:
-        """查询冻结目录得 (h, u, full_hit_last_token_adjusted)。"""
-        n_complete = row.input_length // BLOCK
-        k = self.catalog.match(row.hash_ids, n_complete)
-        h = min(BLOCK * k, row.input_length - 1)
-        u = row.input_length - h
-        return h, u, (BLOCK * k >= row.input_length)
-
-    def split_bounds_ms(self) -> Tuple[int, int]:
-        """[0,0.2D) 建目录、[0.2D,0.4D) 训练、[0.4D,D) 评价；整数毫秒边界。"""
-        return self.build_end_ms, self.train_end_ms
+        """命中信息直接来自派生字段(h+u=input、u>=1 已在导入时校验)。"""
+        return row.hit_tokens, row.u_tokens, row.full_hit_adjusted
 
 
-def import_mooncake(path: str, fname: str) -> TraceImport:
-    """导入单个 Mooncake 文件并构建冻结目录（§5.5 合同）。"""
-    rows = load_mooncake(path, fname)
-    max_ts = max(r.timestamp_ms for r in rows)
-    d_raw_ms = max_ts + 1
-    build_end = (Fraction(d_raw_ms) * Fraction(1, 5)).__floor__()
-    train_end = (Fraction(d_raw_ms) * Fraction(2, 5)).__floor__()
-    cat = PrefixCatalog()
-    n_cat = 0
-    for r in rows:
-        if r.timestamp_ms < build_end:
-            cat.insert(r.hash_ids, r.input_length // BLOCK)
-            n_cat += 1
-        else:
-            break
-    after = [r for r in rows if r.timestamp_ms >= build_end]
-    n_hit = 0
-    sum_h = 0
-    sum_in = 0
+def import_mooncake(derived_path: str, fname: str) -> TraceImport:
+    """读 derived/<名>.hit.jsonl 并校验,返回全量统计。"""
+    rows = []
+    tot_in = tot_hit = n_hit = n_full = 0
     max_u = 0
-    adj = 0
-    for r in after:
-        h, u, full = None, None, None
-        h, u, full = _hu(cat, r)
-        if h > 0:
-            n_hit += 1
-        sum_h += h
-        sum_in += r.input_length
-        max_u = max(max_u, u)
-        adj += 1 if full else 0
+    with open(derived_path, "r", encoding="utf-8") as f:
+        for i, line in enumerate(f, start=1):
+            line = line.strip()
+            if not line:
+                continue
+            obj = json.loads(line)
+            ts, il = int(obj["timestamp"]), int(obj["input_length"])
+            ol = int(obj["output_length"])
+            hs = tuple(int(x) for x in obj["hash_ids"])
+            hit = int(obj["hit_tokens"])
+            u = int(obj["u_tokens"])
+            full = bool(obj.get("full_hit_adjusted", False))
+            if ts < 0 or il < 0 or ol < 0:
+                raise ValueError(f"{fname}:{i} 负长度/时间戳")
+            need = (il + BLOCK - 1) // BLOCK
+            if len(hs) != need:
+                raise ValueError(f"{fname}:{i} hash 数 {len(hs)} != ceil({il}/512)")
+            if hit + u != il or u < 1 or hit > il - 1:
+                raise ValueError(f"{fname}:{i} hit/u 字段非法: {hit}+{u}!={il}")
+            rows.append(RawTraceRow(fname, i, ts, il, ol, hs, hit, u, full))
+            tot_in += il
+            tot_hit += hit
+            n_hit += 1 if hit > 0 else 0
+            n_full += 1 if full else 0
+            max_u = max(max_u, u)
+    if not rows:
+        raise ValueError(f"{fname} 派生文件为空")
+    rows.sort(key=lambda r: (r.timestamp_ms, r.source_line))
+    d_raw_ms = max(r.timestamp_ms for r in rows) + 1
     return TraceImport(
-        fname=fname, rows=rows, d_raw_s=frac(d_raw_ms) / 1000, catalog=cat,
-        build_end_ms=build_end, train_end_ms=train_end, n_catalog=n_cat,
-        n_after=len(after), hit_ratio_req=n_hit / len(after),
-        hit_ratio_token=sum_h / sum_in, max_u=max_u, full_hit_adjusted=adj,
-        file_sha256=sha256_file(path))
-
-
-def _hu(cat: PrefixCatalog, r: RawTraceRow) -> Tuple[int, int, bool]:
-    n_complete = r.input_length // BLOCK
-    k = cat.match(r.hash_ids, n_complete)
-    h = min(BLOCK * k, r.input_length - 1)
-    return h, r.input_length - h, (BLOCK * k >= r.input_length)
+        fname=fname, rows=rows, n_rows=len(rows),
+        token_hit_ratio=tot_hit / tot_in,
+        request_hit_ratio=n_hit / len(rows),
+        max_u=max_u, full_hit_adjusted=n_full,
+        d_raw_s=frac(d_raw_ms) / 1000,
+        derived_sha256=sha256_file(derived_path))
 
 
 # ---------------------------------------------------------------------------
@@ -215,7 +174,7 @@ def split_blocks(rows: Sequence[RawTraceRow], start_ms: int, end_ms: int,
     for i in range(n_blocks):
         s = start_ms + (Fraction(span) * Fraction(i, n_blocks)).__floor__()
         e = start_ms + (Fraction(span) * Fraction(i + 1, n_blocks)).__floor__()
-        blocks.append(TimeBlock(i if n_blocks == 5 else 100 + i, s, e))
+        blocks.append(TimeBlock(i, s, e))   # 统一窗口编号 0..N-1(全量打分)
     return blocks
 
 

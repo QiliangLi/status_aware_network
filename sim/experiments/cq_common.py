@@ -52,44 +52,38 @@ def build_policy(pid: str, theta: str = "S", c_ref: float = 0.01,
 
 
 class MooncakeSource:
-    """一个 Mooncake 文件的冻结导入 + 窗口装载（λ0 从训练区间冻结）。"""
+    """一份 Mooncake 文件的 first_seen 派生导入 + 统一窗口装载(变更设计 v1.4)。
+
+    全量打分:窗口仅为运行/统计分片(编号 0..19),全部参与打分;
+    λ0 用全量请求计算;无训练/评价/建目录段之分。
+    """
 
     def __init__(self, fname: str, trace_dir: str = TRACE_DIR_DEFAULT):
         self.fname = fname
-        self.path = os.path.join(trace_dir, fname)
-        self.imp = import_mooncake(self.path, fname)
+        derived = os.path.join(trace_dir, "derived", fname + ".hit.jsonl")
+        self.imp = import_mooncake(derived, fname)
         self.label = TRACE_LABEL[fname]
-        train_rows = [r for r in self.imp.rows
-                      if self.imp.build_end_ms <= r.timestamp_ms
-                      < self.imp.train_end_ms]
-        self.train_rows = train_rows
-        self.eval_rows = [r for r in self.imp.rows
-                          if r.timestamp_ms >= self.imp.train_end_ms]
-        self.train_blocks = split_blocks(self.imp.rows, self.imp.build_end_ms,
-                                         self.imp.train_end_ms, 5)
-        self.eval_blocks = split_blocks(self.imp.rows, self.imp.train_end_ms,
-                                        max(r.timestamp_ms for r in self.imp.rows) + 1, 15)
-        # λ0 = min(80/E[V_layer], m/E[K_singleton])，m=4
+        # λ0 = min(80/E[V_layer], m/E[K_singleton]),m=4,全量请求(在线参数替代训练冻结)
         prof = ProfileConfig()
-        hus = [self.imp.h_u_of(r)[:2] for r in train_rows]
-        if hus:
-            e_v = sum(F(prof.kappa_gb_per_token_layer) * h for h, _u in hus) / len(hus)
-            ks = []
-            for h, u in hus:
-                rs = RequestSpec(0, 0, h, u, "x", 1, 1)
-                ks.append(F(singleton_K(rs, prof, F(80), F(200))))
-            e_k = sum(ks) / len(ks)
-            self.lam0 = min(F(80) / e_v, F(4) / e_k)
-        else:
-            self.lam0 = F(1)
+        hus = [(r.hit_tokens, r.u_tokens) for r in self.imp.rows]
+        e_v = sum(F(prof.kappa_gb_per_token_layer) * h for h, _u in hus) / len(hus)
+        ks = []
+        for h, u in hus:
+            rs = RequestSpec(0, 0, h, u, "x", 1, 1)
+            ks.append(F(singleton_K(rs, prof, F(80), F(200))))
+        e_k = sum(ks) / len(ks)
+        self.lam0 = min(F(80) / e_v, F(4) / e_k)
+        # 统一窗口:全量时间等切 20 块,编号 0..19
+        t0 = min(r.timestamp_ms for r in self.imp.rows)
+        t1 = max(r.timestamp_ms for r in self.imp.rows) + 1
+        self.windows = split_blocks(self.imp.rows, t0, t1, 20)
 
     def window_specs(self, block_id: int, lam: F, alpha: F = F(4),
                      duration_cap: Optional[float] = None,
                      limits: HardLimits = TRACE_WIDE_LIMITS
                      ) -> Tuple[List[RequestSpec], float]:
-        """装载一个时间块窗口：缩放到目标负载 λ，T0/SLO 用 B_ref=80 冻结。"""
-        blocks = self.train_blocks + self.eval_blocks
-        blk = next(b for b in blocks if b.block_id == block_id)
+        """装载一个窗口:缩放到目标负载 λ;h/u 直接用派生字段。"""
+        blk = self.windows[block_id]
         rows = block_rows(self.imp.rows, blk)
         if not rows:
             return [], 0.0

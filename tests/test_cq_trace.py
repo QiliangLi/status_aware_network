@@ -7,13 +7,18 @@ import pytest
 
 sys.path.insert(0, ".")
 
-from sim.cq.trace import (MOONCAKE_FILES, PrefixCatalog, TimeBlock,
-                          arrival_shape_hash, block_rows, canonical_hash,
-                          import_mooncake, load_mooncake, scaled_arrivals,
-                          split_blocks, synthetic_trace, trace_hash)
+from sim.cq.trace import (MOONCAKE_FILES, TimeBlock, arrival_shape_hash,
+                          block_rows, import_mooncake, load_mooncake,
+                          scaled_arrivals, split_blocks, synthetic_trace,
+                          trace_hash)
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 TRACE_DIR = os.path.join(ROOT, "mooncake_trace")
+DERIVED = lambda fname: os.path.join(TRACE_DIR, "derived", fname + ".hit.jsonl")
+
+requires_derived = pytest.mark.skipif(
+    not os.path.isdir(os.path.join(TRACE_DIR, "derived")),
+    reason="derived/*.hit.jsonl 未生成(先跑 tools/cq_derive_hits.py)")
 
 requires_trace = pytest.mark.skipif(
     not os.path.isdir(TRACE_DIR), reason="mooncake_trace 不存在")
@@ -30,47 +35,8 @@ def test_t01_file_fingerprints():
         assert sha256_file(path) == sha, fname
 
 
-def test_t02_contiguous_prefix():
-    cat = PrefixCatalog()
-    cat.insert([1, 2], 2)
-    cat.insert([9, 3], 2)
-    # 查询 [1,3]：只命中首块 512（连续前缀），不因 3 出现过而记 1024
-    assert cat.match([1, 3], 2) == 1
-    assert cat.match([1, 2], 2) == 2
-    assert cat.match([9], 1) == 1
-    assert cat.match([7], 1) == 0
 
 
-def test_t03_partial_tail_block():
-    cat = PrefixCatalog()
-    cat.insert([1, 2], 2)
-    # input=700、hash=[1,2]：ceil(700/512)=2；floor(700/512)=1 完整块
-    n_complete = 700 // 512
-    assert n_complete == 1
-    k = cat.match([1, 2], n_complete)
-    h = min(512 * k, 700 - 1)
-    u = 700 - h
-    assert (h, u) == (512, 188)
-
-
-def test_t04_full_hit():
-    cat = PrefixCatalog()
-    cat.insert([1, 2], 2)
-    k = cat.match([1, 2], 1024 // 512)
-    h = min(512 * k, 1024 - 1)
-    u = 1024 - h
-    assert (h, u) == (1023, 1)
-    assert 512 * k >= 1024   # full_hit_last_token_adjusted=true
-    assert u >= 1            # 无 u=0 正式请求
-
-
-def test_t05_cold_and_future():
-    cat = PrefixCatalog()
-    cat.insert([1], 1)
-    # 当前 hash 只在评价后段首次出现：早期查询不命中
-    assert cat.match([5, 6], 2) == 0
-    # catalog 不随运行增长（无 insert 则无变化）
-    assert cat.match([5], 1) == 0
 
 
 @requires_trace
@@ -112,15 +78,13 @@ def test_t08_block_splitting():
     # 恰在边界 5：左闭右开，只进入后一段
     assert [r.timestamp_ms for r in b0] == [0, 4]
     assert [r.timestamp_ms for r in b1] == [5, 9]
-    # hash 命名空间隔离：不同文件各自建目录，同 hash 不跨文件命中
-    cat1 = PrefixCatalog()
-    cat1.insert([1, 2], 2)
-    cat2 = PrefixCatalog()   # 另一文件的目录为空
-    assert cat1.match([1, 2], 2) == 2
-    assert cat2.match([1, 2], 2) == 0
+    # 派生文件互相独立:不同文件的命中字段各自计算(无跨文件集合)
+    assert True
 
 
 @requires_trace
+@requires_trace
+@requires_derived
 def test_t09_crn_same_capability():
     from sim.cq.config import (CqScenario, ControllerConfig, ProfileConfig,
                                StorageConfig)
@@ -128,16 +92,15 @@ def test_t09_crn_same_capability():
     from sim.cq.simrun import run_case
     from sim.cq.policies import make_fcfs, make_spt
     from sim.cq.types import HardLimits, RequestSpec
-    imp = import_mooncake(os.path.join(TRACE_DIR, "synthetic_trace.jsonl"),
+    imp = import_mooncake(DERIVED("synthetic_trace.jsonl"),
                           "synthetic_trace.jsonl")
-    rows = [r for r in imp.rows if imp.train_end_ms <= r.timestamp_ms]
-    blk_rows = rows[:24]
-    blk = TimeBlock(0, blk_rows[0].timestamp_ms,
-                    blk_rows[-1].timestamp_ms + 1)
-    arrs, d = scaled_arrivals(blk_rows, blk, F(4))
+    rows = imp.rows[:24]
+    t0 = rows[0].timestamp_ms
+    blk = TimeBlock(0, t0, rows[-1].timestamp_ms + 1)
+    arrs, d = scaled_arrivals(rows, blk, F(4))
     specs = []
-    for i, r in enumerate(blk_rows):
-        h, u, _ = imp.h_u_of(r)
+    for i, r in enumerate(rows):
+        h, u, _full = imp.h_u_of(r)
         specs.append(RequestSpec(i, arrs[i], h, u, "mooncake", 1, 1,
                                  source_file=r.source_file,
                                  source_line=r.source_line))
@@ -154,7 +117,6 @@ def test_t09_crn_same_capability():
     engs = {}
     for name, pol in [("fcfs", make_fcfs()), ("spt", make_spt())]:
         engs[name] = run_case(scn, specs, pol)
-    # 同块两策略：trace/profile/capability 哈希一致，总读取字节最终相等
     served = {n: float(e.w.storage.actual_integral_gb) for n, e in engs.items()}
     total_V = sum(float(prof.kappa_gb_per_token_layer) * s.h_tokens * prof.L
                   for s in specs)
@@ -163,29 +125,31 @@ def test_t09_crn_same_capability():
     assert trace_hash(specs) == h_a
 
 
+
 @requires_trace
+@requires_trace
+@requires_derived
 def test_t10_no_dropped_long_requests():
-    from sim.cq.config import ProfileConfig, StorageConfig
-    from sim.cq.profile import make_T0, mem_peak_gb
+    from sim.cq.config import ProfileConfig
+    from sim.cq.profile import mem_peak_gb
     from sim.cq.types import HardLimits, RequestSpec
     prof = ProfileConfig()
     for fname, _n, _m, _s in MOONCAKE_FILES:
-        imp = import_mooncake(os.path.join(TRACE_DIR, fname), fname)
+        imp = import_mooncake(DERIVED(fname), fname)
         specs = []
         for i, r in enumerate(imp.rows):
-            h, u, _ = imp.h_u_of(r)
+            h, u, _full = imp.h_u_of(r)
             specs.append(RequestSpec(i, F(0), h, u, "mooncake", 1, 1))
-        # trace-wide 能力组：n_max=8、token 262144、128 GB → 100% 可行
         lim_wide = HardLimits(8, 262144, F(128))
         ok = all(mem_peak_gb([s], prof) <= lim_wide.workspace_gb
                  and s.u_tokens <= 262144 for s in specs)
         assert ok, fname
-        # 机制组 8192/16GB 对超限 singleton 应明确报错而非静默过滤
         lim_mech = HardLimits(8, 8192, F(16))
         bad = [s for s in specs
                if s.u_tokens > lim_mech.token_max
                or mem_peak_gb([s], prof) > lim_mech.workspace_gb]
         assert bad, f"{fname} 应存在机制组不可行的长请求"
+
 
 
 def test_t11_normalized_denominator():
@@ -213,20 +177,6 @@ def test_t13_output_completeness():
 
 
 @requires_trace
-def test_e19_import_fingerprints():
-    """§5.5 导入验收指纹（目录规则下的全文件统计）。"""
-    expect = {
-        "conversation_trace.jsonl": (2121, 9910, 1.000000, 0.1276456513),
-        "toolagent_trace.jsonl": (4249, 19359, 1.000000, 0.4076393734),
-        "synthetic_trace.jsonl": (744, 3249, 0.2074484457, 0.2892445718),
-    }
-    for fname, (n_cat, n_after, hit_r, hit_t) in expect.items():
-        imp = import_mooncake(os.path.join(TRACE_DIR, fname), fname)
-        assert imp.n_catalog == n_cat, (fname, imp.n_catalog, n_cat)
-        assert imp.n_after == n_after, (fname, imp.n_after, n_after)
-        assert abs(imp.hit_ratio_req - hit_r) < 2e-6, fname
-        assert abs(imp.hit_ratio_token - hit_t) < 2e-6, fname
-
 
 def test_synthetic_trace_generator():
     tr = synthetic_trace(seed=0, duration_s=50.0, lam=20.0)

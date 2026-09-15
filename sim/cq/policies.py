@@ -126,7 +126,12 @@ class SimplePolicy:
             return V / K
 
         ra = ratio(a)
-        r_ref = self.r_ref if self.r_ref else 1.0
+        if not self.r_ref:
+            import math as _m
+            pos = [ratio(r.rid) for r in queued if ratio(r.rid)]
+            self.r_ref = (_m.exp(sum(_m.log(x) for x in pos) / len(pos))
+                          if pos else 1.0)
+        r_ref = self.r_ref
 
         def dist(r):
             ri = ratio(r)
