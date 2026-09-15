@@ -61,20 +61,26 @@
 ### 3.1 伪代码(方案 A/A/A)
 
 ```text
-seen = 空集合                       # 已见 hash(来自之前请求的全部块,含尾块)
-for row in rows 按 (timestamp, source_line) 升序:
-    n_full = floor(row.input_length / 512)
-    k = 0
-    for i in 0 .. len(hash_ids)-1:  # 完整块与尾块都参与判定(D3=A)
-        if row.hash_ids[i] in seen: k += 1
-        else: break                 # 连续前缀:首个未命中即停(D1=连续)
-    hit = 512*k
-    if k > n_full:                  # 尾块也命中 → 全命中,留 1 token
-        hit = row.input_length - 1
-    row.hit_tokens = min(hit, row.input_length - 1)      # 至少留 1 token
-    row.u_tokens   = row.input_length - row.hit_tokens
-    row.full_hit_adjusted = (hit >= row.input_length - 1)
-    seen ∪= row.hash_ids            # 本请求全部块入集合(处理后,D2=请求内不可见)
+seen = 空集合                       # 已见 hash(来自更早 timestamp 组的全部块,含尾块)
+rows 按 (timestamp, source_line) 升序
+i = 0
+while i < len(rows):
+    j = 下一个 timestamp 不同处的行号     # [i, j) = 同一毫秒并发到达的请求组(D7)
+    for row in rows[i:j]:                # 组内全部请求的视图 = 组前集合
+        n_full = floor(row.input_length / 512)
+        k = 0
+        for x in 0 .. len(hash_ids)-1:   # 完整块与尾块都参与判定(D3=参与)
+            if row.hash_ids[x] in seen: k += 1
+            else: break                  # 连续前缀:首个未命中即停(D1=连续)
+        hit = 512*k
+        if k > n_full:                   # 尾块也命中 → 全命中,留 1 token
+            hit = row.input_length - 1
+        row.hit_tokens = min(hit, row.input_length - 1)
+        row.u_tokens   = row.input_length - row.hit_tokens
+        row.full_hit_adjusted = (hit >= row.input_length - 1)
+    for row in rows[i:j]:                # 组处理完后统一入集合(请求内与组内均不可见)
+        seen ∪= row.hash_ids
+    i = j
 输出:增强 trace(每行新增 3 个字段)
 ```
 
@@ -89,13 +95,13 @@ for row in rows 按 (timestamp, source_line) 升序:
 
 按方案 A/A/A 对三份 trace 全量扫描的结果(与旧口径对照,详见第 6 节):
 
-| 文件 | token 命中比例(新) | 请求 h>0 比例(新,弃置段之后) | u 中位数(旧→新) | 全命中行数(u=1) |
-|---|---:|---:|---:|---:|
-| conversation | **0.374** | 1.000 | 5408 → **2010** | 100 |
-| toolagent | **0.571** | 1.000 | 861 → **681** | 221 |
-| synthetic | **0.651** | 0.531 | 2458 → **348** | 203 |
+| 文件 | token 命中比例(新) | 请求 h>0 比例(新,弃置段之后) | u 中位数(旧→新) | 并发结构(时刻数/最大同刻组) |
+|---|---:|---:|---:|---|
+| conversation | **0.374** | 1.000 | 5408 → **2010** | 1,180 / 28 |
+| toolagent | **0.570** | 1.000 | 861 → **681** | 1,180 / 47 |
+| synthetic | **0.651** | 0.531 | 2458 → **348** | 3,982 / 2 |
 
-D3 数据检验(支持"参与"无歧义):三份 trace 各 18.3 万/18.3 万/4.4 万个不同 hash 中,"同一 hash 既以完整块又以尾块角色出现"= 0;"同一 hash 以不同长度尾块出现"= 0——hash_id 为内容指纹的假设自洽。
+(以上为 D7 同刻不可见口径。两项数据检验:① 三份 trace 各 18.3 万/18.3 万/4.4 万个不同 hash 中,"同一 hash 既以完整块又以尾块角色出现"= 0、"同一 hash 以不同长度尾块出现"= 0,hash 为内容指纹的假设自洽;② conversation/toolagent 的并发结构极端——同刻到达占 100%,平均每毫秒 10–20 条;synthetic 几乎逐条错开。两份真实 trace 与官方合成 trace 的并发形态完全不同,流量结构差异本身是重要实验背景。)
 
 实现完成后,预处理脚本输出必须与上表逐位一致(差异仅允许来自决策点组合的不同)。
 
@@ -138,6 +144,7 @@ D5 已裁定:first_seen 为默认,frozen 显式传参可跑,结果目录按口�
 | T19 全命中留一口 | input=1024、[A,B] 均已见 | hit=1023、u=1、full_hit_adjusted=true |
 | T20 派生文件一致 | 三份真实 trace | `tools/cq_derive_hits.py --check-only` 通过;统计与 §3.3 指纹逐位一致 |
 | T21 双模式共存 | 同文件两模式导入 | frozen 结果与现状回归一致;first_seen 的 h/u 恒满足 h+u=input、u≥1 |
+| T22 同刻不可见 | 同 timestamp 三条 [A,B] / [A,C] / [A,D] | 第一条 hit=0;同刻的第二、三条也全部 hit=0(互相不可见);下一个 timestamp 的 [A,E] 命中 A |
 
 ### 5.2 存量测试处置
 
