@@ -40,7 +40,7 @@
 | D2 | 同一请求内重复块互相可见性 | **不可见**(整条请求处理完才入集合) | 位置编码决定同内容块不能跨位置复用 |
 | D3 | 尾块(不满 512)参与判定 | **参与**(用户裁定) | hash_id 为内容指纹,经三份 trace 全量检验自洽(角色冲突=0、长度冲突=0);完全按请求显示的 hash_ids 判定 |
 | D4 | 数据切分 | **取消训练/评价切分,全量打分**(用户裁定) | 参数不做预先标定(见 2.1),无需训练段;窗口仅作为运行与统计分片,**全部窗口参与打分**。最早 20% 冷启动期照常打分,报告同时给出"剔除冷启动段"的对照口径 |
-| D5 | 默认命中口径 | **first_seen** | frozen 保留为显式对照口径,结果按口径隔离 |
+| D5 | 命中口径 | **仅 first_seen,删除 frozen**(用户裁定 v1.4) | 不做双模式开关;frozen 导入路径(PrefixCatalog/trie 查询/建目录切分)与其专属测试一并删除,由 first_seen 实现与 T14–T22 取代;frozen 口径的历史定义与验收指纹保留在规格 §5.5,不随代码保留 |
 | D6 | 参照与呈现 | **取消 B\*,完整展示全部 baseline**(用户裁定) | 每个策略的完整指标全部呈现;预注册判据改为相对 FCFS(机制投影,无事后挑选);E24 锚点定位由"B\* 满足率 20–95%"改为"FCFS 满足率 20–95%" |
 
 ### 2.1 为什么参数可以不预先冻结(用户质疑的正面回答)
@@ -111,14 +111,14 @@ while i < len(rows):
 
 | 文件 | 内容 |
 |---|---|
-| `tools/cq_derive_hits.py` | 预处理入口:读原始三份 → 3.1 算法 → 写 `derived/*.hit.jsonl` + `derive_report.json`;`--check-only` 只校验已有派生文件与报告一致;支持 `--model A/B` 与 `--within-request visible/hidden`、`--tail-block include/exclude` 三个开关对应决策点 D1–D3 |
+| `tools/cq_derive_hits.py` | 预处理入口:读原始三份 → 3.1 算法(单一实现,D1/D2/D3/D7 已定案,无模式开关)→ 写 `derived/*.hit.jsonl` + `derive_report.json`;`--check-only` 只校验已有派生文件与报告一致 |
 | `tests/test_cq_derive.py` | 新口径单元测试(见 5.1) |
 
 ### 4.2 修改
 
 | 文件 | 改动 | 说明 |
 |---|---|---|
-| `sim/cq/trace.py` | ① `load_mooncake` 接受可选行内 `hit_tokens` 字段(存在则校验 0 ≤ hit ≤ input−1);② `import_mooncake(path, fname, cache_model=...)`:`"frozen_catalog"`(现状不动)/`"first_seen"`(读 `derived/<名>.hit.jsonl`,不做 trie 查询);③ `h_u_of` 在 first_seen 模式直接返回行内字段;④ `TraceImport` 增加 `cache_model`、派生文件 SHA256 字段 | 双模式共存,frozen 路径零改动 |
+| `sim/cq/trace.py` | **重写导入为 first_seen 单模式**:`import_mooncake` 读 `derived/<名>.hit.jsonl`,`h_u_of` 直接返回行内 hit/u 字段并校验 h+u=input、u≥1;**删除** PrefixCatalog、trie 查询、build_end/train_end 建目录切分与 `_hu`;`TraceImport` 字段按新口径定义(全量统计 + 派生文件 SHA256) | 单模式,无开关 |
 | `sim/experiments/cq_common.py` | `MooncakeSource(fname, trace_dir, cache_model="first_seen")`:构造时按模式分流;`λ0` 用全量重算;**train_blocks/eval_blocks 合并为统一窗口列表(全部打分)**;W_guard/r_ref 改在线滚动 | D5 默认 first_seen |
 | `sim/experiments/e19_profile.py` | `import_report` 输出双模式统计并列对照;新指纹取自 `derive_report.json` | E19 成为两种口径的对照面板 |
 | `sim/experiments/e21/e22/e23/e24` | 无直接改动(全部经 `MooncakeSource`);正式重跑时结果目录加 `cache_model` 段以隔离 | 旧结果不覆盖 |
@@ -146,9 +146,9 @@ D5 已裁定:first_seen 为默认,frozen 显式传参可跑,结果目录按口�
 | T21 双模式共存 | 同文件两模式导入 | frozen 结果与现状回归一致;first_seen 的 h/u 恒满足 h+u=input、u≥1 |
 | T22 同刻不可见 | 同 timestamp 三条 [A,B] / [A,C] / [A,D] | 第一条 hit=0;同刻的第二、三条也全部 hit=0(互相不可见);下一个 timestamp 的 [A,E] 命中 A |
 
-### 5.2 存量测试处置
+### 5.2 存量测试处置(D5=v1.4 后)
 
-`test_cq_trace.py` 的 T01–T05(T02 连续前缀/T03 尾块/T04 全命中)与 `test_e19_import_fingerprints` 是 **frozen 口径**的验收,全部保留不动(frozen 路径零改动,继续通过);仅在其 docstring 标注"仅适用于 cache_model=frozen_catalog"。全量 `pytest tests/ -q` 须保持全绿(预计 115 + 约 8 = 123 项)。
+与 frozen 绑定的测试**删除**:`test_cq_trace.py` 的 T02(trie 连续前缀)/T03(尾块)/T04(全命中)/T05(冷数据)与 `test_e19_import_fingerprints`——其语义已由 T14–T22 在 derive 工具上重新覆盖。与口径无关的测试保留:T01(文件指纹)、T06(同 timestamp 稳定排序)、T07(缩放)、T08(分块)、T09(CRN 守恒,改经新导入)、T10(不丢长请求)、T11–T13(统计口径)。全量 `pytest tests/ -q` 须全绿(预计 115 − 5 + 9 ≈ 119 项,以实际为准)。
 
 ## 6. 研究影响预警(必须重跑,新旧不可混)
 
@@ -178,10 +178,10 @@ D4/D6 的连锁调整:① E23 主矩阵不再区分训练/评价窗口,全部 15
 ## 8. 实施顺序与验收标准
 
 ```text
-第 1 步  tools/cq_derive_hits.py + tests/test_cq_derive.py(T14–T21)
+第 1 步  tools/cq_derive_hits.py + tests/test_cq_derive.py(T14–T22)
          验收:派生文件生成,--check-only 过,§3.3 指纹逐位一致,全量 pytest 绿
-第 2 步  sim/cq/trace.py 双模式导入 + MooncakeSource 透传 + W_guard/r_ref 在线化 + gate=0 固定
-         验收:frozen 全部存量测试不变绿;first_seen 导入 h+u=input、u≥1
+第 2 步  sim/cq/trace.py 重写为 first_seen 单模式(删 frozen)+ MooncakeSource 统一窗口/全量 λ0 + W_guard/r_ref 在线化 + gate=0
+         验收:删除 frozen 专属测试后全量 pytest 绿;导入校验 h+u=input、u≥1
 第 3 步  E19 双模式对照面板 + manifest 口径登记
          验收:derive_report 数字进入 manifest;E19 冒烟图含双口径对照
 第 4 步  E21/E23/E24 冒烟重跑(first_seen 口径),结果目录按口径隔离
