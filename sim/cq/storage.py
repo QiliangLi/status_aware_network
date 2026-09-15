@@ -24,6 +24,10 @@ class StorageSim:
         self.actual_integral_gb = self.zero       # ∫Σrate dt
         self.requested_integral_gb = self.zero    # ∫Σq dt
         self.rate_log: List[Tuple] = []           # (seq, t, rate) 每次变化
+        # E25 时间序列账本（默认关闭）：advance 每个 [t0,t1) 区段记 (t0,t1,Σrate,Σq)。
+        # 仅在 record_intervals=True 时追加；不改变任何物理行为（BU11 对拍）。
+        self.record_intervals: bool = False
+        self.interval_log: List[Tuple] = []
         self.tol = tol if tol is not None else (0 if numeric is not float else 1e-12)
 
     # -- 带宽 schedule -----------------------------------------------------
@@ -88,6 +92,8 @@ class StorageSim:
             total_q += f.q_gbps
         self.actual_integral_gb += total_rate * dt
         self.requested_integral_gb += total_q * dt
+        if self.record_intervals:
+            self.interval_log.append((t0, t1, total_rate, total_q))
 
     def completions(self, t):
         """返回 [(seq, t + remaining/rate)]，rate>0 的流。"""

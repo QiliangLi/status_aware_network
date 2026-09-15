@@ -16,12 +16,15 @@ from .types import RequestSpec
 
 def run_case(scenario: CqScenario, specs: Sequence[RequestSpec], policy,
              numeric=float, seed: int = 0,
-             drain_budget_s=None) -> CqEngine:
+             drain_budget_s=None, record_intervals: bool = False) -> CqEngine:
     """执行一个 run。有限工作集（全部 arrival=0/有限集合）与在线模式共用；
-    排空预算 = max(drain_budget, arrival_stop + drain_budget)。"""
+    排空预算 = max(drain_budget, arrival_stop + drain_budget)。
+    record_intervals=True 时打开存储区间账本（E25 时间序列，BU11 零影响）。"""
     obs = Observable(scenario, numeric=numeric, seed=seed)
     eng = CqEngine(scenario, specs, policy, numeric=numeric,
                    fallback_policy=GuardedEDF(), observable=obs)
+    if record_intervals:
+        eng.w.storage.record_intervals = True
     obs.attach(eng)
     last_arrival = max((numeric(s.arrival_s) for s in specs), default=numeric(0))
     db = numeric(drain_budget_s if drain_budget_s is not None

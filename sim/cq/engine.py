@@ -104,6 +104,8 @@ class WorldState:
         st.actual_integral_gb = self.storage.actual_integral_gb
         st.requested_integral_gb = self.storage.requested_integral_gb
         st.rate_log = []
+        st.record_intervals = False   # 搜索分支不记录时间序列账本
+        st.interval_log = []
         st.tol = self.storage.tol
         w.storage = st
         w.wake_timers = dict(self.wake_timers)

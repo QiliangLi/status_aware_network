@@ -119,7 +119,62 @@ def summarize(engine, scenario, warmup=None, arrival_stop=None) -> dict:
     M_lb = max((float(w.requests[rid].F_s) if rid in done else censor)
                for rid in cohort) if cohort else None
 
-    return {
+    # E25 新增：最大积压 |QUEUED|+|ACTIVE| 的全程峰值（到达+1/完成-1 事件扫描；
+    # 未完成请求按 censor 仍计在系统，与时间序列口径一致，FG04）
+    evs = []
+    for rr in w.requests.values():
+        evs.append((max(0.0, float(rr.spec.arrival_s)), 1))
+        end = float(rr.F_s) if rr.F_s is not None else censor
+        evs.append((min(end, censor), -1))
+    _cnt = 0
+    max_backlog = 0
+    for _t, _d in sorted(evs):
+        _cnt += _d
+        max_backlog = max(max_backlog, _cnt)
+
+    # E25 新增：设备秒按 arrival_stop 拆分 main/drain（OL 模式；从 worker 区段
+    # 精确复算，旧全程字段语义不变）。仅 arrival_stop 给出时输出。
+    split = None
+    if arrival_stop is not None:
+        aso = float(arrival_stop)
+        dm = {"COMPUTE": 0.0, "STALL": 0.0, "IDLE": 0.0}
+        dr = {"COMPUTE": 0.0, "STALL": 0.0, "IDLE": 0.0}
+        for wk in w.workers.values():
+            for (s0, e0, state, _b, _l) in wk.segments:
+                s0, e0 = float(s0), float(e0)
+                if state not in dm:
+                    continue
+                dm[state] += max(0.0, min(e0, aso) - s0)
+                dr[state] += max(0.0, e0 - max(s0, aso))
+        # 存储利用率拆分：需要区间账本（e25 开启）；无账本时为 None
+        util_main = util_drain = None
+        il = getattr(w.storage, "interval_log", None)
+        if il:
+            sm = sr = 0.0
+            for (t0, t1, rate, _rq) in il:
+                t0, t1 = float(t0), float(t1)
+                ov = max(0.0, min(t1, aso) - t0)
+                if ov > 0:
+                    sm += float(rate) * ov
+                ov2 = max(0.0, t1 - max(t0, aso))
+                if ov2 > 0:
+                    sr += float(rate) * ov2
+            cap_m = _schedule_integral(w.storage.b_schedule, 0.0, aso)
+            cap_r = _schedule_integral(w.storage.b_schedule, aso, censor)
+            util_main = sm / cap_m if cap_m > 0 else None
+            util_drain = sr / cap_r if cap_r > 0 else None
+        split = {
+            "device_compute_main_s": dm["COMPUTE"],
+            "device_stall_main_s": dm["STALL"],
+            "device_idle_main_s": dm["IDLE"],
+            "device_compute_drain_s": dr["COMPUTE"],
+            "device_stall_drain_s": dr["STALL"],
+            "device_idle_drain_s": dr["IDLE"],
+            "storage_util_main": util_main,
+            "storage_util_drain": util_drain,
+        }
+
+    out = {
         "n_cohort": n, "n_done": len(done), "n_unfinished": len(und),
         "censor_s": censor,
         "ttft_mean_lower": mean_lb,
@@ -148,6 +203,24 @@ def summarize(engine, scenario, warmup=None, arrival_stop=None) -> dict:
         "n_fallback": engine.n_fallback,
         "n_stale_invalid": engine.n_stale_invalid,
     }
+    out["max_backlog"] = max_backlog
+    if split is not None:
+        out.update(split)
+    return out
+
+
+def _schedule_integral(b_schedule, lo: float, hi: float) -> float:
+    """阶梯 schedule 的闭式积分 ∫B over [lo,hi)（E25 窗口拆分用）。"""
+    if hi <= lo:
+        return 0.0
+    sched = [(float(t), float(v)) for t, v in b_schedule]
+    total = 0.0
+    for j, (seg_start, v) in enumerate(sched):
+        seg_end = sched[j + 1][0] if j + 1 < len(sched) else float("inf")
+        s2, e2 = max(lo, seg_start), min(hi, seg_end)
+        if e2 > s2:
+            total += v * (e2 - s2)
+    return total
 
 
 # ---------------------------------------------------------------------------
