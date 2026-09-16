@@ -185,7 +185,25 @@
   .objs{display:grid; grid-template-columns:repeat(auto-fit,minmax(210px,1fr)); gap:10px; margin:12px 0}
   .objs .obj{border:1.5px solid var(--line); border-radius:10px; padding:8px 14px; font-size:13.5px}
   .objs .obj b{font-family:Menlo,monospace; color:var(--accent)}
-  /* ---------- ⑨ 通俗版 ---------- */
+  /* ---------- ⑦ 联合调度 ---------- */
+  .panel{display:none; border:1px solid var(--line); border-radius:10px; background:#fdfcf9; padding:12px 18px; margin:10px 0}
+  .panel.on{display:block}
+  .panel h4{margin:2px 0 6px; font-size:15.5px}
+  .panel p{margin:6px 0; font-size:14.5px}
+  .panel .guard{font-size:13.5px; color:#3f5a48; background:#eef4ee; border-left:3px solid var(--good); padding:8px 12px; border-radius:0 8px 8px 0; margin-top:8px}
+  .paramchips{display:flex; flex-wrap:wrap; gap:8px; margin:8px 0 2px}
+  .paramchips span{font-family:Menlo,Consolas,monospace; font-size:12.5px; border:1px solid var(--line); background:var(--card); border-radius:999px; padding:2px 12px; color:var(--soft)}
+  .cands{display:grid; grid-template-columns:repeat(auto-fit,minmax(240px,1fr)); gap:12px; margin:12px 0}
+  .cand{position:relative; border:1.5px solid var(--line); border-radius:10px; padding:12px 14px; font-size:13.5px; transition:border-color .3s, box-shadow .3s}
+  .cand .bn{font-weight:700; font-size:15px}
+  .cand .desc{color:var(--soft); font-size:12.5px; margin:2px 0 6px}
+  .cand .sl{font-family:Menlo,Consolas,monospace; font-size:12px}
+  .cand .res{opacity:0; transition:opacity .6s}
+  .cand.show .res{opacity:1}
+  .cand.best{border-color:var(--good); box-shadow:0 0 0 4px rgba(46,139,87,.15)}
+  .round2{border:1.5px dashed var(--accent); border-radius:10px; padding:10px 16px; font-size:14px; margin-top:10px; display:none}
+  .round2.on{display:block}
+  /* ---------- ⑩ 通俗版 ---------- */
   .plain li{margin:6px 0}
   details{margin:12px 0; border:1px solid var(--line); border-radius:8px; background:var(--card)}
   summary{cursor:pointer; padding:9px 16px; font-weight:600; font-size:14.5px}
@@ -214,11 +232,12 @@
     NPU 怎么<b>选 Path</b>（P 层）、ASU 怎么<b>分配带宽</b>（B 层），以及每一步依据的公式。
     三个互动例子分别对应设计文档要优先验证的三个疑问：
     <b>①多开几条 Path 真的更快吗？②"队列条数最少"选得对吗？③同时启动 vs 错峰，差在哪？</b>
+    压轴的 <a href="#m7">§7</a> 讲<b>联合调度方案</b>本身：三层动作放进同一次滚动搜索里重放、打分、只落第一步。
   </div>
   <div class="selfbox">
     <b>本页自足。</b>例子所需的系统背景在 <a href="#m1">§1</a>（2 分钟读完）；
     所有数字都给出代入公式的过程，可以拿计算器逐步验算；动画只是把同样的数字演出来，
-    每个动画都配"事件时间表"文字版；公式速查在 <a href="#m8">§8</a>；通俗版收尾在 <a href="#m9">§9</a>。
+    每个动画都配"事件时间表"文字版；联合决策循环在 <a href="#m7">§7</a>；公式速查在 <a href="#m9">§9</a>；通俗版收尾在 <a href="#m10">§10</a>。
     不需要先读任何其他文档。姊妹篇：<a href="MPC方案图解-20260916.html">MPC 方案图解</a>。
   </div>
   <nav class="toc">
@@ -228,15 +247,16 @@
     <a href="#m4">④ 错峰主场（A/B/C）</a>
     <a href="#m5">⑤ 多盘尾部</a>
     <a href="#m6">⑥ B1 保底+水位</a>
-    <a href="#m7">⑦ 三层协同</a>
-    <a href="#m8">⑧ 公式速查</a>
-    <a href="#m9">⑨ 通俗版</a>
+    <a href="#m7">⑦ 联合调度</a>
+    <a href="#m8">⑧ 三层协同</a>
+    <a href="#m9">⑨ 公式速查</a>
+    <a href="#m10">⑩ 通俗版</a>
   </nav>
 </header>
 
 <nav class="stickynav" aria-label="章节导航">
   <a href="#m1">①系统</a><a href="#m2">②份额</a><a href="#m3">③选路</a><a href="#m4">④错峰</a>
-  <a href="#m5">⑤多盘</a><a href="#m6">⑥B1</a><a href="#m7">⑦协同</a><a href="#m8">⑧公式</a><a href="#m9">⑨通俗</a>
+  <a href="#m5">⑤多盘</a><a href="#m6">⑥B1</a><a href="#m7">⑦联合</a><a href="#m8">⑧协同</a><a href="#m9">⑨公式</a><a href="#m10">⑩通俗</a>
 </nav>
 
 <!-- ================================================================ -->
@@ -494,7 +514,7 @@
   skew(V) = max<sub>d</sub>V<sub>d</sub> / ( (Σ<sub>d</sub>V<sub>d</sub>)/D )
   &nbsp;&nbsp;<span style="color:#54636f">(8,0)：skew=8/4=2.0 → 拖尾 0.2 s；(4,4)：skew=1.0 → 0.1 s</span>
 </div>
-<div class="takeaway"><b>⑤的结论。</b>一致性哈希把块钉死在盘上——不能为了 0.1 s 把 (8,0) 的块挪去盘2（放置固定是全策略共同约束）。调度真正能做的是<b>看盘向量组批、看盘向量错峰</b>：这正是 S1 中央调度的核心信号（→⑦）。</div>
+<div class="takeaway"><b>⑤的结论。</b>一致性哈希把块钉死在盘上——不能为了 0.1 s 把 (8,0) 的块挪去盘2（放置固定是全策略共同约束）。调度真正能做的是<b>看盘向量组批、看盘向量错峰</b>：这正是 S1 中央调度的核心信号（→⑧）。</div>
 
 <div class="hook"><span class="ar">→</span><span>B0 的三处可疑都看完了：份额绑 Path 数（②）、条数误判（③）、对盘向量视而不见。现在给出带宽侧的修复：<b>B1——保底、权重、上限三者分开</b>。</span></div>
 
@@ -542,12 +562,153 @@
 <div class="takeaway"><b>⑥的结论。</b>同样"只有 LS 忙"：B0 给多少取决于各组开了几条 Path（②的预设 SS×2,LS×1 里 LS 只剩 13.28）；B1 给 min(需求, 保底+权重余量)，<b>Path 数不再影响组权利</b>。点预设"四组全忙"再看 φ：φ=0.5 时饱和分配恰好回到 20/12/4/4——比例来自 η 权重而非 Path 数；φ=1 且四组全忙时保底恰好占满 40，<b>无余量可分</b>，这是必须保留的对照配置。</div>
 <div class="note">式(18) 是 GB/s 的流体分配器，思路（保底/份额/上限分离）受 mClock 启发但不继承其算法与保证。权重 w 的起点可取 η 或统一 1；自适应版按"剩余字节 ÷ 消费窗口"的追赶需求 + SLO 可挽救性 + 等待年龄生成有界权重（§11.6，含具体 clip 公式），都只使用导出观测。</div>
 
-<div class="hook"><span class="ar">→</span><span>S（组批错峰）、P（选路）、B（带宽）三层各自就位。它们怎么拼成一个闭环？收益又怎么证明来自哪一层？</span></div>
+<div class="hook"><span class="ar">→</span><span>S（组批错峰）、P（选路）、B（带宽）三层各自会干活了。但一次决策不能三层各贪各的——候选要放上同一张赌桌联合比较，赢者只落第一步。下一章就是联合调度方案本身。</span></div>
 
 <!-- ================================================================ -->
-<h2 id="m7"><span class="no">⑦</span>三层协同：谁在什么时间尺度上，拿什么信息，做什么决定<span class="en">§11 · S1/P1/B1</span></h2>
+<h2 id="m7"><span class="no">⑦</span>联合调度：一次决策，三层动作放上同一张赌桌<span class="en">§7 代价 · §11.6–11.8 滚动搜索</span></h2>
 
-<h3>7.1 控制闭环：中央不碰队列细节，存储不改批成员</h3>
+<p>
+  前六章把三层拆开各讲各的。但设计文档的主张是：<b>这些动作互相影响，不能各层各自贪心再把报价加起来</b>。
+  中央调度器要把"组什么批、何时启动、（第二阶段）配什么带宽"作为<b>联合候选</b>，在系统副本里<b>重放</b>到出分；
+  赢的计划也只落实第一步，下一轮重算——这就是联合调度方案（JOINT_CONTROL，§11.8）。
+</p>
+
+<h3>7.1 为什么必须联合：三个外部性</h3>
+<div class="pairgrid">
+  <div class="paircard">① <b>选路改全局</b>：把 I/O 放到空 Path，自己排队变短，但活跃数 +1 → 式(6) 重算整盘所有 b_dp（②算过：一条 Path 值 6.7 GB/s）。单条 Path 的"局部最优"可能让全盘更差。</div>
+  <div class="paircard">② <b>带宽是零和的</b>：Σ<sub>c</sub>B<sub>dc</sub> ≤ 40。给 LL 组提权重，它的关键块提前，其他组的关键块必然被推迟（⑥ 的水位线就是这样工作的）。</div>
+  <div class="paircard">③ <b>无效加速</b>：本层就绪时刻 = max<sub>各盘完成</sub>。给本批的非瓶颈盘加速，max 不动——带宽花了，就绪时间一点没变。</div>
+</div>
+<div class="formula"><span class="tag">严格代价</span>
+  Q<sub>J</sub>*(X<sub>t</sub>, α) = inf<sub>合法后续计划</sub> J&nbsp;&nbsp;<span style="color:#54636f">（离线最优条件价值——在线算不出，只能逼近）</span><br>
+  在线版：在估计状态重放候选 α → 预测完成时刻 F̂<sub>i</sub><sup>α</sup>；&nbsp; Δ<sub>i</sub> = F̂<sub>i</sub><sup>α</sup> − F̂<sub>i</sub><sup>0</sup>
+  &nbsp;&nbsp;<span style="color:#54636f">Δ 必须计入其他活动批、中央等待请求与写回——只给新批自己打分是常见错误</span>
+</div>
+
+<h3>7.2 搜索循环：JOINT_CONTROL 五步</h3>
+<div class="stage">
+  <div class="ctrl">
+    <button class="stepbtn" aria-pressed="true">① 对账建态</button>
+    <button class="stepbtn" aria-pressed="false">② 摆候选</button>
+    <button class="stepbtn" aria-pressed="false">③ 推演</button>
+    <button class="stepbtn" aria-pressed="false">④ 打分</button>
+    <button class="stepbtn" aria-pressed="false">⑤ 落子滚动</button>
+    <span style="width:10px"></span>
+    <button id="jcPrev">◀ 上一步</button>
+    <button id="jcNext">下一步 ▶</button>
+  </div>
+  <div class="paramchips"><span>beam = 8</span><span>深度 = 3 个决策</span><span>≤ 10⁴ 预测事件</span><span>墙钟预算 1 ms（扫描 0.1–5 ms）</span><span>回退：S0/P0/B0</span></div>
+  <div class="panel on">
+    <h4>① 对账建态</h4>
+    <p>校验观测时间与 ring/config <b>版本号</b>；把<b>己方提交回执</b>（我提交了但快照还没反映的 I/O）合并进导出观测，构建估计状态。</p>
+    <div class="guard">防作弊：策略看不到存储真值。估计状态 = 版本化导出观测 + 自己的回执；伪造"已完成字节"不被允许，版本过期就重算或回退。</div>
+  </div>
+  <div class="panel">
+    <h4>② 摆候选</h4>
+    <p>生成联合候选：合法候选批（singleton、同类、读算互补、<b>盘负载互补</b>、含最老请求）× 启动选项（立即 / 关键完成点后 / 有限 δ 延迟）× 有限带宽配置目录（B0，或 ⑥ 的 φ/w 档位）；对同时空闲的实例生成<b>互不重叠</b>的联合领取。</p>
+    <div class="guard">公平性：候选空间预先声明、对所有策略同构——不能只给联合策略开小灶，也不能让基线用不了等待选项。</div>
+  </div>
+  <div class="panel">
+    <h4>③ 推演（beam search）</h4>
+    <p>在估计状态里逐个落实候选（<b>不碰物理状态</b>）：合法释放的读写 I/O 用指定的 P0/P1 选路并更新承诺账本；按 B0/B1 重放所有盘、队列、层依赖（式11）与写缓冲；搜索窗口结束后用<b>共同后续策略</b>排空已到达请求与必要写负载。</p>
+    <div class="guard">防作弊：窗口内未完成请求统一给终端代价——"全部等待"不能靠没有完成样本获胜。</div>
+  </div>
+  <div class="panel">
+    <h4>④ 打分</h4>
+    <p>对每个推演结局计算：四目标 J 之一、SS/LS/SL/LL <b>分组损害</b>、控制成本、不确定性。best 的初值不是空，而是<b>同能力安全后续策略的可行计划</b>；满足共同保护（W_guard 等待保护、正带宽保底）且目标改善才替换。</p>
+    <div class="guard">防平均数掩盖牺牲：分组损害逐类报告，不许用总均值掩盖某类被牺牲。</div>
+  </div>
+  <div class="panel">
+    <h4>⑤ 落子滚动</h4>
+    <p>返回时<b>重验</b>版本、实例空闲、成员仍在队列（搜索期间真实系统在前进）；只<b>原子落实第一个合法动作</b>，计划表其余部分作废，下一轮重算。超时/过期/预测不可信 → 同能力内的确定回退。</p>
+    <div class="guard">像下棋：推演到终局只为了落第一子；对手（新到达、新完成）走一步，重新推演。搜索的 CPU 与通信开销计入真实时间，控制器不能暂停世界。</div>
+  </div>
+  <details><summary>伪代码原文（设计文档 §11.8）</summary><div class="formula" style="white-space:pre-wrap">JOINT_CONTROL(observation, objective, budget):
+  校验观测时间、ring/config 版本；合并己方提交回执，构建估计状态
+  生成合法候选批、联合领取/等待动作、有限带宽配置
+  best = 同能力安全后续策略的可行计划
+  对候选联合动作做 beam search，直到事件/墙钟预算耗尽:
+      在估计状态中落实候选，不修改物理状态
+      对合法释放的读写 I/O，用指定 P0/P1 产生选路并更新承诺账本
+      按 B0/B1 重放所有盘、队列、层依赖与写缓冲
+      搜索窗口结束后用共同后续策略排空已到达请求与必要写负载
+      计算全部相关请求的 J、分组损害、控制成本和不确定性
+      若满足共同保护且目标改善，保留计划
+  成本计入真实时间，系统原有计算/I/O 在此期间继续前进
+  返回时重验版本、实例空闲和成员仍在队列
+  仅原子落实首个合法动作，未来计划留待下一轮重算
+  超时/过期/预测不可信时，使用相同能力内的确定回退</div></details>
+</div>
+
+<h3>7.3 动手：把 ④ 的三个候选放进搜索打一次分</h3>
+<p>④ 的 A/B/C 三方案，其实就是同一时刻摆上桌的三个联合候选（A = 两个 singleton 立即领取；B = SS 立即 + LS 延迟 0.025；C = 合批立即）。重放用的正是 ④ 的公式——联合搜索没有新魔法，只是把"人肉比较"自动化，并保证计入对其他请求的影响：</p>
+<div class="stage">
+  <div class="ctrl">
+    <button id="scReplay" class="primary">▶ 重放并打分（目标 J_S）</button>
+    <button id="scCommit">落实第一步</button>
+    <button id="scReset">↺ 重置</button>
+  </div>
+  <div class="cands" id="scCands">
+    <div class="cand">
+      <div class="bn">候选 A · 同时领取</div>
+      <div class="desc">实例1 领 SS（立即）＋ 实例2 领 LS（立即）</div>
+      <div class="res">
+        <div class="sl">重放：F̂_SS = 0.0999 ✗（&gt; 0.09）</div>
+        <div class="sl">　　　F̂_LS = 0.325 ✓</div>
+        <div class="sl">J_S = 1/2 = 0.50　J_T = 0.2124</div>
+        <div>分组损害：SS 违约 1 例（+0.0099 s）</div>
+      </div>
+    </div>
+    <div class="cand">
+      <div class="bn">候选 B · 错峰</div>
+      <div class="desc">实例1 领 SS（立即）；LS 延迟 δ=0.025 领取</div>
+      <div class="res">
+        <div class="sl">重放：F̂_SS = 0.075 ✓　F̂_LS = 0.325 ✓</div>
+        <div class="sl">J_S = 0　J_T = 0.2000</div>
+        <div>Δ vs A：SS −0.0249 s、LS ±0——收益全部来自让 SS 先独占盘，无人被牺牲</div>
+      </div>
+    </div>
+    <div class="cand">
+      <div class="bn">候选 C · 混合批</div>
+      <div class="desc">{SS+LS} 合批，实例1 立即领取</div>
+      <div class="res">
+        <div class="sl">重放：F̂_SS = 0.375 ✗　F̂_LS = 0.375 ✓</div>
+        <div class="sl">J_S = 1/2 = 0.50　J_T = 0.3750</div>
+        <div>分组损害：SS 违约 1 例（+0.285 s，被长成员拖住）</div>
+      </div>
+    </div>
+  </div>
+  <div class="cap" id="scCap" style="min-height:56px"></div>
+  <div class="round2" id="scRound2">
+    <b>t = 0.025 s，第二轮。</b>SS 读取完成（关键 I/O 事件）唤醒调度器：此刻只剩"LS 立即领取 vs 再等"。
+    重放：立即 → F̂_LS = 0.325（J_S 维持 0、J_T 最小）；等 δ=0.05 → F̂_LS = 0.375（SLO 仍 ✓ 但 J_T 变差）→ <b>落子：立即领取</b>。
+    两轮之后 ④ 的 B 方案完整出现——它不是手写规则"LS 一律延后"，而是搜索对"立即 vs 延迟"逐轮重放比较的结果。
+  </div>
+</div>
+
+<h3>7.4 需求信号：权重不是拍脑袋（§11.6）</h3>
+<p>推演之外，带宽侧的权重也要自动生成。对一个在盘 d 上有在途 I/O 的请求 i（q^R / q^W 为剩余读/写字节，τ_i 为预计消费时刻 = 下一层开算时间）：</p>
+<div class="formula"><span class="tag">权重</span>
+  r<sup>need</sup><sub>id</sub> = q<sup>R</sup><sub>id</sub> / max(τ<sub>i</sub>−t, δ<sub>min</sub>) + q<sup>W</sup><sub>id</sub> / Δ<sub>W</sub><br>
+  z<sub>id</sub> = clip( v<sub>i</sub><sup>θ</sup> · [1 + min(8, r<sup>need</sup><sub>id</sub>/40) + min(2, age<sub>i</sub>/W<sub>guard</sub>) + 2ω<sub>w</sub>], 1/8, 32 )<br>
+  w<sub>dc</sub> = η<sub>c</sub> + Σ<sub>该盘该组有在途 I/O 的唯一请求</sub> z<sub>id</sub>
+</div>
+<p style="font-size:14px">三项加成分别是：<b>追赶需求</b>（剩余字节 ÷ 消费窗口；已 STALL 时窗口已过，用有上限的紧迫性）、<b>年龄</b>（防饿死）、<b>写水位</b>（回货区越满写越急）。v^θ 按目标选：J_T 取 1；J_R 取中位 T⁰/T⁰ 截到 [1/8, 8]；J_S / J_M 对预测完成时刻落在临界区（deadline ± Δ_W）的请求取 8。z 对一个请求<b>聚合一次，不按 Path 重复</b>（呼应 ⑥）。参数 δ_min=0.1 ms、Δ_W=max(5 ms, 层计算中位数) 固定进 manifest，不从测试 trace 反推。</p>
+<div class="note"><b>deadline ≠ 消费时刻。</b>前者是首 token SLO，后者只表示"何时可能 STALL"。下一层即将到期但 SLO 很松的请求，不必挤掉还能救回 SLO 的请求；已无希望按时的请求仍要服务，不许丢。中央经 <code>ServiceHint</code> 把消费时刻 / deadline / 权重下发数据面——是需求信号，不是硬资源预留。</div>
+
+<h3>7.5 预算、开销与回退</h3>
+<div class="note">
+  <b>开销入账</b>：搜索的 CPU 与通信/下发耗时分别记录；主评价使用实测或统一固定延迟模式，零成本只算算法上界。决策延迟 P95 接近 singleton TTFT 时收缩候选或退回简单规则。<br>
+  <b>回退链</b>：观测过期 / 版本冲突 / 预测误差超阈 / 预算用尽 → 回退 S0/P0/B0 或固定 B1，实验预先声明并统计触发次数；误差门槛从训练集候选排序残差确定——改善不足以覆盖误差就不切配置。<br>
+  <b>专门要构造的失效场景（E30）</b>：陈旧报价、惊群、反复扩张活跃 Path、SS 抢走余量、读优先导致写背压。
+</div>
+
+<div class="hook"><span class="ar">→</span><span>联合搜索要跨三层拿信息、下动作——凭什么对所有策略公平？最后一章：控制闭环、信息边界、2×2×2 因子验证与四目标。</span></div>
+
+<!-- ================================================================ -->
+<h2 id="m8"><span class="no">⑧</span>三层协同：谁在什么时间尺度上，拿什么信息，做什么决定<span class="en">§11 · S1/P1/B1</span></h2>
+
+<h3>8.1 控制闭环：中央不碰队列细节，存储不改批成员</h3>
 <div class="loop">
   <div class="lb"><b>中央调度器 · S 层（S0→S1）</b>
     <div class="d">组批、领取顺序、启动时刻（立即 / 关键事件后 / 有限 δ 延迟=错峰）。候选批含 singleton、同类批、读算互补、<b>盘负载互补</b>、含最老请求批；对同时空闲的实例做互不重叠的联合选择。</div>
@@ -575,7 +736,7 @@
   <div class="lb" style="border-style:dashed"><b>共同信息边界</b><div class="d">三层共享请求 ID、类别、层消费时刻、deadline、配置版本。普通策略只见导出观测（版本化、带交付延迟），拿不到存储内部真值队列；Oracle 基线另设。对每个候选动作，在"估计状态"里重放到窗口结束、统一排空，按四目标打分——CPU 与通信开销计入真实时间。</div></div>
 </div>
 
-<h3>7.2 八格因子矩阵：一次只换一个机制，收益才说得清来源</h3>
+<h3>8.2 八格因子矩阵：一次只换一个机制，收益才说得清来源</h3>
 <p>点下面任意格子切换组合（也可以点三个层级开关）：</p>
 <div class="stage">
   <div class="ctrl">
@@ -588,7 +749,7 @@
 </div>
 <p>这 8 个组合就是 E28 因子实验：同 trace、同画像、同硬容量，只改机制——单项、双项、全部联合的差值分别归因给 P、B、S 与交互项。第一阶段保持 B0 只换 S/P；第二阶段再引入 B1（带宽反馈闭环），用能力消融分清收益来源。S0 之外还要对比 EDF、SPT、最小 slack 等强简单基线，且统一开放候选批与等待选项。</p>
 
-<h3>7.3 四个目标，一次只优化一个</h3>
+<h3>8.3 四个目标，一次只优化一个</h3>
 <div class="objs">
   <div class="obj"><b>J_M</b> = max<sub>i</sub>F<sub>i</sub> − t₀<br>全部请求完成时间（makespan）</div>
   <div class="obj"><b>J_S</b> = Σ𝟙[F<sub>i</sub>&gt;d<sub>i</sub>]/n<br>SLO 违约率（满足率 = 1−J_S，压线算成功）</div>
@@ -602,7 +763,7 @@
 <div class="hook"><span class="ar">→</span><span>最后收个尾：一页速查本页用过的全部公式。</span></div>
 
 <!-- ================================================================ -->
-<h2 id="m8"><span class="no">⑧</span>公式速查<span class="en">每条一行大白话</span></h2>
+<h2 id="m9"><span class="no">⑨</span>公式速查<span class="en">每条一行大白话</span></h2>
 <table>
   <thead><tr><th style="width:110px">编号</th><th class="l">公式</th><th class="l">大白话</th></tr></thead>
   <tbody>
@@ -617,12 +778,14 @@
     <tr><td>式(13)</td><td class="l mono">J_M / J_S / J_T / J_R</td><td class="l">四个目标分头求解；SLO 满足率 = 1−J_S</td></tr>
     <tr><td>式(15)</td><td class="l mono">skew = max V_d / 均值</td><td class="l">盘向量越偏斜，"总量够"越骗人：(8,0) vs (4,4)</td></tr>
     <tr><td>式(18)</td><td class="l mono">f=min(D, φηB)；余量按 λ·w 水位分</td><td class="l">B1：保底按组发一次，余量按权重，与 Path 数解耦</td></tr>
+    <tr><td>严格代价</td><td class="l mono">Q*_J(X_t,α)=inf J；Δ_i=F̂_i^α−F̂_i^0</td><td class="l">动作分数 = 全体重放的四目标增量，须计入其他请求与写回（⑦）</td></tr>
+    <tr><td>权重 z</td><td class="l mono">z=clip(v·[1+min(8,r_need/40)+min(2,age/W)+2ω_w],1/8,32)</td><td class="l">追赶需求+年龄+写水位；每请求计一次，不按 Path 重复（⑦）</td></tr>
     <tr><td>式(19)</td><td class="l mono">λ₀ = min( min_d 40/E[V_d], m/E[K] )</td><td class="l">负载刻度按原始 S0P0B0 的输入需求定，只是生成尺度</td></tr>
   </tbody>
 </table>
 
 <!-- ================================================================ -->
-<h2 id="m9"><span class="no">⑨</span>通俗版：仓库、窗口与加工台<span class="en">一图流类比</span></h2>
+<h2 id="m10"><span class="no">⑩</span>通俗版：仓库、窗口与加工台<span class="en">一图流类比</span></h2>
 <div class="card">
   <ul class="plain" style="margin:0">
     <li>每个 ASU 是一座<b>总出货速度 40 的仓库</b>，里面 256 个取货窗口（Path），每个窗口各排一条队。货放在哪座仓库由货号（hashID）决定，<b>不能因为旁边仓库清闲就去那里取同一件货</b>。</li>
@@ -631,6 +794,7 @@
     <li>中央调度器是<b>安排加工台领料的人</b>：决定哪些订单一起加工、何时来取料。有时先让小订单取完、大订单晚 0.025 秒开始取，小订单就按时交付而大订单一分钟都没多等（④）。但仓库不挤时，故意等待只有成本。</li>
     <li>两座仓库总出货够 ≠ 每座都够：8 吨货全压在一座，总量再宽也要排队（⑤）。</li>
     <li>B1 给每类订单<b>保底速度 + 按需借余量</b>，跟你开了几个窗口无关（⑥）。</li>
+    <li><b>联合调度像下棋</b>：把"哪些订单一起做、何时开工、各仓出货速度给多少"当一手棋，在棋盘副本上推演到终局，只落第一子；对手（新订单、新完成）走一步，重新推演（⑦）。姊妹篇《MPC 方案图解》讲过单层版本。</li>
     <li>新做出的 KV 还要<b>送回仓库</b>：回货区（写暂存池）满了同样堵加工台——只优化取货是不够的。</li>
     <li>最终裁判是<b>订单完成时间与按时交付率</b>，不是窗口开得多、设备看起来忙。</li>
   </ul>
@@ -1265,6 +1429,50 @@ $$('#m7 .sw2').forEach(function(b){
 jointUpdate();
 
 /* ================================================================
+   ⑦ 联合调度：五步面板 + 打分演示
+================================================================ */
+(function(){
+  var panels = $$('#m7 .panel');
+  var sbtns = $$('#m7 .stepbtn');
+  var jcCur = 0;
+  function jcShow(i){
+    jcCur = Math.max(0, Math.min(panels.length-1, i));
+    panels.forEach(function(p,k){ p.classList.toggle('on', k===jcCur); });
+    sbtns.forEach(function(b,k){ b.setAttribute('aria-pressed', k===jcCur ? 'true' : 'false'); });
+  }
+  sbtns.forEach(function(b,k){ b.addEventListener('click', function(){ jcShow(k); }); });
+  $('#jcPrev').addEventListener('click', function(){ jcShow(jcCur-1); });
+  $('#jcNext').addEventListener('click', function(){ jcShow(jcCur+1); });
+
+  var scTimers = [];
+  function scClear(){ scTimers.forEach(clearTimeout); scTimers = []; }
+  function scResetFn(){
+    scClear();
+    $$('#scCands .cand').forEach(function(c){ c.classList.remove('show','best'); });
+    $('#scRound2').classList.remove('on');
+    $('#scReplay').disabled = false;
+    $('#scCap').innerHTML = 'Step 2 摆上桌的候选包含这三个（还有 singleton、盘互补批等）。点「重放打分」：搜索在估计状态里把每个候选推演到所有请求完成——用的正是 ④ 的那套公式——再按目标 J_S 打分。';
+  }
+  $('#scReplay').addEventListener('click', function(){
+    scClear(); this.disabled = true;
+    var cards = $$('#scCands .cand');
+    cards.forEach(function(c){ c.classList.remove('show','best'); });
+    $('#scRound2').classList.remove('on');
+    cards.forEach(function(c,k){ scTimers.push(setTimeout(function(){ c.classList.add('show'); }, 300+k*700)); });
+    scTimers.push(setTimeout(function(){
+      cards[1].classList.add('best');
+      $('#scCap').innerHTML = '<b>打分结果（目标 J_S）</b>：B = 0 全胜，A/C 均为 0.50。J_M 上 A/B 打平（0.325）、J_T/J_R 上 B 更优——<b>目标不同答案可能不同，所以每次只优化一个 J</b>。best 的初值是安全计划（≈A），B 是靠逐项重放赢下的，不是默认偏好。';
+    }, 300+cards.length*700+200));
+  });
+  $('#scCommit').addEventListener('click', function(){
+    $('#scCap').innerHTML = '<b>原子落实第一个动作</b>：实例1 立即领取 SS；LS 留在中央队列，唤醒事件定在 t=0.025（SS 读取完成）。「B 的其余部分」随即作废——下一轮重新推演。';
+    $('#scRound2').classList.add('on');
+  });
+  $('#scReset').addEventListener('click', scResetFn);
+  scResetFn();
+})();
+
+/* ================================================================
    粘性导航高亮
 ================================================================ */
 (function(){
@@ -1279,7 +1487,7 @@ jointUpdate();
       }
     });
   }, {rootMargin:'-20% 0px -70% 0px'});
-  ['m1','m2','m3','m4','m5','m6','m7','m8','m9'].forEach(function(id){
+  ['m1','m2','m3','m4','m5','m6','m7','m8','m9','m10'].forEach(function(id){
     var el = document.getElementById(id); if(el) io.observe(el);
   });
 })();
