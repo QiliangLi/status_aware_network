@@ -1,0 +1,1290 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>多 ASU·多 Path 组批错峰与带宽协同 · 图解 —— 用可手算的例子讲清三层调度设计</title>
+<style>
+  :root{
+    --paper:#faf9f6; --card:#ffffff; --ink:#1c2733; --soft:#54636f; --line:#d9d3c5;
+    --accent:#414f8f; --accent-soft:#eef0fa;
+    /* 四类请求 */
+    --ss:#4C72B0; --ls:#8172B3; --sl:#DD8452; --ll:#937860;
+    /* 状态 */
+    --read:#a9cbe6; --compute:#4C72B0; --stall:#E4A76F; --idle:#c9c3b4; --cwait:#ece6d4;
+    --good:#2e7d52; --bad:#bf4f45;
+  }
+  *{box-sizing:border-box}
+  html{scroll-behavior:smooth}
+  body{margin:0; color:var(--ink); background:var(--paper); line-height:1.85; font-size:16px;
+    font-family:"PingFang SC","Hiragino Sans GB","Microsoft YaHei",system-ui,sans-serif}
+  main{max-width:1020px; margin:0 auto; padding:0 20px 90px}
+  header{border-bottom:2px solid var(--ink); padding:44px 0 22px; margin-bottom:26px}
+  header h1{font-size:28px; margin:0 0 10px; line-height:1.45}
+  header .sub{color:var(--soft); font-size:15px; max-width:820px}
+  .selfbox{background:var(--accent-soft); border:1px solid #ccd3ef; border-radius:10px; padding:12px 18px; margin:16px 0; font-size:14.5px}
+  .selfbox b{color:var(--accent)}
+  a{color:var(--accent)}
+  h2{font-size:22px; margin:56px 0 14px; padding-top:14px; border-top:1px solid var(--line)}
+  h2 .no{color:var(--accent); font-family:Georgia,serif; margin-right:8px}
+  h2 .en{font-size:13px; color:var(--soft); font-weight:400; margin-left:10px}
+  h3{font-size:17px; margin:26px 0 8px}
+  p{margin:10px 0}
+  .toc{display:flex; flex-wrap:wrap; gap:8px; margin-top:14px}
+  .toc a{text-decoration:none; color:var(--accent); border:1px solid var(--line); background:var(--card); border-radius:999px; padding:4px 14px; font-size:14px}
+  .toc a:hover,.toc a:focus{border-color:var(--accent)}
+  .card{background:var(--card); border:1px solid var(--line); border-radius:10px; padding:18px 20px; margin:16px 0}
+  .note{background:#f2efe6; border-left:4px solid var(--accent); padding:10px 16px; border-radius:0 8px 8px 0; font-size:14.5px; color:var(--soft)}
+  .note b{color:var(--ink)}
+  .hook{display:flex; gap:10px; align-items:baseline; background:var(--accent-soft); border:1px dashed #b9c2e6; border-radius:10px; padding:12px 18px; margin:22px 0 6px; font-size:14.5px}
+  .hook .ar{color:var(--accent); font-weight:700}
+  .takeaway{background:#eef4ee; border:1px solid #cfe0cf; border-radius:10px; padding:12px 18px; margin:18px 0 8px; font-size:15px}
+  .takeaway b{color:var(--good)}
+  code{font-family:"SF Mono",Menlo,Consolas,monospace; font-size:13.5px; background:#f0ede4; padding:1px 6px; border-radius:4px}
+  .formula{background:#f7f5ee; border:1px dashed var(--line); border-radius:8px; padding:12px 16px; margin:12px 0; font-family:"SF Mono",Menlo,Consolas,monospace; font-size:13.5px; overflow-x:auto; white-space:nowrap}
+  .formula .tag{display:inline-block; background:var(--accent); color:#fff; border-radius:4px; padding:0 8px; margin-right:8px; font-size:12px}
+  .substituted{background:#fff; border:1px solid var(--line); border-radius:8px; padding:10px 14px; margin:8px 0; font-family:Menlo,Consolas,monospace; font-size:13px; color:var(--ink); overflow-x:auto; white-space:nowrap}
+  table{border-collapse:collapse; width:100%; margin:14px 0; font-size:14px; background:var(--card)}
+  th,td{border:1px solid var(--line); padding:6px 10px; text-align:center}
+  th{background:#efece2; font-weight:600}
+  td.l,th.l{text-align:left}
+  .win{outline:2.5px solid var(--good); outline-offset:-2.5px; font-weight:700; color:var(--good)}
+  .curcol{background:#f3f4fd}
+  /* ---------- 粘性导航 ---------- */
+  .stickynav{position:sticky; top:0; z-index:50; background:rgba(250,249,246,.96); backdrop-filter:blur(4px);
+    border-bottom:1px solid var(--line); margin:0 -20px; padding:7px 20px; display:flex; gap:6px; overflow-x:auto; scrollbar-width:none}
+  .stickynav::-webkit-scrollbar{display:none}
+  .stickynav a{flex:0 0 auto; text-decoration:none; color:var(--soft); border:1px solid transparent; border-radius:999px; padding:2px 12px; font-size:13px}
+  .stickynav a.cur{color:#fff; background:var(--accent); border-color:var(--accent)}
+  /* ---------- 舞台通用 ---------- */
+  .stage{background:var(--card); border:1.5px solid var(--ink); border-radius:12px; padding:18px 20px; margin:18px 0}
+  .ctrl{display:flex; align-items:center; gap:8px; flex-wrap:wrap; margin-bottom:6px}
+  .ctrl button{border:1.5px solid var(--ink); background:var(--card); color:var(--ink); border-radius:8px; padding:5px 14px; font-size:14px; cursor:pointer; font-family:inherit}
+  .ctrl button:hover,.ctrl button:focus{background:#efece2}
+  .ctrl button.primary{background:var(--accent); border-color:var(--accent); color:#fff}
+  .ctrl button[aria-pressed="true"]{background:var(--ink); color:#fff; border-color:var(--ink)}
+  .ctrl .t-now{font-family:Menlo,Consolas,monospace; font-size:15px; margin-left:auto; white-space:nowrap}
+  .cap{min-height:64px; background:#f4f1e8; border-radius:8px; padding:10px 14px; font-size:14.5px; margin:8px 0 12px}
+  .cap b{color:var(--accent)}
+  .cap .tt{font-family:Menlo,monospace; color:var(--bad); font-weight:700}
+  .legend{display:flex; flex-wrap:wrap; gap:12px; align-items:center; font-size:13px; margin:8px 0; padding:8px 12px; background:#f4f1e8; border-radius:8px}
+  .legend .sw{display:inline-block; width:20px; height:12px; border-radius:3px; vertical-align:-1px; margin-right:5px}
+  :focus-visible{outline:2.5px solid var(--accent); outline-offset:2px}
+  /* ---------- ① 分类交互 ---------- */
+  .clsgrid{display:grid; grid-template-columns:300px 1fr; gap:18px; align-items:start}
+  .sliderbox label{display:flex; justify-content:space-between; font-size:14px; margin-top:10px}
+  .sliderbox input[type=range]{width:100%; accent-color:var(--accent)}
+  .clsbadge{display:inline-block; color:#fff; font-weight:700; border-radius:8px; padding:3px 18px; font-size:19px; letter-spacing:2px}
+  .clsname{font-size:14px; color:var(--soft); margin-top:2px}
+  .clstrend{font-size:14px; margin-top:8px}
+  .req4{display:grid; grid-template-columns:repeat(auto-fit,minmax(200px,1fr)); gap:10px; margin:12px 0}
+  .req4 .rq{border:1.5px solid; border-radius:10px; padding:8px 12px; font-size:13px}
+  .rq b{font-size:15px; letter-spacing:1px}
+  .rq .dim{color:var(--soft)}
+  /* ---------- ① 架构示意 ---------- */
+  .arch{display:flex; flex-direction:column; gap:0; margin:14px 0; font-size:13.5px}
+  .arch .lv{display:flex; align-items:stretch; gap:10px}
+  .arch .box{flex:1; border:1.5px solid var(--ink); border-radius:10px; background:var(--card); padding:8px 14px}
+  .arch .box b{display:block}
+  .arch .box .d{color:var(--soft); font-size:12.5px}
+  .arch .down{ text-align:center; color:var(--soft); font-size:16px; line-height:1.1; padding:2px 0}
+  .arch .down span{font-size:12px; vertical-align:2px; margin:0 10px; color:var(--accent)}
+  .pathgroups{display:flex; gap:4px; margin-top:6px}
+  .pathgroups i{display:block; height:12px; border-radius:3px}
+  /* ---------- ② B0 份额 ---------- */
+  .sharetrack{position:relative; height:30px; border:1.5px solid var(--ink); border-radius:8px; overflow:hidden; background:repeating-linear-gradient(45deg,#f1efe7 0 6px,#faf9f6 6px 12px); display:flex}
+  .sharetrack .seg{height:100%; display:flex; align-items:center; justify-content:center; color:#fff; font-size:12px; font-weight:600; white-space:nowrap; overflow:hidden}
+  .presets{display:flex; flex-wrap:wrap; gap:8px; margin:10px 0}
+  .presets button{border:1.5px solid var(--line); background:var(--card); border-radius:999px; padding:3px 14px; font-size:13.5px; cursor:pointer; font-family:inherit}
+  .presets button:hover,.presets button:focus{border-color:var(--accent); color:var(--accent)}
+  /* ---------- ③ Path 队列动画 ---------- */
+  .qrow{margin:14px 0}
+  .qrow .qlab{font-size:14px; margin-bottom:4px; display:flex; justify-content:space-between; flex-wrap:wrap; gap:6px}
+  .qrow .qlab .mono{font-family:Menlo,monospace; color:var(--soft); font-size:13px}
+  .qtrack{position:relative; height:34px; border:1.5px solid var(--ink); border-radius:8px; background:#faf9f6; display:flex; align-items:center; padding:3px; gap:3px}
+  .chip{height:26px; border-radius:5px; display:flex; align-items:center; justify-content:center; font-size:11px; color:#123a5e; overflow:hidden; white-space:nowrap; min-width:10px; transition:opacity .3s}
+  .chip.base{background:var(--read)}
+  .chip.head{border:2px solid var(--ink); font-weight:700}
+  .chip.newio{background:var(--accent); color:#fff; border:2px dashed #fff}
+  .chip.done{opacity:.15}
+  .qread{font-family:Menlo,monospace; font-size:12.5px; color:var(--soft); margin-top:3px}
+  .score{font-size:14.5px; margin-top:10px}
+  .score div{padding:3px 0}
+  /* ---------- ④ 时间线 ---------- */
+  .tlwrap{overflow-x:auto; margin:14px 0 4px}
+  .tl{position:relative; min-width:660px; padding-top:46px}
+  .tlrow{position:relative; height:30px; margin-bottom:14px}
+  .tlrow .rowlab{position:absolute; left:0; top:0; width:120px; font-size:11.5px; color:var(--soft); display:flex; align-items:center; line-height:1.3}
+  .tlrow .track{position:absolute; left:126px; right:0; top:0; bottom:0; border-bottom:1px dotted #e4ddcd}
+  .blk{position:absolute; height:24px; top:3px; border-radius:4px; font-size:10px; color:#fff; display:flex; align-items:center; justify-content:center; overflow:hidden; white-space:nowrap}
+  .blk.stall{background:var(--stall); color:#6b3c0e}
+  .blk.compute{background:var(--compute)}
+  .blk.idle{background:var(--idle); color:#5c574b}
+  .blk.cwait{background:var(--cwait); color:#6b6350; border:1px dashed #b3ab93}
+  .blk.notext{font-size:0}
+  .dsk .track{height:30px}
+  .dsk{height:36px}
+  .dsegrow{position:absolute; top:3px; height:24px; display:flex; width:0; overflow:hidden; border-radius:4px}
+  .dseg{height:100%; display:flex; align-items:center; justify-content:center; color:#fff; font-size:10px; font-weight:600; white-space:nowrap; overflow:hidden}
+  .dseg.ss{background:var(--ss)} .dseg.ls{background:var(--ls)} .dseg.sl{background:var(--sl)} .dseg.ll{background:var(--ll)}
+  .dseg.off{background:var(--idle); color:#5c574b}
+  .taxis{position:relative; height:16px; margin-left:126px; font-size:10px; color:var(--soft); font-family:Menlo,monospace}
+  .taxis span{position:absolute; transform:translateX(-50%)}
+  .deadline{position:absolute; top:40px; bottom:16px; width:0; border-left:2px dashed var(--bad); z-index:2}
+  .deadline .dl{position:absolute; top:-14px; left:4px; font-size:10px; color:var(--bad); white-space:nowrap; font-family:Menlo,monospace}
+  .flag{position:absolute; transform:translateX(-50%); font-size:10.5px; font-weight:700; font-family:Menlo,monospace; white-space:nowrap; z-index:3; opacity:0; transition:opacity .4s}
+  .flag.ok{color:var(--good)} .flag.no{color:var(--bad)}
+  .cursor{position:absolute; top:-6px; bottom:0; width:2px; background:var(--bad); z-index:4}
+  .bytebar{display:grid; grid-template-columns:120px 1fr 150px; gap:8px; align-items:center; font-size:12.5px; margin:4px 0}
+  .bytebar .bt{height:14px; border:1px solid var(--line); border-radius:4px; background:#f4f1e8; overflow:hidden}
+  .bytebar .bf{height:100%; width:0}
+  .bytebar .bn{font-family:Menlo,monospace; color:var(--soft)}
+  .ledger{font-family:Menlo,monospace; font-size:12.5px; color:var(--ink); background:#f4f1e8; border-radius:8px; padding:8px 12px; margin-top:10px; overflow-x:auto; white-space:nowrap}
+  .scrubrow{display:flex; align-items:center; gap:10px; margin-top:10px}
+  .scrubrow input[type=range]{flex:1; accent-color:var(--bad)}
+  .scrubrow .scl{font-size:12.5px; color:var(--soft); white-space:nowrap}
+  /* ---------- ⑤ 多盘 ---------- */
+  .diskrow{display:grid; grid-template-columns:64px 1fr 120px; gap:10px; align-items:center; margin:10px 0}
+  .diskrow .dt{height:26px; border:1.5px solid var(--ink); border-radius:6px; background:repeating-linear-gradient(45deg,#f1efe7 0 6px,#faf9f6 6px 12px); overflow:hidden; display:flex}
+  .diskrow .df{height:100%; background:var(--read); border-right:1.5px solid var(--ink); width:0}
+  .diskrow .dn{font-family:Menlo,monospace; font-size:12.5px; color:var(--soft)}
+  .pairgrid{display:grid; grid-template-columns:repeat(auto-fit,minmax(280px,1fr)); gap:10px; margin:12px 0}
+  .paircard{border:1.5px solid var(--line); border-radius:10px; padding:10px 14px; font-size:13.5px}
+  .paircard.yes{border-color:var(--good)} .paircard.no{border-color:var(--bad)}
+  /* ---------- ⑥ B1 ---------- */
+  .b1row{display:grid; grid-template-columns:150px 1fr 210px; gap:10px; align-items:center; margin:8px 0; font-size:13px}
+  .b1row .cl{display:flex; align-items:center; gap:8px}
+  .b1row .dot{width:14px; height:14px; border-radius:4px; flex:0 0 auto}
+  .b1row .bt{height:24px; border:1.5px solid var(--ink); border-radius:6px; position:relative; display:flex; background:repeating-linear-gradient(45deg,#f1efe7 0 6px,#faf9f6 6px 12px); overflow:hidden}
+  .b1row .f{height:100%}
+  .b1row .borr{height:100%; background-image:repeating-linear-gradient(45deg,rgba(255,255,255,.5) 0 4px,transparent 4px 8px)}
+  .b1row .unmet{position:absolute; top:0; height:100%; border:2px dashed #b3ab93; background:transparent}
+  .b1row .rn{font-family:Menlo,monospace; font-size:12px; color:var(--soft)}
+  .b1ctrl{display:flex; flex-wrap:wrap; gap:14px; align-items:center; margin:10px 0}
+  .b1ctrl .grp{display:flex; align-items:center; gap:6px; font-size:13.5px}
+  .b1ctrl input[type=range]{width:130px; accent-color:var(--accent)}
+  .b1read{font-family:Menlo,Consolas,monospace; font-size:12.5px; background:#f4f1e8; border-radius:8px; padding:8px 12px; margin-top:10px; overflow-x:auto; white-space:nowrap}
+  /* ---------- ⑦ 闭环 + 矩阵 ---------- */
+  .loop{display:flex; flex-direction:column; gap:0; margin:14px 0; font-size:13.5px}
+  .loop .lb{border:1.5px solid var(--ink); border-radius:10px; background:var(--card); padding:10px 16px}
+  .loop .lb b{font-size:15px}
+  .loop .lb .d{color:var(--soft); font-size:12.5px; margin-top:2px}
+  .loop .lb .ts{display:inline-block; margin-top:6px; font-size:11.5px; color:var(--accent); border:1px solid #ccd3ef; background:var(--accent-soft); border-radius:999px; padding:0 10px}
+  .loop .arrows{display:flex; justify-content:space-between; gap:10px; padding:2px 8px; color:var(--soft); font-size:12.5px}
+  .loop .arrows .a{max-width:46%; line-height:1.5}
+  .loop .arrows .a b{color:var(--accent); font-weight:600}
+  .factor{display:grid; grid-template-columns:repeat(4,1fr); gap:8px; margin:12px 0}
+  .factor button{border:1.5px solid var(--line); background:var(--card); border-radius:10px; padding:8px 6px; font-size:13px; cursor:pointer; font-family:inherit; text-align:center}
+  .factor button .code{font-family:Menlo,monospace; font-weight:700; display:block}
+  .factor button .tag2{font-size:11px; color:var(--soft)}
+  .factor button.cur{border-color:var(--accent); background:var(--accent-soft); box-shadow:0 0 0 3px rgba(65,79,143,.15)}
+  .factor button.origin{border-style:dashed}
+  .layerdesc{background:#f4f1e8; border-radius:10px; padding:12px 16px; font-size:14px; margin-top:10px}
+  .layerdesc div{margin:4px 0}
+  .layerdesc .ln{font-weight:700}
+  .objs{display:grid; grid-template-columns:repeat(auto-fit,minmax(210px,1fr)); gap:10px; margin:12px 0}
+  .objs .obj{border:1.5px solid var(--line); border-radius:10px; padding:8px 14px; font-size:13.5px}
+  .objs .obj b{font-family:Menlo,monospace; color:var(--accent)}
+  /* ---------- ⑨ 通俗版 ---------- */
+  .plain li{margin:6px 0}
+  details{margin:12px 0; border:1px solid var(--line); border-radius:8px; background:var(--card)}
+  summary{cursor:pointer; padding:9px 16px; font-weight:600; font-size:14.5px}
+  details > div{padding:2px 18px 14px; font-size:14px}
+  #errbanner{display:none; position:fixed; left:12px; bottom:12px; right:12px; z-index:99; background:#fdecea; color:#8f1f16; border:2px solid var(--bad); border-radius:10px; padding:10px 14px; font-family:Menlo,monospace; font-size:12px; white-space:pre-wrap}
+  footer{margin-top:60px; padding-top:14px; border-top:1px solid var(--line); color:var(--soft); font-size:13px}
+  @media (max-width:760px){
+    .clsgrid{grid-template-columns:1fr}
+    .factor{grid-template-columns:repeat(2,1fr)}
+    .b1row{grid-template-columns:110px 1fr; } .b1row .rn{grid-column:1/-1}
+  }
+  @media (prefers-reduced-motion: reduce){
+    *{transition:none!important; animation:none!important}
+  }
+  @media print{ .stickynav{display:none} .stage,.card{break-inside:avoid} }
+</style>
+</head>
+<body>
+<main>
+
+<header>
+  <h1>多 ASU·多 Path 组批错峰与带宽协同 · 图解</h1>
+  <div class="sub">
+    依据 <a href="共享KV多ASU多Path下的组批错峰与带宽协同调度设计-20260917.md">设计文档（2026-09-17）</a>，
+    本页用<b>可以手算的小例子</b>讲清这套分层调度方案：中央调度器怎么<b>组批与错峰</b>（S 层）、
+    NPU 怎么<b>选 Path</b>（P 层）、ASU 怎么<b>分配带宽</b>（B 层），以及每一步依据的公式。
+    三个互动例子分别对应设计文档要优先验证的三个疑问：
+    <b>①多开几条 Path 真的更快吗？②"队列条数最少"选得对吗？③同时启动 vs 错峰，差在哪？</b>
+  </div>
+  <div class="selfbox">
+    <b>本页自足。</b>例子所需的系统背景在 <a href="#m1">§1</a>（2 分钟读完）；
+    所有数字都给出代入公式的过程，可以拿计算器逐步验算；动画只是把同样的数字演出来，
+    每个动画都配"事件时间表"文字版；公式速查在 <a href="#m8">§8</a>；通俗版收尾在 <a href="#m9">§9</a>。
+    不需要先读任何其他文档。姊妹篇：<a href="MPC方案图解-20260916.html">MPC 方案图解</a>。
+  </div>
+  <nav class="toc">
+    <a href="#m1">① 系统与画像</a>
+    <a href="#m2">② 份额游戏（B0）</a>
+    <a href="#m3">③ 选 Path（P0→P1）</a>
+    <a href="#m4">④ 错峰主场（A/B/C）</a>
+    <a href="#m5">⑤ 多盘尾部</a>
+    <a href="#m6">⑥ B1 保底+水位</a>
+    <a href="#m7">⑦ 三层协同</a>
+    <a href="#m8">⑧ 公式速查</a>
+    <a href="#m9">⑨ 通俗版</a>
+  </nav>
+</header>
+
+<nav class="stickynav" aria-label="章节导航">
+  <a href="#m1">①系统</a><a href="#m2">②份额</a><a href="#m3">③选路</a><a href="#m4">④错峰</a>
+  <a href="#m5">⑤多盘</a><a href="#m6">⑥B1</a><a href="#m7">⑦协同</a><a href="#m8">⑧公式</a><a href="#m9">⑨通俗</a>
+</nav>
+
+<!-- ================================================================ -->
+<h2 id="m1"><span class="no">①</span>系统与画像：看懂例子需要的四个事实<span class="en">2 分钟</span></h2>
+
+<h3>1.1 一个请求 = 已缓存前缀 h + 新算部分 u，逐层"先读后算"</h3>
+<p>
+  每个请求到达时带着两个数：<b>h</b> 个 token 的 KV 已在存储里（可复用），还要新算 <b>u</b> 个 token。
+  计算是逐层的：第 ℓ 层<b>先读齐</b>本层所有 KV Block，才能开始算；算本层的同时提交下一层的读取（只提前一层 lookahead）。
+  末层算完 = 首 token 返回（TTFT 的终点）。读不齐就得停 —— 这个状态叫 <b>STALL</b>。
+</p>
+<div class="formula"><span class="tag">式(11)·层依赖</span>
+  C<sub>βℓ</sub> = max(R<sub>βℓ</sub>, Z<sub>β,ℓ−1</sub>, E<sub>βℓ</sub>) ，&nbsp; Z<sub>βℓ</sub> = C<sub>βℓ</sub> + c<sub>βℓ</sub>
+  &nbsp;&nbsp;<span style="color:#54636f">R=本层读齐时刻&nbsp; Z=本层算完&nbsp; c=本层纯计算时长&nbsp; E=写缓冲可预留时刻</span>
+</div>
+<p>本页的例子都取 L=1 层（单层就够讲清机制），此时公式坍缩成一句话：<b>首 token = 读齐时刻 + 计算时长</b>。</p>
+
+<h3>1.2 四类请求：分类只看 h 和 u 是否过线</h3>
+<div class="formula"><span class="tag">分类</span>
+  χ<sub>i</sub> = ( 1[h<sub>i</sub> &gt; 80000], 1[u<sub>i</sub> &gt; 512] ) ，&nbsp; 0 记 S、1 记 L，第一维=命中、第二维=未命中
+</div>
+<div class="clsgrid">
+  <div class="sliderbox card">
+    <label for="c1h">命中长度 h（token）<span id="c1hv" style="font-family:Menlo,monospace">40000</span></label>
+    <input type="range" id="c1h" min="0" max="200000" step="1000" value="40000">
+    <label for="c1u">未命中长度 u（token）<span id="c1uv" style="font-family:Menlo,monospace">128</span></label>
+    <input type="range" id="c1u" min="1" max="8192" step="1" value="128">
+    <p style="font-size:12.5px;color:var(--soft);margin:6px 0 0">阈值：h=80000（等号属 S）、u=512（等号属 S）。拖到 80000 两侧看类别翻转。</p>
+  </div>
+  <div class="card">
+    <div><span class="clsbadge" id="c1badge">SS</span> <span class="clsname" id="c1name">短命中 · 短未命中</span></div>
+    <div class="substituted" id="c1calc">χ = (1[40000>80000], 1[128>512]) = (0,0) → SS</div>
+    <div class="clstrend" id="c1trend"></div>
+    <div class="substituted" id="c1bytes">每层读 ≈ κ·h = 4.096e-6 × 40000 = 0.164 GB&nbsp;&nbsp;|&nbsp;&nbsp;每层写 ≈ κ·u = 0.0005 GB</div>
+    <p style="font-size:12.5px;color:var(--soft);margin:4px 0 0">κ=4.096×10⁻⁶ GB/token/层（synthetic-v1 起点值）。读写是分开的两个量：LS 读多写少，SL 读少写多。</p>
+  </div>
+</div>
+<div class="req4">
+  <div class="rq" style="border-color:var(--ss)"><b style="color:var(--ss)">SS</b>（h≤80K, u≤512）<br><span class="dim">新 token 少；但 h 逼近 80K 时仍有大读取——别把 SS 当零成本</span></div>
+  <div class="rq" style="border-color:var(--ls)"><b style="color:var(--ls)">LS</b>（h&gt;80K, u≤512）<br><span class="dim">典型"读多算少"：κℓh 的读取主导，attention 随 h 增长</span></div>
+  <div class="rq" style="border-color:var(--sl)"><b style="color:var(--sl)">SL</b>（h≤80K, u&gt;512）<br><span class="dim">典型"算多写多"：新 KV 写回与新计算都重</span></div>
+  <div class="rq" style="border-color:var(--ll)"><b style="color:var(--ll)">LL</b>（h&gt;80K, u&gt;512）<br><span class="dim">读、attention、写回三头都重</span></div>
+</div>
+<div class="note"><b>混合批不改成员类别。</b>一个批里 SS 成员的 I/O 永远走 SS 组、LL 成员走 LL 组——不能按"批里最长者"把所有人升成 LL，也不能让短成员替长成员占 SS 份额。</div>
+
+<h3>1.3 存储拓扑：D 个 ASU × 每盘 256 条 Path × 40 GB/s</h3>
+<div class="arch">
+  <div class="lv"><div class="box"><b>中央等待队列 + 调度器（S 层）</b><span class="d">组批、选空闲实例、决定启动时刻（可有限延迟=错峰）。请求一直留在中央队列，领取时才绑定实例。</span></div></div>
+  <div class="down">▼ <span>领取：批成员 + 启动时刻</span>&nbsp;&nbsp;&nbsp;<span style="color:var(--soft)">▲ 盘负载观测（版本化）</span></div>
+  <div class="lv"><div class="box"><b>NPU 实例 × m（P 层）</b><span class="d">同构实例，每实例同时只有<b>一个</b>完整 prefill 批；为已释放的 I/O 在目标盘、本类别组内选一条 Path。</span></div></div>
+  <div class="down">▼ <span>Block I/O 按 (盘, 类别组, Path) 入队</span>&nbsp;&nbsp;&nbsp;<span style="color:var(--soft)">▲ 选路报价与版本</span></div>
+  <div class="lv"><div class="box"><b>ASU 存储（B 层）：D 个盘，每盘 256 条 Path 共享 40 GB/s</b>
+    <span class="d">Block 放哪座盘由一致性哈希按 hashID 决定，<b>不能改读别的盘</b>；Path 只是排队通道，不是数据副本。四类各有固定 Path 组：</span>
+    <div class="pathgroups">
+      <i style="flex:96;background:var(--ss)" title="SS 组 96 条"></i><i style="flex:96;background:var(--ls)" title="LS 组 96 条"></i><i style="flex:32;background:var(--sl)" title="SL 组 32 条"></i><i style="flex:32;background:var(--ll)" title="LL 组 32 条"></i>
+    </div>
+  </div></div>
+</div>
+<div class="note"><b>组基础带宽 20/12/4/4 GB/s</b>（SS/LS/SL/LL），来自配置而非硬件差别；每条 Path 的基础速率 r 分别为 5/24、1/8、1/8、1/8 GB/s。同实例末层算完才出首 token；新算出的 KV 还要<b>写回</b>存储，与读取竞争同一个 40 GB/s。</div>
+
+<div class="hook"><span class="ar">→</span><span>系统就绪。接下来把<b>现有默认规则</b>摆上台面——B0 带宽规则里藏着一个可疑的等式：权利居然跟着"开了几条 Path"走。</span></div>
+
+<!-- ================================================================ -->
+<h2 id="m2"><span class="no">②</span>份额游戏：多开 Path 不能创造带宽，只会重分权利<span class="en">B0 · 式(6)(7)</span></h2>
+
+<p>B0（现状规则）分两步给一条活跃 Path 定速率：</p>
+<div class="formula"><span class="tag">式(6)·B0</span>
+  L<sub>d</sub> = 40 − Σ<sub>p∈A<sub>d</sub></sub> r<sub>c(p)</sub> ，&nbsp;&nbsp; b<sub>d,p</sub> = r<sub>c(p)</sub> + L<sub>d</sub>/n<sub>d</sub>
+  &nbsp;&nbsp;<span style="color:#54636f">A_d=活跃 Path 集，n_d=条数；非活动 Path 速率为 0</span>
+</div>
+<div class="formula"><span class="tag">式(7)·组份额</span>
+  B<sub>d,c</sub> = a<sub>d,c</sub>·r<sub>c</sub> + a<sub>d,c</sub>/Σ<sub>e</sub>a<sub>d,e</sub> · (40 − Σ<sub>e</sub>a<sub>d,e</sub>·r<sub>e</sub>)
+</div>
+<p>翻译：先给每条活跃 Path 发基础速率，<b>没用完的余量平均分给所有活跃 Path</b>。于是活跃条数本身成了分配变量——这就是"并发数替代业务优先级"。拖动下面的滑块，或点预设（数值来自设计文档 §4.3 表）：</p>
+
+<div class="stage">
+  <div class="ctrl">
+    <div class="presets" style="margin:0">
+      <button data-a="96,96,32,32">全活跃 96/96/32/32</button>
+      <button data-a="1,0,0,0">仅 SS×1</button>
+      <button data-a="1,1,0,0">SS×1, LS×1</button>
+      <button data-a="2,1,0,0">SS×2, LS×1</button>
+      <button data-a="96,1,0,0">SS×96, LS×1</button>
+    </div>
+  </div>
+  <div class="ctrl" style="gap:16px">
+    <span class="grp"><label for="aSS">SS 组活跃</label><input type="range" id="aSS" min="0" max="96" value="1" style="width:110px;accent-color:var(--ss)"><b id="aSSv" style="font-family:Menlo,monospace">1</b></span>
+    <span class="grp"><label for="aLS">LS 组活跃</label><input type="range" id="aLS" min="0" max="96" value="1" style="width:110px;accent-color:var(--ls)"><b id="aLSv" style="font-family:Menlo,monospace">1</b></span>
+    <span class="grp"><label for="aSL">SL 组活跃</label><input type="range" id="aSL" min="0" max="32" value="0" style="width:80px;accent-color:var(--sl)"><b id="aSLv" style="font-family:Menlo,monospace">0</b></span>
+    <span class="grp"><label for="aLL">LL 组活跃</label><input type="range" id="aLL" min="0" max="32" value="0" style="width:80px;accent-color:var(--ll)"><b id="aLLv" style="font-family:Menlo,monospace">0</b></span>
+  </div>
+  <div class="sharetrack" id="shareBar" aria-hidden="true"></div>
+  <table id="shareTbl" style="margin-top:10px">
+    <thead><tr><th class="l">组</th><th>活跃 Path a</th><th>基础份额 a·r</th><th>借到余量</th><th>实际份额 B（式7）</th></tr></thead>
+    <tbody></tbody>
+  </table>
+  <div class="substituted" id="shareCalc"></div>
+  <div class="cap" id="shareVerdict" style="min-height:48px"></div>
+</div>
+
+<p>看预设 <b>SS×2, LS×1</b>：SS 份额从 20.04 跳到 26.72，LS 从 19.96 掉到 13.28——<b>字节量一点没变，变的只有"谁有权利用"</b>。盘还是那块 40 GB/s 的盘。反过来看 SS×96, LS×1：LS 虽被挤到 0.33 GB/s，仍保住正的基础速率 0.125——B0 并不饿死谁，但份额随并发数漂移。</p>
+<div class="takeaway"><b>②的结论。</b>B0 把带宽权利挂在"活跃 Path 条数"上，于是独立 NPU 各自多铺 Path 就能多抢余量，互相争抢直至挤掉别人。<b>修复思路（→⑥ B1）：保底按"组"发一次、余量按"权重"水位分配，与 Path 数彻底解耦。</b></div>
+<div class="note">注意 20/12/4/4 只是<b>四组全活跃时</b>的基础份额，不是组的硬上限——仅 SS 一条 Path 活跃时可独享整盘 40（见预设"仅 SS×1"）。</div>
+
+<div class="hook"><span class="ar">→</span><span>份额会随 Path 数漂移，是第一处可疑。第二处在 NPU 每次提交 I/O 的那个动作上：<b>选哪条 Path</b>。</span></div>
+
+<!-- ================================================================ -->
+<h2 id="m3"><span class="no">③</span>选 Path：队伍条数少 ≠ 等得少<span class="en">P0→P1 · 式(8)(17) · §8.1</span></h2>
+
+<p>现状 P0 的规则是"组内选<b>未完成 I/O 条数</b>最少的 Path"（条数含正在服务的队头）：</p>
+<div class="formula"><span class="tag">式(8)·P0</span>
+  p* = argmin<sub>p ∈ P<sub>d,χi</sub></sub> N̂<sub>d,p</sub>(t)
+  &nbsp;&nbsp;<span style="color:#54636f">N̂ = 未完成 I/O 条数</span>
+</div>
+<p>它把"4 GB 的大队头"和"0.1 GB 的小队头"算成同样的一件事。改进 P1 改看<b>预计完成时间</b>：</p>
+<div class="formula"><span class="tag">式(17)·P1</span>
+  R̂<sub>j</sub>(p) = t + ( Ŵ<sup>ahead</sup><sub>dp</sub> + v<sub>j</sub> ) / max( b̂<sup>after</sup><sub>dp</sub>, ε ) + t̂<sup>submit</sup><sub>dp</sub>
+  &nbsp;&nbsp;<span style="color:#54636f">ahead=前方剩余字节(含队头、已排队、已承诺未上账)&nbsp; v_j=自己&nbsp; after=把自己放进去之后重算的速率</span>
+</div>
+
+<p>例子（设计文档 §8.1）：同类别两条候选 Path，速率都按 1 GB/s 计。P1 队列里只有 1 个 I/O、剩 <b>4 GB</b>；P2 里有 4 个 I/O、各剩 <b>0.1 GB</b>。一个 0.1 GB 的新 I/O 要入队——你会选哪条？先按 P0 试一次，再按 P1 试一次：</p>
+
+<div class="stage">
+  <div class="ctrl">
+    <button id="runP0" class="primary">用 P0 选（条数最少 → P1）</button>
+    <button id="runP1" class="primary">用 P1 选（剩余字节最少 → P2）</button>
+    <button id="qReset">重置</button>
+    <span class="t-now" id="qTime">t = 0.00 s</span>
+  </div>
+  <div class="legend">
+    <span><span class="sw" style="background:var(--read)"></span>在队 I/O</span>
+    <span><span class="sw" style="background:var(--accent)"></span>新到达的 0.1 GB I/O</span>
+    <span><span class="sw" style="background:#fff;border:2px solid var(--ink)"></span>队头（正在服务）</span>
+    <span>条形宽度 ∝ 剩余字节；服务速率统一按 1 GB/s 演示</span>
+  </div>
+  <div class="qrow" id="qrowP1">
+    <div class="qlab"><b>P1 队列</b><span class="mono" id="qreadP1">剩余 4.00 GB · 1 项</span></div>
+    <div class="qtrack" id="qtrackP1"></div>
+  </div>
+  <div class="qrow" id="qrowP2">
+    <div class="qlab"><b>P2 队列</b><span class="mono" id="qreadP2">剩余 0.40 GB · 4 项</span></div>
+    <div class="qtrack" id="qtrackP2"></div>
+  </div>
+  <div class="cap" id="qCap" style="min-height:52px">点上面任一按钮开始。队头以 1 GB/s 缩短；新 I/O 排在队尾，看它多久轮到完成。</div>
+  <div class="score" id="qScore"></div>
+</div>
+
+<div class="substituted" id="qCalc" >式(17) 代入（速率 1 GB/s，t=0，忽略提交开销）：R̂(P1) = (4 + 0.1)/1 = 4.1 s &nbsp;&nbsp;|&nbsp;&nbsp; R̂(P2) = (0.4 + 0.1)/1 = 0.5 s</div>
+<div class="takeaway"><b>③的结论。</b>P0 的"条数"把 4 GB 与 0.1 GB 的队头等权，选错边差出 8 倍等待；P1 按"前方剩余字节 ÷ 放入后速率"估计完成时间。两点保留：本例假设速率恒定——真实 B0 里别的 Path 结束会<b>重算全盘速率</b>，所以 P1 最终要用重放核验；而且把 I/O 放到空 Path 会增大活跃集、改变别人的份额（→② 的外部性）——选 Path 不是纯私事。</div>
+
+<div class="hook"><span class="ar">→</span><span>单条 Path 选对，省的只是排队。更大的杠杆在中央调度器手里：<b>批怎么组、什么时候启动</b>——这就是错峰，也是本页的主场戏。</span></div>
+
+<!-- ================================================================ -->
+<h2 id="m4"><span class="no">④</span>错峰主场：两请求 × 三方案，手算全程对照<span class="en">§8.3 · 式(6)(11)</span></h2>
+
+<h3>4.1 布景（所有数字给定，可自行验算）</h3>
+<div class="card">
+  <p style="margin-top:0">D=1 个盘、X=2 张卡（P=1，两个实例）、L=1 层、纯读、两请求同时到达（a=0）。每个请求的整层读取合并为 1 个 I/O，走<b>自己类别组</b>的一条 Path：</p>
+  <table>
+    <thead><tr><th class="l">请求</th><th>每层读</th><th>计算</th><th>SLO（首 token 截止）</th><th>参考基线 T⁰</th></tr></thead>
+    <tbody>
+      <tr><td class="l"><b style="color:var(--ss)">SS</b>（如 h=32000, u≤512）</td><td>1 GB</td><td>0.05 s</td><td>0.09 s</td><td>0.075 s</td></tr>
+      <tr><td class="l"><b style="color:var(--ls)">LS</b>（如 h=128000, u≤512）</td><td>4 GB</td><td>0.20 s</td><td>0.40 s</td><td>0.300 s</td></tr>
+    </tbody>
+  </table>
+  <p style="font-size:13.5px;color:var(--soft);margin-bottom:0">计算时长此处独立给定（不用式(3) 的画像）。三个方案共享同样的硬件、动作能力，<b>只差决策</b>：<b>A</b> 两实例同时领取；<b>B</b> 错峰——先只放行 SS，0.025 s 后再领取 LS；<b>C</b> 两请求合成一个完整混合批（批计算 0.25 s，无合批加速假设）。</p>
+</div>
+
+<h3>4.2 动画：A / B / C 三种命运</h3>
+<div class="stage">
+  <div class="ctrl">
+    <button id="plA" aria-pressed="true">A · 同时执行</button>
+    <button id="plB" aria-pressed="false">B · 错峰</button>
+    <button id="plC" aria-pressed="false">C · 混合批</button>
+    <span style="width:14px"></span>
+    <button id="tlPlay" class="primary">▶ 播放</button>
+    <button id="tlPrev" title="跳到上一事件">⏮ 上一事件</button>
+    <button id="tlNext" title="跳到下一事件">下一事件 ⏭</button>
+    <button id="tlReset">↺ 重置</button>
+    <span class="t-now" id="tlNow">t = 0.000 s</span>
+  </div>
+  <div class="cap" id="tlCap"></div>
+  <div class="legend">
+    <span><span class="sw" style="background:var(--stall)"></span>等读（STALL）</span>
+    <span><span class="sw" style="background:var(--compute)"></span>计算</span>
+    <span><span class="sw" style="background:var(--cwait);border:1px dashed #b3ab93"></span>中央错峰等待</span>
+    <span><span class="sw" style="background:var(--idle)"></span>空闲</span>
+    <span><span class="sw" style="background:var(--ss)"></span>盘在服务 SS 组</span>
+    <span><span class="sw" style="background:var(--ls)"></span>盘在服务 LS 组</span>
+  </div>
+  <div class="tlwrap">
+    <div class="tl" id="tlBox">
+      <div class="tlrow"><div class="rowlab" id="lab1"></div><div class="track" id="trk1"></div></div>
+      <div class="tlrow"><div class="rowlab" id="lab2"></div><div class="track" id="trk2"></div></div>
+      <div class="tlrow dsk"><div class="rowlab">ASU 盘 40 GB/s<br>（色块=谁在用）</div><div class="track" id="trkD"></div></div>
+      <div class="taxis" id="tlAxis"></div>
+    </div>
+  </div>
+  <div class="scrubrow">
+    <span class="scl">拖动时间轴</span>
+    <input type="range" id="tlScrub" min="0" max="0.42" step="0.0002" value="0" aria-label="时间轴位置">
+  </div>
+  <div id="tlBytes"></div>
+  <div class="ledger" id="tlLedger"></div>
+  <details><summary>事件时间表（文字版，免动画）</summary><div id="tlEvents"></div></details>
+</div>
+
+<h3>4.3 三方案总账（来自设计文档 §8.3，逐项可复算）</h3>
+<table class="cmp" id="cmpTbl">
+  <thead><tr><th class="l">指标</th><th>A 同时执行</th><th>B 错峰</th><th>C 混合批</th></tr></thead>
+  <tbody>
+    <tr><td class="l">SS 读取完成</td><td>1÷(481/24) = 0.049896</td><td class="win">1÷40 = 0.025</td><td>0.049896</td></tr>
+    <tr><td class="l">LS 读取完成</td><td>0.125</td><td>0.125</td><td>0.125</td></tr>
+    <tr><td class="l">SS 首 token（SLO 0.09）</td><td>0.099896 ✗</td><td class="win">0.075 ✓</td><td>0.375 ✗</td></tr>
+    <tr><td class="l">LS 首 token（SLO 0.40）</td><td class="win">0.325 ✓</td><td class="win">0.325 ✓</td><td>0.375 ✓</td></tr>
+    <tr><td class="l">全部完成时间 M</td><td class="win">0.325</td><td class="win">0.325</td><td>0.375</td></tr>
+    <tr><td class="l">平均 TTFT</td><td>0.212448</td><td class="win">0.200000</td><td>0.375000</td></tr>
+    <tr><td class="l">平均归一化 TTFT（T⁰=0.075/0.300）</td><td>1.207640</td><td class="win">1.041667</td><td>3.125000</td></tr>
+    <tr><td class="l">SLO 满足率</td><td>50%</td><td class="win">100%</td><td>50%</td></tr>
+    <tr><td class="l">Compute 卡秒</td><td>0.250</td><td>0.250</td><td>0.250</td></tr>
+    <tr><td class="l">STALL 卡秒</td><td>0.174896</td><td>0.150000*</td><td>0.125000</td></tr>
+    <tr><td class="l">Idle 卡秒（以各自 M 为窗）</td><td>0.225104</td><td>0.250000</td><td>0.375000</td></tr>
+  </tbody>
+</table>
+<p style="font-size:13px;color:var(--soft)">* B 的 LS 在 0–0.025 s 处于中央等待（错峰持有），卡秒口径按原文档 §8.3。三方案都有 Compute+STALL+Idle = 2M（守恒不变量，式(12)）。</p>
+
+<div class="takeaway"><b>④的结论。</b>B 用同一个 0.325 s 的 M，把 SS 首 token 从 0.0999 提前到 0.075——<b>短请求救回 SLO，长请求没有变慢</b>。诀窍只是把 LS 的读取启动挪后 0.025 s，让 SS 先独占整盘、其计算窗口正好覆盖 LS 的读取。C 的 STALL 最少却整体最慢：<b>"等待最少"≠"结果最好"</b>，混合批的同步代价把短成员拖到了长成员的节奏里。</div>
+<div class="note"><b>错峰不是万能药。</b>以下情况等待只有成本（§8.5）：没有关键盘竞争；计算已能掩盖读取；写暂存充裕；到达率低且 deadline 紧。单请求已读满唯一瓶颈盘时，加卡也不降它的数据下界；带宽方案已保护关键读取时，中央再等待是重复保护。最终以四目标之一的全局重放决策，<b>不能按类别硬性规定"LS 一律延后"</b>。</div>
+
+<div class="hook"><span class="ar">→</span><span>§4 只有 1 个盘。多盘时还有第二道阴影：<b>总带宽够，不等于每个盘都够</b>——而且不能靠搬数据来修。</span></div>
+
+<!-- ================================================================ -->
+<h2 id="m5"><span class="no">⑤</span>多盘尾部：总量够 ≠ 快<span class="en">§8.4 · 式(15) skew</span></h2>
+
+<p>两个盘各 40 GB/s（合计 80）。一层读取的字节<b>按盘分解成向量</b>——块在哪个盘是一致性哈希定死的。比较两个总量相同的向量：</p>
+<div class="stage">
+  <div class="ctrl">
+    <button id="vec80" aria-pressed="true">读向量 (8, 0) GB</button>
+    <button id="vec44" aria-pressed="false">读向量 (4, 4) GB</button>
+    <button id="mdPlay" class="primary">▶ 播放</button>
+    <button id="mdReset">↺ 重置</button>
+    <span class="t-now" id="mdTime">t = 0.000 s</span>
+  </div>
+  <div class="diskrow"><b>盘 D1</b><div class="dt" id="dt1"><div class="df" id="df1"></div></div><span class="dn" id="dn1">8.0 GB 待读</span></div>
+  <div class="diskrow"><b>盘 D2</b><div class="dt" id="dt2"><div class="df" id="df2"></div></div><span class="dn" id="dn2">0.0 GB 待读</span></div>
+  <div class="cap" id="mdCap" style="min-height:52px"></div>
+  <div class="substituted" id="mdCalc"></div>
+</div>
+<p>8/80 = 0.1 s 是"总量幻觉"：它只对 (4,4) 可达。这提醒两件事——<b>验证一个批能不能按时读齐，必须逐盘检查</b>（Σ<sub>d</sub>V<sub>d</sub> ≤ 80·Δ 并不充分），而组批/并发筛选应该比较<b>需求向量</b>，不是类别标签或总命中长度：</p>
+<div class="pairgrid">
+  <div class="paircard yes">✅ 批α=(8,0) 与 批β=(0,8) 并行：各占各盘，互不拖尾——盘向量互补，值得并发</div>
+  <div class="paircard no">❌ 批α=(8,0) 与 批β'=(8,0) 并行：争同一座盘，排队翻倍——类别不同也可能相撞，同类也可能互补</div>
+</div>
+<div class="formula"><span class="tag">式(15)·热点指标</span>
+  skew(V) = max<sub>d</sub>V<sub>d</sub> / ( (Σ<sub>d</sub>V<sub>d</sub>)/D )
+  &nbsp;&nbsp;<span style="color:#54636f">(8,0)：skew=8/4=2.0 → 拖尾 0.2 s；(4,4)：skew=1.0 → 0.1 s</span>
+</div>
+<div class="takeaway"><b>⑤的结论。</b>一致性哈希把块钉死在盘上——不能为了 0.1 s 把 (8,0) 的块挪去盘2（放置固定是全策略共同约束）。调度真正能做的是<b>看盘向量组批、看盘向量错峰</b>：这正是 S1 中央调度的核心信号（→⑦）。</div>
+
+<div class="hook"><span class="ar">→</span><span>B0 的三处可疑都看完了：份额绑 Path 数（②）、条数误判（③）、对盘向量视而不见。现在给出带宽侧的修复：<b>B1——保底、权重、上限三者分开</b>。</span></div>
+
+<!-- ================================================================ -->
+<h2 id="m6"><span class="no">⑥</span>B1：组保底 + 权重水位，把权利从 Path 数上解下来<span class="en">式(18) · §11.4</span></h2>
+
+<p>B1 的分配器分两步（η=(0.5, 0.3, 0.1, 0.1) 为 SS/LS/SL/LL 的基础比例，φ∈(0,1] 是保底系数，D<sub>c</sub> 是该组当前的速率需求上限，空组 D=0）：</p>
+<div class="formula"><span class="tag">式(18)·B1</span>
+  第一步：f<sub>d,c</sub> = min(D<sub>d,c</sub>, φ·η<sub>c</sub>·B<sub>d</sub>) ，&nbsp; L<sub>d</sub> = B<sub>d</sub> − Σ<sub>c</sub>f<sub>d,c</sub><br>
+  第二步：B<sub>d,c</sub> = f<sub>d,c</sub> + min(D<sub>d,c</sub> − f<sub>d,c</sub>, λ<sub>d</sub>·w<sub>d,c</sub>) ，&nbsp; Σ<sub>c</sub>B<sub>d,c</sub> = min(B<sub>d</sub>, Σ<sub>c</sub>D<sub>d,c</sub>)
+  &nbsp;&nbsp;<span style="color:#54636f">λ 由最后的等式解出（水位线）：已满足需求的组让出余量，空组不占带宽</span>
+</div>
+<p>关键设计：<b>保底按"组"算一次，不随 Path 数重复发放</b>——同样一组需求，不会因为多占几条逻辑 Path 就多拿权利（对照 ②）。拖动需求滑块试试：</p>
+
+<div class="stage">
+  <div class="ctrl">
+    <div class="presets" style="margin:0">
+      <button data-d="0,30,0,0">只有 LS 忙</button>
+      <button data-d="0,30,8,4">示例 (0,30,8,4)</button>
+      <button data-d="40,40,40,40">四组全忙</button>
+      <button data-d="0,0,0,0">全部空闲</button>
+    </div>
+  </div>
+  <div class="b1ctrl">
+    <span class="grp"><label for="dSS">需求 D<sub>SS</sub></label><input type="range" id="dSS" min="0" max="40" step="0.5" value="0" style="accent-color:var(--ss)"><b id="dSSv" style="font-family:Menlo,monospace">0</b></span>
+    <span class="grp"><label for="dLS">D<sub>LS</sub></label><input type="range" id="dLS" min="0" max="40" step="0.5" value="30" style="accent-color:var(--ls)"><b id="dLSv" style="font-family:Menlo,monospace">30</b></span>
+    <span class="grp"><label for="dSL">D<sub>SL</sub></label><input type="range" id="dSL" min="0" max="40" step="0.5" value="0" style="accent-color:var(--sl)"><b id="dSLv" style="font-family:Menlo,monospace">0</b></span>
+    <span class="grp"><label for="dLL">D<sub>LL</sub></label><input type="range" id="dLL" min="0" max="40" step="0.5" value="0" style="accent-color:var(--ll)"><b id="dLLv" style="font-family:Menlo,monospace">0</b></span>
+    <span class="grp">保底 φ：
+      <button class="phi" data-phi="0.25" aria-pressed="false">0.25</button>
+      <button class="phi" data-phi="0.5" aria-pressed="true">0.5</button>
+      <button class="phi" data-phi="1" aria-pressed="false">1.0</button>
+    </span>
+  </div>
+  <div id="b1rows"></div>
+  <div class="legend">
+    <span><span class="sw" style="background:var(--ls)"></span>保底 f = min(D, φη·40)</span>
+    <span><span class="sw" style="background:repeating-linear-gradient(45deg,rgba(255,255,255,.6) 0 3px,var(--ls) 3px 6px)"></span>按权重借到的余量 λ·w</span>
+    <span><span class="sw" style="background:#fff;border:2px dashed #b3ab93"></span>没分到的需求（容量不够时）</span>
+  </div>
+  <div class="b1read" id="b1read"></div>
+  <div class="cap" id="b1cap" style="min-height:48px"></div>
+</div>
+
+<div class="takeaway"><b>⑥的结论。</b>同样"只有 LS 忙"：B0 给多少取决于各组开了几条 Path（②的预设 SS×2,LS×1 里 LS 只剩 13.28）；B1 给 min(需求, 保底+权重余量)，<b>Path 数不再影响组权利</b>。点预设"四组全忙"再看 φ：φ=0.5 时饱和分配恰好回到 20/12/4/4——比例来自 η 权重而非 Path 数；φ=1 且四组全忙时保底恰好占满 40，<b>无余量可分</b>，这是必须保留的对照配置。</div>
+<div class="note">式(18) 是 GB/s 的流体分配器，思路（保底/份额/上限分离）受 mClock 启发但不继承其算法与保证。权重 w 的起点可取 η 或统一 1；自适应版按"剩余字节 ÷ 消费窗口"的追赶需求 + SLO 可挽救性 + 等待年龄生成有界权重（§11.6，含具体 clip 公式），都只使用导出观测。</div>
+
+<div class="hook"><span class="ar">→</span><span>S（组批错峰）、P（选路）、B（带宽）三层各自就位。它们怎么拼成一个闭环？收益又怎么证明来自哪一层？</span></div>
+
+<!-- ================================================================ -->
+<h2 id="m7"><span class="no">⑦</span>三层协同：谁在什么时间尺度上，拿什么信息，做什么决定<span class="en">§11 · S1/P1/B1</span></h2>
+
+<h3>7.1 控制闭环：中央不碰队列细节，存储不改批成员</h3>
+<div class="loop">
+  <div class="lb"><b>中央调度器 · S 层（S0→S1）</b>
+    <div class="d">组批、领取顺序、启动时刻（立即 / 关键事件后 / 有限 δ 延迟=错峰）。候选批含 singleton、同类批、读算互补、<b>盘负载互补</b>、含最老请求批；对同时空闲的实例做互不重叠的联合选择。</div>
+    <span class="ts">决策时机：实例空闲 / 关键 I/O 完成 / 有限周期</span>
+  </div>
+  <div class="arrows">
+    <div class="a">▼ <b>下发</b>：批成员 + 启动时刻（原子领取，版本校验）</div>
+    <div class="a">▲ <b>上报</b>：DiskGroupObservation——各盘各组服务量、活跃数、估计容量、版本</div>
+  </div>
+  <div class="lb"><b>NPU 数据面 · P 层（P0→P1）</b>
+    <div class="d">为每个已释放 I/O 在目标盘、本类别组内选 Path：P1 先用式(17) 筛 2–4 条，再在估计状态中重放入队到完成；配合版本号与客户端账本防惊群。</div>
+    <span class="ts">决策时机：每个 I/O 提交时</span>
+  </div>
+  <div class="arrows">
+    <div class="a">▼ <b>下发</b>：Block I/O → (盘, 组, Path) 入队，FIFO 不许加塞</div>
+    <div class="a">▲ <b>上报</b>：PathObservation——未完成数、剩余字节、速率区间</div>
+  </div>
+  <div class="lb"><b>ASU 存储 · B 层（B0→B1）</b>
+    <div class="d">快速工作守恒分配：队头完成/新入队立刻回收空闲容量；B1 按式(18) 组保底+权重水位，组内再按请求权重水位分到各队头。每 Path 队头串行、FIFO，不可抢占。</div>
+    <span class="ts">决策时机：队头变化即时 / 组权重 ~5ms 更新</span>
+  </div>
+  <div class="arrows">
+    <div class="a" style="max-width:100%">▼ <b>需求反馈</b>：ServiceHint——每个请求的消费时刻（下一层预计开算时间）、最终 deadline、权重。它是"需求信号"不是硬资源预留。</div>
+  </div>
+  <div class="lb" style="border-style:dashed"><b>共同信息边界</b><div class="d">三层共享请求 ID、类别、层消费时刻、deadline、配置版本。普通策略只见导出观测（版本化、带交付延迟），拿不到存储内部真值队列；Oracle 基线另设。对每个候选动作，在"估计状态"里重放到窗口结束、统一排空，按四目标打分——CPU 与通信开销计入真实时间。</div></div>
+</div>
+
+<h3>7.2 八格因子矩阵：一次只换一个机制，收益才说得清来源</h3>
+<p>点下面任意格子切换组合（也可以点三个层级开关）：</p>
+<div class="stage">
+  <div class="ctrl">
+    <span class="grp">S：<button class="sw2" data-l="S" data-v="0" aria-pressed="true">S0</button><button class="sw2" data-l="S" data-v="1" aria-pressed="false">S1</button></span>
+    <span class="grp">P：<button class="sw2" data-l="P" data-v="0" aria-pressed="true">P0</button><button class="sw2" data-l="P" data-v="1" aria-pressed="false">P1</button></span>
+    <span class="grp">B：<button class="sw2" data-l="B" data-v="0" aria-pressed="true">B0</button><button class="sw2" data-l="B" data-v="1" aria-pressed="false">B1</button></span>
+  </div>
+  <div class="factor" id="factorGrid"></div>
+  <div class="layerdesc" id="jointDesc"></div>
+</div>
+<p>这 8 个组合就是 E28 因子实验：同 trace、同画像、同硬容量，只改机制——单项、双项、全部联合的差值分别归因给 P、B、S 与交互项。第一阶段保持 B0 只换 S/P；第二阶段再引入 B1（带宽反馈闭环），用能力消融分清收益来源。S0 之外还要对比 EDF、SPT、最小 slack 等强简单基线，且统一开放候选批与等待选项。</p>
+
+<h3>7.3 四个目标，一次只优化一个</h3>
+<div class="objs">
+  <div class="obj"><b>J_M</b> = max<sub>i</sub>F<sub>i</sub> − t₀<br>全部请求完成时间（makespan）</div>
+  <div class="obj"><b>J_S</b> = Σ𝟙[F<sub>i</sub>&gt;d<sub>i</sub>]/n<br>SLO 违约率（满足率 = 1−J_S，压线算成功）</div>
+  <div class="obj"><b>J_T</b> = Σ(F<sub>i</sub>−a<sub>i</sub>)/n<br>平均 TTFT</div>
+  <div class="obj"><b>J_R</b> = Σ(F<sub>i</sub>−a<sub>i</sub>)/T<sub>i</sub>⁰/n<br>平均归一化 TTFT（T⁰=同拓扑独占重放的基线）</div>
+</div>
+<p style="font-size:14px;color:var(--soft)">④ 的表格正好给出这四个目标在同一例子上的取值——B 在 J_S/J_T/J_R 全胜且 J_M 不劣；C 只赢 STALL 卡秒（不在这四个目标里）。<b>不同目标可能选出不同方案，所以每次实验只优化一个 J。</b></p>
+
+<div class="note"><b>诚实边界。</b>这套设计尚未实现，也未取得实验增益：所有带宽/时间数字都是解析算例；单 Path 独占 40 GB/s 是理想化模型，首轮必须硬件标定；优化不能把热盘数据改读到冷盘；"多开 Path / 更大批 / 更高利用率"都不是应强行通过的单调性断言。Go/no-go 预注册：至少两个未参与调参的独立场景中，相对最强同能力简单基线净改善 ≥5%（时延）或 ≥5 个百分点（SLO），配对 95% 区间不跨零。</div>
+
+<div class="hook"><span class="ar">→</span><span>最后收个尾：一页速查本页用过的全部公式。</span></div>
+
+<!-- ================================================================ -->
+<h2 id="m8"><span class="no">⑧</span>公式速查<span class="en">每条一行大白话</span></h2>
+<table>
+  <thead><tr><th style="width:110px">编号</th><th class="l">公式</th><th class="l">大白话</th></tr></thead>
+  <tbody>
+    <tr><td>分类 χ</td><td class="l mono">( 1[h&gt;80000], 1[u&gt;512] )</td><td class="l">类别只由两个阈值决定，等号属 S；混合批不改成员类别</td></tr>
+    <tr><td>式(2)</td><td class="l mono">q_need = V^R_{β,ℓ+1,d} / c_{βℓ}</td><td class="l">下一层要不 STALL，本层计算窗口内得读到这个平均速率</td></tr>
+    <tr><td>式(6)</td><td class="l mono">b = r_c + (40 − Σr)/n_活跃</td><td class="l">B0：基础速率 + 余量均分给活跃 Path → ②的份额游戏</td></tr>
+    <tr><td>式(7)</td><td class="l mono">B_dc = a_dc·r_c + (a_dc/Σa)·(40 − Σa·r)</td><td class="l">组份额随活跃 Path 数漂移；SS×2 vs ×1 差 6.7 GB/s</td></tr>
+    <tr><td>式(8)</td><td class="l mono">p* = argmin N̂_dp</td><td class="l">P0：选条数最少的队列 → ③里 4.1 s vs 0.5 s 的教训</td></tr>
+    <tr><td>式(17)</td><td class="l mono">R̂ = t + (W_ahead+v)/b̂_after + t̂_submit</td><td class="l">P1：按"前方字节÷放入后速率"估完成时间，重放核验</td></tr>
+    <tr><td>式(11)</td><td class="l mono">C = max(R, Z_前层, E)；Z = C + c</td><td class="l">层依赖：读齐 + 前层算完 + 写缓冲可留，三者取最大才开算</td></tr>
+    <tr><td>式(12)</td><td class="l mono">Compute+STALL+Other+Idle = m·H</td><td class="l">实例状态守恒；写背压算 Other，不许漏记</td></tr>
+    <tr><td>式(13)</td><td class="l mono">J_M / J_S / J_T / J_R</td><td class="l">四个目标分头求解；SLO 满足率 = 1−J_S</td></tr>
+    <tr><td>式(15)</td><td class="l mono">skew = max V_d / 均值</td><td class="l">盘向量越偏斜，"总量够"越骗人：(8,0) vs (4,4)</td></tr>
+    <tr><td>式(18)</td><td class="l mono">f=min(D, φηB)；余量按 λ·w 水位分</td><td class="l">B1：保底按组发一次，余量按权重，与 Path 数解耦</td></tr>
+    <tr><td>式(19)</td><td class="l mono">λ₀ = min( min_d 40/E[V_d], m/E[K] )</td><td class="l">负载刻度按原始 S0P0B0 的输入需求定，只是生成尺度</td></tr>
+  </tbody>
+</table>
+
+<!-- ================================================================ -->
+<h2 id="m9"><span class="no">⑨</span>通俗版：仓库、窗口与加工台<span class="en">一图流类比</span></h2>
+<div class="card">
+  <ul class="plain" style="margin:0">
+    <li>每个 ASU 是一座<b>总出货速度 40 的仓库</b>，里面 256 个取货窗口（Path），每个窗口各排一条队。货放在哪座仓库由货号（hashID）决定，<b>不能因为旁边仓库清闲就去那里取同一件货</b>。</li>
+    <li>B0 的问题是：<b>多开窗口 = 多分余量</b>。订单量没变，只是一类订单多开了几个窗口，另一类就被挤慢——并发数偷走了业务优先级（②）。</li>
+    <li>"队伍人数少"不一定快：前面一个人搬四吨，可能比四个人各搬一小箱等更久。选窗口要看<b>前面剩多少货</b>（③）。</li>
+    <li>中央调度器是<b>安排加工台领料的人</b>：决定哪些订单一起加工、何时来取料。有时先让小订单取完、大订单晚 0.025 秒开始取，小订单就按时交付而大订单一分钟都没多等（④）。但仓库不挤时，故意等待只有成本。</li>
+    <li>两座仓库总出货够 ≠ 每座都够：8 吨货全压在一座，总量再宽也要排队（⑤）。</li>
+    <li>B1 给每类订单<b>保底速度 + 按需借余量</b>，跟你开了几个窗口无关（⑥）。</li>
+    <li>新做出的 KV 还要<b>送回仓库</b>：回货区（写暂存池）满了同样堵加工台——只优化取货是不够的。</li>
+    <li>最终裁判是<b>订单完成时间与按时交付率</b>，不是窗口开得多、设备看起来忙。</li>
+  </ul>
+</div>
+
+<footer>
+  依据：<a href="共享KV多ASU多Path下的组批错峰与带宽协同调度设计-20260917.md">共享KV多ASU多Path下的组批错峰与带宽协同调度设计-20260917.md</a>（§4 B0/P0、§8 手算例子、§11 P1/B1/S1、§12 实验）。<br>
+  本页所有数值均为该文档的解析算例（假设参数），不是仿真或实测结果；正式结论以 E26–E31 实验为准。姊妹篇：<a href="MPC方案图解-20260916.html">MPC 方案图解</a>。2026-09-17。
+</footer>
+
+</main>
+<div id="errbanner" role="alert"></div>
+
+<script>
+(function(){
+"use strict";
+window.addEventListener('error', function(e){
+  var b = document.getElementById('errbanner');
+  b.style.display='block'; b.textContent += '⚠ '+(e.message||e)+' @'+(e.lineno||'?')+'\n';
+});
+var $ = function(s){ return document.querySelector(s); };
+var $$ = function(s){ return Array.prototype.slice.call(document.querySelectorAll(s)); };
+var fmt = function(x,d){ return (+x).toFixed(d===undefined?3:d); };
+var CLS = ['SS','LS','SL','LL'];
+var CLSC = ['var(--ss)','var(--ls)','var(--sl)','var(--ll)'];
+var CLSH = ['#4C72B0','#8172B3','#DD8452','#937860'];
+
+/* ================================================================
+   ① 分类交互
+================================================================ */
+var TREND = {
+  SS:'新 token 少、写回少；但命中越接近 80K，读取仍然可观——SS ≠ 零成本。',
+  LS:'读多算少：读取 ≈ κℓ·h 主导。h=128000 时每层读 0.524 GB，独占 40 GB/s 的盘也要 0.0131 s，比 0.0018 s 的计算窗口长得多 → 必然 STALL。',
+  SL:'算多写多：新计算与新 KV 写回都重，读取相对小。',
+  LL:'读、attention、写回三头都重，是最容易同时压满计算与存储的类别。'
+};
+function c1update(){
+  var h = +$('#c1h').value, u = +$('#c1u').value;
+  $('#c1hv').textContent = h; $('#c1uv').textContent = u;
+  var b1 = h>80000?1:0, b2 = u>512?1:0;
+  var cls = (b1?'L':'S') + (b2?'L':'S');
+  var badge = $('#c1badge');
+  badge.textContent = cls;
+  badge.style.background = 'var(--'+cls.toLowerCase()+')';
+  var names = {SS:'短命中 · 短未命中', LS:'长命中 · 短未命中（读多算少）', SL:'短命中 · 长未命中（算多写多）', LL:'长命中 · 长未命中（三头都重）'};
+  $('#c1name').textContent = names[cls];
+  $('#c1calc').textContent = 'χ = (1['+h+'>80000], 1['+u+'>512]) = ('+b1+','+b2+') → '+cls;
+  $('#c1trend').textContent = TREND[cls];
+  $('#c1bytes').textContent = '每层读 ≈ κ·h = 4.096e-6 × '+h+' = '+fmt(4.096e-6*h,4)+' GB  |  每层写 ≈ κ·u = '+fmt(4.096e-6*u,5)+' GB';
+}
+$('#c1h').addEventListener('input', c1update);
+$('#c1u').addEventListener('input', c1update);
+c1update();
+
+/* ================================================================
+   ② B0 份额计算器
+================================================================ */
+var R0 = [5/24, 1/8, 1/8, 1/8];
+function b0(a){
+  var n = a.reduce(function(x,y){return x+y;},0);
+  if(n===0) return [0,0,0,0];
+  var sr = a.reduce(function(s,x,i){return s+x*R0[i];},0);
+  var L = 40 - sr;
+  return a.map(function(x,i){ return x===0 ? 0 : x*R0[i] + x/n*L; });
+}
+function shareUpdate(){
+  var a = [+$('#aSS').value, +$('#aLS').value, +$('#aSL').value, +$('#aLL').value];
+  $('#aSSv').textContent=a[0]; $('#aLSv').textContent=a[1]; $('#aSLv').textContent=a[2]; $('#aLLv').textContent=a[3];
+  var B = b0(a);
+  var bar = $('#shareBar'); bar.innerHTML='';
+  var tb = $('#shareTbl tbody'); tb.innerHTML='';
+  for(var i=0;i<4;i++){
+    if(B[i] > 1e-9){
+      var seg = document.createElement('div');
+      seg.className='seg'; seg.style.width=(B[i]/40*100)+'%'; seg.style.background=CLSC[i];
+      seg.textContent = CLS[i]+' '+fmt(B[i],2);
+      bar.appendChild(seg);
+    }
+  }
+  var n = a.reduce(function(x,y){return x+y;},0);
+  var sr = a.reduce(function(s,x,i){return s+x*R0[i];},0);
+  for(i=0;i<4;i++){
+    var tr = document.createElement('tr');
+    var base = a[i]*R0[i], borrow = B[i]-base;
+    tr.innerHTML = '<td class="l" style="color:'+CLSH[i]+';font-weight:700">'+CLS[i]+'</td><td>'+a[i]+'</td><td>'+fmt(base,3)+'</td><td>'+fmt(borrow,3)+'</td><td><b>'+fmt(B[i],4)+'</b></td>';
+    tb.appendChild(tr);
+  }
+  var tr2 = document.createElement('tr');
+  tr2.innerHTML = '<td class="l"><b>合计</b></td><td>'+n+'</td><td>'+fmt(sr,3)+'</td><td>'+fmt(40-Math.min(sr,40),3)+'</td><td><b>'+fmt(B.reduce(function(x,y){return x+y;},0),2)+(n===0?'（盘空闲）':' = 40')+'</b></td>';
+  tb.appendChild(tr2);
+  $('#shareCalc').textContent = '式(7) 代入 SS：B_SS = '+a[0]+'×(5/24) + '+a[0]+'/'+n+'×(40 − ('+a[0]+'×5/24 + '+a[1]+'×1/8 + '+a[2]+'×1/8 + '+a[3]+'×1/8)) = '+fmt(B[0],4)+' GB/s'+
+    (n>0?'   |   LS：B_LS = '+fmt(B[1],4)+' GB/s':'');
+  var v = $('#shareVerdict');
+  if(a[0]===2 && a[1]===1 && a[2]===0 && a[3]===0){
+    v.innerHTML = '<b>SS 多开一条 Path（1→2）</b>：SS 20.04 → 26.72（+6.68），LS 19.96 → 13.28（−6.68）。字节量没变——盘还是 40 GB/s，变的只是权利分配。';
+  } else if(a[0]===96 && a[1]===1 && a[2]===0 && a[3]===0){
+    v.innerHTML = '<b>SS 铺满 96 条</b>：SS ≈ 39.67，LS 被挤到 0.33——但仍保有正的基础速率 1/8=0.125（B0 不饿死人，只是份额漂移）。';
+  } else if(a[0]===1 && a[1]===0 && a[2]===0 && a[3]===0){
+    v.innerHTML = '<b>仅 SS 一条 Path</b>：独享整盘 40。20/12/4/4 只是全活跃时的基础份额，不是组的硬上限。';
+  } else if(a[0]===1 && a[1]===1 && a[2]===0 && a[3]===0){
+    v.innerHTML = '各一条时两组接近均分（20.04 / 19.96），已偏离 20:12 的基础比例——比例被"活跃条数"改写了。';
+  } else if(n===0){
+    v.innerHTML = '全部空闲：整盘 40 GB/s 闲置，等待下一个 I/O。';
+  } else {
+    v.innerHTML = '拖动滑块或点预设，观察"活跃条数"如何改写各组份额（总和恒为 40）。';
+  }
+}
+['#aSS','#aLS','#aSL','#aLL'].forEach(function(id){ $(id).addEventListener('input', shareUpdate); });
+$$('#m2 .presets button').forEach(function(btn){
+  btn.addEventListener('click', function(){
+    var a = btn.dataset.a.split(',');
+    $('#aSS').value=a[0]; $('#aLS').value=a[1]; $('#aSL').value=a[2]; $('#aLL').value=a[3];
+    shareUpdate();
+  });
+});
+shareUpdate();
+
+/* ================================================================
+   ③ Path 队列动画（§8.1）
+================================================================ */
+var qState = null, qRAF = null, qLast = 0, qTried = {};
+var SCALE = 4.6; // GB 满宽
+function qBuild(newTo){ // newTo: 'P1' | 'P2' | null
+  var qs = {
+    P1: {items:[{rem:4, base:true}]},
+    P2: {items:[{rem:0.1,base:true},{rem:0.1,base:true},{rem:0.1,base:true},{rem:0.1,base:true}]}
+  };
+  if(newTo){ qs[newTo].items.push({rem:0.1, base:false}); }
+  return qs;
+}
+function qRender(qs, t){
+  ['P1','P2'].forEach(function(k){
+    var track = $('#qtrack'+k); track.innerHTML='';
+    var items = qs[k].items;
+    for(var i=0;i<items.length;i++){
+      var c = document.createElement('div');
+      c.className = 'chip '+(items[i].base?'base':'newio')+(i===0?' head':'')+(items[i].done?' done':'');
+      c.style.width = 'calc('+ (items[i].rem/SCALE*100) +'% - 2px)';
+      if(items[i].base && items[i].initRem >= 0.5) c.textContent = fmt(items[i].rem,2)+' GB';
+      track.appendChild(c);
+    }
+    var tot = items.reduce(function(s,x){return s + (x.done?0:x.rem);},0);
+    $('#qread'+k).textContent = '剩余 '+fmt(tot,2)+' GB · '+items.filter(function(x){return !x.done;}).length+' 项'+(items.length&&items[0]&&!items[0].done?'（队头服务中）':'');
+  });
+  $('#qTime').textContent = 't = '+fmt(t,2)+' s';
+}
+function qInitRem(qs){ ['P1','P2'].forEach(function(k){ qs[k].items.forEach(function(x){ if(x.initRem===undefined) x.initRem=x.rem; }); }); }
+function qRun(mode){
+  if(qRAF) cancelAnimationFrame(qRAF);
+  var qs = qBuild(mode==='p0' ? 'P1' : 'P2');
+  qInitRem(qs);
+  var t = 0, last = performance.now();
+  var target = mode==='p0' ? qs.P1 : qs.P2;
+  $('#qCap').innerHTML = mode==='p0'
+    ? '<b>P0（式8）</b>：P1 队列 1 项 &lt; P2 队列 4 项 → 选 P1。新 I/O 排在 4 GB 队头后面……'
+    : '<b>P1（式17）</b>：前方剩余 P1=4.0 GB &gt; P2=0.4 GB → 选 P2。新 I/O 排在四个小块后面……';
+  function step(now){
+    var dt = Math.min((now-last)/1000, 0.1); last = now;
+    t += dt;
+    ['P1','P2'].forEach(function(k){
+      var items = qs[k].items;
+      while(items.length && !items[0].done){
+        items[0].rem -= 1*dt;
+        if(items[0].rem <= 1e-9){ items[0].rem = 0; items[0].done = true; items.shift(); if(items.length===0) break; }
+        else break;
+      }
+    });
+    var newItem = target.items.filter(function(x){return !x.base;})[0];
+    var fin = !newItem || newItem.done;
+    qRender(qs, t);
+    if(fin){
+      var el = t;
+      qTried[mode] = el;
+      $('#qCap').innerHTML = (mode==='p0'
+        ? '<b>P0 选 P1</b>：前方 4 GB + 自己 0.1 GB = 4.1 GB ÷ 1 GB/s → 新 I/O <span class="tt">'+fmt(el,2)+' s</span> 才完成 ✗'
+        : '<b>P1 选 P2</b>：前方 0.4 GB + 自己 0.1 GB = 0.5 GB ÷ 1 GB/s → 新 I/O <span class="tt">'+fmt(el,2)+' s</span> 完成 ✓');
+      qScoreUpdate();
+      qRAF = null; return;
+    }
+    qRAF = requestAnimationFrame(step);
+  }
+  qRAF = requestAnimationFrame(step);
+}
+function qScoreUpdate(){
+  var s = $('#qScore'); s.innerHTML='';
+  if(qTried.p0!==undefined) s.innerHTML += '<div>▢ P0（条数最少 → P1）：<b style="color:var(--bad)">'+fmt(qTried.p0,2)+' s</b></div>';
+  if(qTried.p1!==undefined) s.innerHTML += '<div>▢ P1（剩余字节 → P2）：<b style="color:var(--good)">'+fmt(qTried.p1,2)+' s</b>（快 '+(qTried.p0!==undefined?fmt(qTried.p0/qTried.p1,1)+' 倍':'')+'）</div>';
+  if(qTried.p0!==undefined && qTried.p1!==undefined)
+    s.innerHTML += '<div style="color:var(--soft);font-size:13.5px">同一个新 I/O，两种规则差 8 倍。P0 没错在"看队列"，错在把 4 GB 和 0.1 GB 的队头算成同一件事。</div>';
+}
+$('#runP0').addEventListener('click', function(){ qRun('p0'); });
+$('#runP1').addEventListener('click', function(){ qRun('p1'); });
+$('#qReset').addEventListener('click', function(){
+  if(qRAF){cancelAnimationFrame(qRAF); qRAF=null;}
+  qTried={}; qScoreUpdate();
+  var qs=qBuild(null); qInitRem(qs); qRender(qs,0);
+  $('#qCap').textContent='点上面任一按钮开始。队头以 1 GB/s 缩短；新 I/O 排在队尾，看它多久轮到完成。';
+});
+(function(){ var qs=qBuild(null); qInitRem(qs); qRender(qs,0); })();
+
+/* ================================================================
+   ④ 时间线动画（§8.3）
+================================================================ */
+var T = 0.42;
+var tSS_A = 24/481;          // 0.049896…
+function bytesAt(curve, t){
+  if(t<=curve[0][0]) return 0;
+  for(var i=1;i<curve.length;i++){
+    if(t<=curve[i][0]){
+      var dt = curve[i][0]-curve[i-1][0];
+      if(dt<=0) return curve[i][1];
+      return curve[i-1][1] + (curve[i][1]-curve[i-1][1])*(t-curve[i-1][0])/dt;
+    }
+  }
+  return curve[curve.length-1][1];
+}
+var PLANS = {
+  A: {
+    lab1:'实例1 · SS 请求', lab2:'实例2 · LS 请求',
+    lanes:[
+      [ {t0:0,t1:tSS_A,ty:'stall',tx:'等读 1GB @20.04'},
+        {t0:tSS_A,t1:tSS_A+0.05,ty:'compute',tx:'算 0.05'},
+        {t0:tSS_A+0.05,t1:T,ty:'idle',tx:'空闲'} ],
+      [ {t0:0,t1:0.125,ty:'stall',tx:'等读 4GB（前段19.96，后段40）'},
+        {t0:0.125,t1:0.325,ty:'compute',tx:'算 0.20'},
+        {t0:0.325,t1:T,ty:'idle',tx:'空闲'} ]
+    ],
+    disk:[
+      {t0:0,t1:tSS_A,split:[['ss',481/24],['ls',479/24]],led:'活跃 Path：SS×1 b=20.04 ｜ LS×1 b=19.96 ｜ Σ=40'},
+      {t0:tSS_A,t1:0.125,split:[['ls',40]],led:'SS Path 已完成 → 重算式(6)：LS×1 b=40 ｜ Σ=40'},
+      {t0:0.125,t1:T,split:[],led:'盘空闲（读已全部完成）'}
+    ],
+    bytes:{ ss:[[0,0],[tSS_A,1]], ls:[[0,0],[tSS_A,479/481],[0.125,4]] },
+    flags:[{t:tSS_A+0.05,tx:'SS 0.0999 ✗',ok:false},{t:0.325,tx:'LS 0.325 ✓',ok:true}],
+    events:[
+      {t:0,tx:'<b>A · t=0</b>：两实例同时领取。SS、LS 各占本组 1 条 Path → <b>式(6)</b>：b_SS = 5/24 + (40−5/24−1/8)/2 = 481/24 ≈ <b>20.04</b>，b_LS = 479/24 ≈ <b>19.96</b> GB/s。'},
+      {t:tSS_A,tx:'<b>t=0.0499</b>：SS 读完 1 GB（1÷(481/24)），转入计算 0.05 s。SS Path 出队 → 活跃集只剩 LS，式(6) 重算：<b>b_LS 跳到 40</b>。'},
+      {t:tSS_A+0.05,tx:'<b>t=0.0999</b>：SS 首 token = 0.0499+0.05 = <span class="tt">0.0999</span> &gt; SLO 0.09 <b>✗</b>（差 0.0099 s——就差这半口气）。'},
+      {t:0.125,tx:'<b>t=0.125</b>：LS 读完：前 0.0499 s 按 19.96 读到 0.996 GB，剩 3.004 GB @40 → 0.125 s。核账：总读 5 GB ÷ 40 = 0.125，<b>盘全程满转</b>。'},
+      {t:0.325,tx:'<b>t=0.325</b>：LS 首 token = 0.125+0.20 = 0.325 ✓。M=0.325，SLO 满足率 <b>50%</b>——盘没有偷懒，短请求仍然超期。'}
+    ]
+  },
+  B: {
+    lab1:'实例1 · SS 请求', lab2:'实例2 · LS 请求',
+    lanes:[
+      [ {t0:0,t1:0.025,ty:'stall',tx:'等读 1GB @40'},
+        {t0:0.025,t1:0.075,ty:'compute',tx:'算 0.05'},
+        {t0:0.075,t1:T,ty:'idle',tx:'空闲'} ],
+      [ {t0:0,t1:0.025,ty:'cwait',tx:'错峰等待'},
+        {t0:0.025,t1:0.125,ty:'stall',tx:'等读 4GB @40'},
+        {t0:0.125,t1:0.325,ty:'compute',tx:'算 0.20'},
+        {t0:0.325,t1:T,ty:'idle',tx:'空闲'} ]
+    ],
+    disk:[
+      {t0:0,t1:0.025,split:[['ss',40]],led:'活跃 Path：SS×1 b=40（独占） ｜ Σ=40'},
+      {t0:0.025,t1:0.125,split:[['ls',40]],led:'SS 读毕 → LS×1 b=40 ｜ Σ=40'},
+      {t0:0.125,t1:T,split:[],led:'盘空闲'}
+    ],
+    bytes:{ ss:[[0,0],[0.025,1]], ls:[[0,0],[0.025,0],[0.125,4]] },
+    flags:[{t:0.075,tx:'SS 0.075 ✓',ok:true},{t:0.325,tx:'LS 0.325 ✓',ok:true}],
+    events:[
+      {t:0,tx:'<b>B · t=0</b>：调度器<b>只放行 SS</b>（错峰）：盘上仅 SS 组 1 条活跃 Path → 式(6)：b = 5/24 + (40−5/24)/1 = <b>40</b>，SS 独占整盘。LS 留在中央队列（错峰等待）。'},
+      {t:0.025,tx:'<b>t=0.025</b>：SS 读完（1÷40=0.025）立即开算 0.05 s；此刻唤醒实例2 领取 LS——SS Path 已空，<b>LS 独占 40</b>，正好与 SS 的计算重叠。'},
+      {t:0.075,tx:'<b>t=0.075</b>：SS 首 token = 0.025+0.05 = <b>0.075 ≤ 0.09 ✓</b>（②里差的那半口气，这里补上了）。'},
+      {t:0.125,tx:'<b>t=0.125</b>：LS 读完（0.025+4÷40 = 0.125），开算 0.20 s。注意：LS 的读完成时刻与 A 完全相同——错峰没有推迟长请求。'},
+      {t:0.325,tx:'<b>t=0.325</b>：LS 首 token 0.325 ✓ → SLO <b>100%</b>，且 M=0.325 与 A 完全相同：<b>短请求救回，长请求没被牺牲</b>。'}
+    ]
+  },
+  C: {
+    lab1:'实例1 · 混合批 {SS+LS}', lab2:'实例2（一次一批）',
+    lanes:[
+      [ {t0:0,t1:0.125,ty:'stall',tx:'等两层块（SS 1GB + LS 4GB）'},
+        {t0:0.125,t1:0.375,ty:'compute',tx:'整批算 0.25'},
+        {t0:0.375,t1:T,ty:'idle',tx:''} ],
+      [ {t0:0,t1:T,ty:'idle',tx:'空闲——单实例同时只挂一个批'} ]
+    ],
+    disk:[
+      {t0:0,t1:tSS_A,split:[['ss',481/24],['ls',479/24]],led:'成员各走原类别：SS×1 b=20.04 ｜ LS×1 b=19.96 ｜ Σ=40'},
+      {t0:tSS_A,t1:0.125,split:[['ls',40]],led:'SS 块读毕 → LS×1 b=40 ｜ Σ=40'},
+      {t0:0.125,t1:T,split:[],led:'盘空闲'}
+    ],
+    bytes:{ ss:[[0,0],[tSS_A,1]], ls:[[0,0],[tSS_A,479/481],[0.125,4]] },
+    flags:[{t:0.375,tx:'SS 0.375 ✗',ok:false},{t:0.375,tx:'LS 0.375 ✓',ok:true}],
+    events:[
+      {t:0,tx:'<b>C · t=0</b>：两请求合成<b>一个完整混合批</b>，实例1 领取（实例2 空闲）。成员仍各走原类别 Path：SS 的 1 GB 走 SS 组、LS 的 4 GB 走 LS 组，速率同 A。'},
+      {t:tSS_A,tx:'<b>t=0.0499</b>：SS 的 1 GB 先读完，LS 提速到 40。但批必须等<b>所有成员</b>的块都齐。'},
+      {t:0.125,tx:'<b>t=0.125</b>：<b>式(11)</b> C = max(R_SS, R_LS) = 0.125 才能开算；批计算 0.25 s（无合批加速假设）。短成员被长成员的节奏拖住。'},
+      {t:0.375,tx:'<b>t=0.375</b>：双双首 token 0.375：SS ✗。STALL 卡秒最少（0.125）却整体最慢——<b>"等待最少" ≠ "结果最好"</b>。'}
+    ]
+  }
+};
+
+var tl = { plan:'A', t:0, playing:false, raf:null, last:0, speed:1, blks:[], dsegs:[], flagsEls:[] };
+function tlBuild(){
+  var p = PLANS[tl.plan];
+  $('#lab1').innerHTML = p.lab1; $('#lab2').innerHTML = p.lab2;
+  tl.blks = [];
+  [['#trk1',0],['#trk2',1]].forEach(function(pair){
+    var trk = $(pair[0]); trk.innerHTML='';
+    p.lanes[pair[1]].forEach(function(seg){
+      var el = document.createElement('div');
+      el.className='blk '+seg.ty; el.textContent=seg.tx;
+      trk.appendChild(el);
+      tl.blks.push({el:el, t0:seg.t0, t1:seg.t1});
+    });
+  });
+  // 盘通道
+  var trkD = $('#trkD'); trkD.innerHTML=''; tl.dsegs=[];
+  p.disk.forEach(function(seg){
+    var row = document.createElement('div'); row.className='dsegrow';
+    seg.split.forEach(function(sp){
+      var d = document.createElement('div');
+      d.className='dseg '+sp[0];
+      d.style.width = (sp[1]/40*100)+'%';
+      d.dataset.tx = sp[0].toUpperCase()+' '+fmt(sp[1], sp[1]>=10?1:2);
+      row.appendChild(d);
+    });
+    if(seg.split.length===0){ var d2=document.createElement('div'); d2.className='dseg off'; d2.style.width='100%'; d2.dataset.tx='盘空闲'; row.appendChild(d2); }
+    trkD.appendChild(row);
+    tl.dsegs.push({el:row, t0:seg.t0, t1:seg.t1, led:seg.led});
+  });
+  tlSizeDiskLabels();
+  // 首 token 旗标 + SLO 线
+  var tlBox = $('#tlBox');
+  $$('.flag,.deadline').forEach(function(e){ e.remove(); });
+  p.flags.forEach(function(f,i){
+    var el = document.createElement('div');
+    el.className='flag '+(f.ok?'ok':'no'); el.textContent=f.tx;
+    el.style.left = 'calc(126px + (100% - 126px) * '+(f.t/T)+')';
+    el.style.top = (2 + i*16)+'px';
+    tlBox.appendChild(el); tl.flagsEls.push({el:el, t:f.t});
+  });
+  [[0.09,'SS SLO 0.09'],[0.40,'LS SLO 0.40']].forEach(function(d){
+    var el = document.createElement('div');
+    el.className='deadline';
+    el.style.left='calc(126px + (100% - 126px) * '+(d[0]/T)+')';
+    el.innerHTML='<span class="dl">'+d[1]+'</span>';
+    tlBox.appendChild(el);
+  });
+  // 事件表
+  var ev = $('#tlEvents'); ev.innerHTML = p.events.map(function(e){return '<div><b style="font-family:Menlo,monospace">t='+fmt(e.t,4)+' s</b> — '+e.tx+'</div>';}).join('');
+  // 字节条
+  var bb = $('#tlBytes'); bb.innerHTML='';
+  [['SS 读（1 GB）','ss',1],['LS 读（4 GB）','ls',4]].forEach(function(cfg){
+    var row = document.createElement('div'); row.className='bytebar';
+    row.innerHTML = '<span>'+cfg[0]+'</span><div class="bt"><div class="bf" id="bf-'+cfg[1]+'" style="background:var(--'+cfg[1]+')"></div></div><span class="bn" id="bn-'+cfg[1]+'"></span>';
+    bb.appendChild(row);
+  });
+  // 表格高亮
+  $('#cmpTbl').setAttribute('data-plan', tl.plan);
+}
+function tlSizeDiskLabels(){
+  var width = $('#trkD').clientWidth || 500;
+  tl.dsegs.forEach(function(seg){
+    var rowW = (seg.t1-seg.t0)/T*width;
+    Array.prototype.forEach.call(seg.el.children, function(ch, idx, arr){
+      var frac = parseFloat(ch.style.width)/100;
+      var px = rowW*frac;
+      var parts = ch.dataset.tx.split(' ');
+      ch.textContent = px>=56 ? ch.dataset.tx : (px>=30 ? (parts[1]||parts[0]) : '');
+    });
+  });
+}
+function tlLedgerAt(t){
+  var p = PLANS[tl.plan];
+  var seg = p.disk[0];
+  for(var i=0;i<p.disk.length;i++){ if(t >= p.disk[i].t0-1e-9){ seg = p.disk[i]; } }
+  var served = 0;
+  p.disk.forEach(function(s){ if(s.split.length){ served += Math.max(0, Math.min(t,s.t1)-s.t0)*40; } });
+  return seg.led + ' ｜ 盘累计已读 '+fmt(served,3)+' GB / 5 GB';
+}
+function tlRender(){
+  var p = PLANS[tl.plan], t = tl.t;
+  tl.blks.forEach(function(b){
+    var t1 = Math.min(t, b.t1);
+    if(t <= b.t0){ b.el.style.width='0'; return; }
+    b.el.style.left = (b.t0/T*100)+'%';
+    b.el.style.width = ((t1-b.t0)/T*100)+'%';
+    b.el.classList.toggle('notext', (t1-b.t0)/T < 0.055);
+  });
+  tl.dsegs.forEach(function(s){
+    var t1 = Math.min(t, s.t1);
+    if(t <= s.t0){ s.el.style.width='0'; return; }
+    s.el.style.left = (s.t0/T*100)+'%';
+    s.el.style.width = ((t1-s.t0)/T*100)+'%';
+  });
+  tl.flagsEls.forEach(function(f){ f.el.style.opacity = t >= f.t ? 1 : 0; });
+  var capTx = p.events[0].tx;
+  for(var i=0;i<p.events.length;i++){ if(t >= p.events[i].t-1e-9) capTx = p.events[i].tx; }
+  $('#tlCap').innerHTML = capTx;
+  $('#tlNow').textContent = 't = '+fmt(t,3)+' s';
+  $('#tlScrub').value = t;
+  $('#bf-ss').style.width = (bytesAt(p.bytes.ss,t)/1*100)+'%';
+  $('#bn-ss').textContent = fmt(bytesAt(p.bytes.ss,t),3)+' / 1 GB';
+  $('#bf-ls').style.width = (bytesAt(p.bytes.ls,t)/4*100)+'%';
+  $('#bn-ls').textContent = fmt(bytesAt(p.bytes.ls,t),3)+' / 4 GB';
+  $('#tlLedger').textContent = tlLedgerAt(t);
+}
+function tlSetPlan(k){
+  if(tl.raf) cancelAnimationFrame(tl.raf), tl.raf=null;
+  tl.plan=k; tl.t=0; tl.playing=false;
+  $('#tlPlay').textContent='▶ 播放';
+  ['plA','plB','plC'].forEach(function(id){ $('#'+id).setAttribute('aria-pressed', id==='pl'+k ? 'true':'false'); });
+  tlBuild(); tlRender();
+}
+$('#plA').addEventListener('click', function(){tlSetPlan('A');});
+$('#plB').addEventListener('click', function(){tlSetPlan('B');});
+$('#plC').addEventListener('click', function(){tlSetPlan('C');});
+$('#tlPlay').addEventListener('click', function(){
+  if(tl.playing){ tl.playing=false; if(tl.raf)cancelAnimationFrame(tl.raf); $('#tlPlay').textContent='▶ 播放'; return; }
+  if(tl.t >= T-1e-6) tl.t=0;
+  tl.playing=true; $('#tlPlay').textContent='⏸ 暂停'; tl.last=performance.now();
+  function loop(now){
+    if(!tl.playing) return;
+    var dt = Math.min((now-tl.last)/1000, 0.1); tl.last=now;
+    tl.t += dt*(T/13)*tl.speed;
+    if(tl.t>=T){ tl.t=T; tl.playing=false; $('#tlPlay').textContent='▶ 播放'; tlRender(); return; }
+    tlRender();
+    tl.raf=requestAnimationFrame(loop);
+  }
+  tl.raf=requestAnimationFrame(loop);
+});
+$('#tlReset').addEventListener('click', function(){ if(tl.raf)cancelAnimationFrame(tl.raf); tl.playing=false; $('#tlPlay').textContent='▶ 播放'; tl.t=0; tlRender(); });
+function tlEventIdx(){
+  var p=PLANS[tl.plan], idx=0;
+  for(var i=0;i<p.events.length;i++){ if(tl.t >= p.events[i].t-1e-9) idx=i; }
+  return idx;
+}
+$('#tlNext').addEventListener('click', function(){
+  var p=PLANS[tl.plan], i=tlEventIdx();
+  if(tl.raf)cancelAnimationFrame(tl.raf); tl.playing=false; $('#tlPlay').textContent='▶ 播放';
+  if(i < p.events.length-1){ tl.t = p.events[i+1].t + 1e-6; tlRender(); }
+});
+$('#tlPrev').addEventListener('click', function(){
+  var p=PLANS[tl.plan], i=tlEventIdx();
+  if(tl.raf)cancelAnimationFrame(tl.raf); tl.playing=false; $('#tlPlay').textContent='▶ 播放';
+  var target = (tl.t - p.events[i].t < 1e-4) ? i-1 : i; // 已在事件点上则退到前一个
+  if(target >= 0){ tl.t = p.events[Math.max(target,0)].t + 1e-6; tlRender(); }
+  else { tl.t = 0; tlRender(); }
+});
+$('#tlScrub').addEventListener('input', function(){
+  if(tl.raf)cancelAnimationFrame(tl.raf); tl.playing=false; $('#tlPlay').textContent='▶ 播放';
+  tl.t = +this.value; tlRender();
+});
+window.addEventListener('resize', function(){ tlSizeDiskLabels(); });
+// 轴刻度
+(function(){
+  var ax = $('#tlAxis'); ax.innerHTML='';
+  for(var v=0; v<=0.4001; v+=0.05){
+    var s = document.createElement('span');
+    s.style.left = (v/T*100)+'%'; s.textContent = fmt(v,2).replace(/0+$/,'').replace(/\.$/,'');
+    ax.appendChild(s);
+  }
+})();
+tlSetPlan('A');
+
+/* ================================================================
+   ⑤ 多盘尾部
+================================================================ */
+var md = { vec:[8,0], t:0, playing:false, raf:null, last:0 };
+function mdRender(){
+  var r1 = Math.max(0, md.vec[0]-40*md.t), r2 = Math.max(0, md.vec[1]-40*md.t);
+  $('#df1').style.width = (r1/8*100)+'%'; $('#df2').style.width = (r2/8*100)+'%';
+  $('#dn1').textContent = fmt(r1,2)+' GB 待读'; $('#dn2').textContent = fmt(r2,2)+' GB 待读';
+  $('#mdTime').textContent = 't = '+fmt(md.t,3)+' s';
+  var doneAt = Math.max(md.vec[0],md.vec[1])/40;
+  var capTx;
+  if(md.vec[0]===8){
+    capTx = md.t>=doneAt
+      ? '<b>(8,0) 完成：'+fmt(doneAt,2)+' s。</b>8 GB 全压在 D1：8÷40 = 0.2 s。总量幻觉 8÷80 = 0.1 s 在这里<b>不可达</b>——D2 全程闲着，块却不许搬过去。'
+      : '盘 D1 满速 40 GB/s 放血，D2 无 I/O（块不在这座盘上）。';
+  } else {
+    capTx = md.t>=doneAt
+      ? '<b>(4,4) 完成：'+fmt(doneAt,2)+' s。</b>两盘并行各 4÷40 = 0.1 s = 总量下界 8÷80——同样的 8 GB，快一倍。'
+      : '两盘同时满速：并行度终于用上了。';
+  }
+  $('#mdCap').innerHTML = capTx;
+  $('#mdCalc').textContent = 'skew(式15) = max('+md.vec[0]+','+md.vec[1]+') / (('+md.vec[0]+'+'+md.vec[1]+')/2) = '+fmt(Math.max(md.vec[0],md.vec[1])/((md.vec[0]+md.vec[1])/2),1)
+    +'   →   完成下界 = max_d V_d/40 = '+fmt(doneAt,2)+' s（不是 ΣV_d/80）';
+}
+function mdSet(vec){
+  md.vec = vec; md.t=0;
+  $('#vec80').setAttribute('aria-pressed', vec[0]===8);
+  $('#vec44').setAttribute('aria-pressed', vec[0]===4);
+  mdRender();
+}
+$('#vec80').addEventListener('click', function(){ mdSet([8,0]); });
+$('#vec44').addEventListener('click', function(){ mdSet([4,4]); });
+$('#mdPlay').addEventListener('click', function(){
+  if(md.playing){ md.playing=false; if(md.raf)cancelAnimationFrame(md.raf); return; }
+  if(md.t >= 0.201) md.t=0;
+  md.playing=true; md.last=performance.now();
+  function loop(now){
+    if(!md.playing) return;
+    var dt=Math.min((now-md.last)/1000,0.1); md.last=now;
+    md.t += dt*0.07;
+    if(md.t>=0.21){ md.t=0.21; md.playing=false; mdRender(); return; }
+    mdRender(); md.raf=requestAnimationFrame(loop);
+  }
+  md.raf=requestAnimationFrame(loop);
+});
+$('#mdReset').addEventListener('click', function(){ md.playing=false; if(md.raf)cancelAnimationFrame(md.raf); md.t=0; mdRender(); });
+mdRender();
+
+/* ================================================================
+   ⑥ B1 计算器
+================================================================ */
+var ETA = [0.5,0.3,0.1,0.1];
+function waterfill(caps, w, L){
+  var idx = [];
+  for(var i=0;i<caps.length;i++) if(caps[i] > 1e-9) idx.push(i);
+  idx.sort(function(a,b){ return caps[a]/w[a] - caps[b]/w[b]; });
+  var alloc = caps.map(function(){return 0;}), lam = 0, remaining = L;
+  for(var k=0;k<idx.length;k++){
+    var wSum = 0;
+    for(var j=k;j<idx.length;j++) wSum += w[idx[j]];
+    var bp = caps[idx[k]]/w[idx[k]];
+    var inc = (bp-lam)*wSum;
+    if(remaining <= inc + 1e-12){ lam += remaining/wSum; remaining = 0; break; }
+    remaining -= inc; lam = bp; alloc[idx[k]] = caps[idx[k]];
+  }
+  var spare = Math.max(0, remaining);
+  if(spare < 1e-9){
+    for(k=0;k<idx.length;k++){ if(alloc[idx[k]]===0) alloc[idx[k]] = lam*w[idx[k]]; }
+  }
+  return {alloc:alloc, lam:lam, spare:spare, any: idx.length>0};
+}
+function b1update(){
+  var D = [+$('#dSS').value, +$('#dLS').value, +$('#dSL').value, +$('#dLL').value];
+  $('#dSSv').textContent=D[0]; $('#dLSv').textContent=D[1]; $('#dSLv').textContent=D[2]; $('#dLLv').textContent=D[3];
+  var phi = +($('#m6 .phi[aria-pressed="true"]')||{dataset:{phi:0.5}}).dataset.phi;
+  var f = D.map(function(d,i){ return Math.min(d, phi*ETA[i]*40); });
+  var L = 40 - f.reduce(function(a,b){return a+b;},0);
+  var caps = D.map(function(d,i){ return Math.max(0, d-f[i]); });
+  var r = waterfill(caps, ETA, L);
+  var B = f.map(function(x,i){ return x + r.alloc[i]; });
+  // 行渲染
+  var rows = $('#b1rows'); rows.innerHTML='';
+  for(var i=0;i<4;i++){
+    var row = document.createElement('div'); row.className='b1row';
+    var borrow = r.alloc[i], unmet = D[i]-f[i]-borrow;
+    var fPct = f[i]/40*100, bPct = borrow/40*100, uLeft = (f[i]+borrow)/40*100, uPct = unmet/40*100;
+    row.innerHTML =
+      '<div class="cl"><span class="dot" style="background:'+CLSC[i]+'"></span><b>'+CLS[i]+'</b> <span style="color:var(--soft)">η='+ETA[i]+'</span></div>'+
+      '<div class="bt">'+
+        (fPct>0?'<div class="f" title="保底 '+fmt(f[i],2)+'" style="width:'+fPct+'%;background:'+CLSC[i]+'"></div>':'')+
+        (bPct>0?'<div class="borr" title="借用 '+fmt(borrow,2)+'" style="width:'+bPct+'%;background:'+CLSC[i]+'"></div>':'')+
+        (uPct>0.4?'<div class="unmet" title="未满足 '+fmt(unmet,2)+'" style="left:'+uLeft+'%;width:'+uPct+'%"></div>':'')+
+      '</div>'+
+      '<div class="rn">需求 '+fmt(D[i],1)+' → 分到 <b>'+fmt(B[i],2)+'</b>'+(f[i]>0?' = 保底 '+fmt(f[i],1):'')+(borrow>0.005?' + 借用 '+fmt(borrow,2):'')+(unmet>0.005?'，<span style="color:var(--bad)">缺 '+fmt(unmet,2)+'</span>':'')+'</div>';
+    rows.appendChild(row);
+  }
+  var sum = B.reduce(function(a,b){return a+b;},0), sumD = D.reduce(function(a,b){return a+b;},0);
+  var lines = ['第一步（保底）：f = ( '+f.map(function(x){return fmt(x,2);}).join(', ')+' )，L = 40 − Σf = '+fmt(L,2)];
+  if(r.any && r.spare<1e-9) lines.push('第二步（水位）：λ = '+fmt(r.lam,2)+' GB/s 每单位权重 → 借用 ( '+r.alloc.map(function(x){return fmt(x,2);}).join(', ')+' )');
+  else if(r.any) lines.push('第二步（水位）：需求全满足，λ ≥ '+fmt(r.lam,2)+'（封顶即可）');
+  else lines.push('无活跃需求：不占带宽');
+  lines.push('Σ 分配 = '+fmt(sum,2)+' = min(40, Σ需求 '+fmt(sumD,1)+') ✓'+(r.spare>0.01?'　未用 '+fmt(r.spare,2)+' GB/s 留作空闲（无需求不占用）':'　容量用满'));
+  $('#b1read').textContent = lines.join('　｜　');
+  var cap = $('#b1cap');
+  if(D[0]===0 && D[1]===30 && D[2]===0 && D[3]===0 && phi===0.5){
+    cap.innerHTML='<b>"只有 LS 忙"</b>：保底 6 + 借用 24 = 30，全给到位。对照 ②的 B0——同样场景下 LS 能拿多少，取决于别人开了几条 Path。';
+  } else if(D[0]===40&&D[1]===40&&D[2]===40&&D[3]===40){
+    cap.innerHTML = phi===1
+      ? '<b>φ=1 且四组全忙</b>：总保底 20+12+4+4 = 40 恰好占满，L=0，<b>无余量可分</b>——这是必须保留的对照配置（份额完全由保底决定）。'
+      : '<b>四组全忙</b>（φ='+phi+'）：保底 '+fmt(phi*20,0)+'/'+fmt(phi*12,0)+'/'+fmt(phi*4,0)+'/'+fmt(phi*4,0)+'，余量按 η 权重水位分配 → 饱和结果回到 <b>20/12/4/4</b>。比例来自权重，与 Path 数无关（对照 ②）。';
+  } else if(D[0]===0&&D[1]===30&&D[2]===8&&D[3]===4){
+    cap.innerHTML='<b>容量不够时</b>（Σ需求 42 &gt; 40）：保底人人有份，缺口按权重摊——LS 让出 2、SL/LL 如数拿够。谁饿死？没有人：保底 φη·40 恒在。';
+  } else if(sumD===0){
+    cap.innerHTML='全部空闲：空组不占带宽，整盘 40 GB/s 等待下一个 I/O（工作守恒）。';
+  } else {
+    cap.innerHTML='拖动需求或切换 φ，观察"保底 → 水位借用"两步分配。';
+  }
+}
+['#dSS','#dLS','#dSL','#dLL'].forEach(function(id){ $(id).addEventListener('input', b1update); });
+$$('#m6 .presets button').forEach(function(btn){
+  btn.addEventListener('click', function(){
+    var d = btn.dataset.d.split(',');
+    $('#dSS').value=d[0]; $('#dLS').value=d[1]; $('#dSL').value=d[2]; $('#dLL').value=d[3];
+    b1update();
+  });
+});
+$$('#m6 .phi').forEach(function(btn){
+  btn.addEventListener('click', function(){
+    $$('#m6 .phi').forEach(function(b){ b.setAttribute('aria-pressed','false'); });
+    btn.setAttribute('aria-pressed','true');
+    b1update();
+  });
+});
+b1update();
+
+/* ================================================================
+   ⑦ 因子矩阵
+================================================================ */
+var LAYER_DESC = {
+  S:['S0 · 中央调度','到达序贪心合法填批、立即启动（现状默认）。合法批满足式(4)：成员数 ≤8、Σu ≤8192、工作区 ≤64 GB。'],
+  P:['P0 · 组内选路','选"未完成 I/O 条数"最少的 Path（式8）。③ 已演示它把 4 GB 与 0.1 GB 的队头等权。'],
+  B:['B0 · 带宽分配','基础份额 + 余量按活跃 Path 均分（式6/7）。② 已演示份额随 Path 数漂移。'],
+  s1:'S1 · 盘向量与窗口感知：候选批按"最老 / 最小 slack / 四类代表 / 盘重叠低"生成，启动选项含立即、关键事件后、有限 δ 延迟（错峰）；对候选做联合重放、按四目标择优。',
+  p1:'P1 · 预计完成选路：式(17) 先筛 2–4 条，放入后重算活跃集，重放核验；版本号 + 客户端账本防惊群。',
+  b1:'B1 · 组保底 + 权重水位：式(18)。保底按组发一次，不随 Path 数重复；组内再按请求权重（消费窗口追赶需求、SLO 可挽救性、年龄）分到各队头。'
+};
+var sel = {S:0,P:0,B:0};
+function jointUpdate(fromCell){
+  // 开关状态
+  $$('#m7 .sw2').forEach(function(b){ b.setAttribute('aria-pressed', sel[b.dataset.l]===+b.dataset.v ? 'true':'false'); });
+  // 矩阵
+  var grid = $('#factorGrid'); grid.innerHTML='';
+  for(var s=0;s<2;s++) for(var p=0;p<2;p++) for(var b=0;b<2;b++){
+    (function(s,p,b){
+      var btn = document.createElement('button');
+      var nUp = s+p+b;
+      var tag = nUp===0 ? '原始默认' : (nUp===1?'单项升级':(nUp===2?'双项':'全部联合'));
+      btn.innerHTML = '<span class="code">S'+s+'·P'+p+'·B'+b+'</span><span class="tag2">'+tag+'</span>';
+      if(nUp===0) btn.classList.add('origin');
+      if(s===sel.S&&p===sel.P&&b===sel.B) btn.classList.add('cur');
+      btn.addEventListener('click', function(){ sel={S:s,P:p,B:b}; jointUpdate(); });
+      grid.appendChild(btn);
+    })(s,p,b);
+  }
+  var d = $('#jointDesc');
+  d.innerHTML =
+    '<div><span class="ln" style="color:var(--accent)">S'+sel.S+'</span> — '+(sel.S? LAYER_DESC.s1 : LAYER_DESC.S[1])+'</div>'+
+    '<div><span class="ln" style="color:var(--accent)">P'+sel.P+'</span> — '+(sel.P? LAYER_DESC.p1 : LAYER_DESC.P[1])+'</div>'+
+    '<div><span class="ln" style="color:var(--accent)">B'+sel.B+'</span> — '+(sel.B? LAYER_DESC.b1 : LAYER_DESC.B[1])+'</div>'+
+    (sel.S+sel.P+sel.B===0 ? '<div style="color:var(--soft)">这就是现状基线 S0P0B0——E28 因子实验的参照系。</div>' :
+     '<div style="color:var(--soft)">相对 S0P0B0 同时升级了 '+['S','P','B'].filter(function(k,i){return sel[k];}).join('+')+'——记入因子矩阵，差值即该机制的贡献。</div>');
+}
+$$('#m7 .sw2').forEach(function(b){
+  b.addEventListener('click', function(){ sel[b.dataset.l]=+b.dataset.v; jointUpdate(); });
+});
+jointUpdate();
+
+/* ================================================================
+   粘性导航高亮
+================================================================ */
+(function(){
+  var links = $$('.stickynav a');
+  var map = {};
+  links.forEach(function(a){ map[a.getAttribute('href').slice(1)] = a; });
+  var io = new IntersectionObserver(function(entries){
+    entries.forEach(function(en){
+      if(en.isIntersecting){
+        links.forEach(function(a){ a.classList.remove('cur'); });
+        var a = map[en.target.id]; if(a) a.classList.add('cur');
+      }
+    });
+  }, {rootMargin:'-20% 0px -70% 0px'});
+  ['m1','m2','m3','m4','m5','m6','m7','m8','m9'].forEach(function(id){
+    var el = document.getElementById(id); if(el) io.observe(el);
+  });
+})();
+
+})();
+</script>
+</body>
+</html>
