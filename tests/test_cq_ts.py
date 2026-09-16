@@ -92,6 +92,13 @@ def test_bu03_device_conservation():
     assert abs(sum(r["compute_s"] for r in rows) - wc) <= 1e-9 * max(1, wc)
     assert abs(sum(r["stall_s"] for r in rows) - ws) <= 1e-9 * max(1, ws)
     assert abs(sum(r["idle_s"] for r in rows) - wi) <= 1e-9 * max(1, wi)
+    # 每 NPU 分桶字段：逐 worker 守恒（workers[i] = [compute, stall, idle]）
+    for wid, wk in sorted(eng.w.workers.items()):
+        sums = [sum(r["workers"][wid][k] for r in rows) for k in range(3)]
+        assert abs(sums[0] - float(wk.compute_s)) <= 1e-9 * max(1, float(wk.compute_s))
+        assert abs(sums[1] - float(wk.stall_s)) <= 1e-9 * max(1, float(wk.stall_s))
+        assert abs(sums[2] - float(wk.idle_s)) <= 1e-9 * max(1, float(wk.idle_s))
+    assert all(len(r["workers"]) == scn.m_workers for r in rows)
 
 
 # ---------------------------------------------------------------------------

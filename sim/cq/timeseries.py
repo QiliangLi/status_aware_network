@@ -187,13 +187,21 @@ def aggregate_run(engine, T_anchor, K: int = K_BUCKETS, *, cell: str = "",
     stall = [0.0] * (K + 1)
     idle = [0.0] * (K + 1)
     tgt = {"COMPUTE": comp, "STALL": stall, "IDLE": idle}
+    # 每 NPU 分桶三态（可选扩展字段，向后兼容；供每实例小倍图）
+    m = len(w.workers)
+    wid_index = {wid: idx for idx, wid in enumerate(sorted(w.workers))}
+    state_idx = {"COMPUTE": 0, "STALL": 1, "IDLE": 2}
+    per_w = [[[0.0, 0.0, 0.0] for _ in range(m)] for _ in range(K + 1)]
     for wk in w.workers.values():
+        wi = wid_index[wk.worker_id]
         for (s, e, state, _b, _l) in wk.segments:
             acc = tgt.get(state)
             if acc is None:
                 continue
+            si = state_idx[state]
             for i, ov in bucket_intersections(float(s), float(e), delta, K):
                 acc[i] += ov
+                per_w[i][wi][si] += ov
 
     served = [0.0] * (K + 1)
     requested = [0.0] * (K + 1)
@@ -236,6 +244,7 @@ def aggregate_run(engine, T_anchor, K: int = K_BUCKETS, *, cell: str = "",
             "queue_max": qmax[i],
             "cum_arrived": bisect.bisect_right(arrs, hi_ref + 1e-9),
             "cum_done": bisect.bisect_right(dones, hi_ref + 1e-9),
+            "workers": per_w[i],
         })
         if rows[-1]["cum_arrived"] > n_req or rows[-1]["cum_done"] > n_req:
             raise TsConservationError("累计口径越界")
