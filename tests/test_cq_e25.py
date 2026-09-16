@@ -289,3 +289,75 @@ def test_fg05_publish_isolation(tmp_path):
     assert sorted(os.listdir(docs)) == [
         "cq_fig_e19_trace_profile.png", "cq_fig_e25_objectives.png",
         "cq_fig_e25_ts_queue.png"]
+
+
+# ---------------------------------------------------------------------------
+# MPC 修复回归（20260917 审计）：WAIT 保持 / 决策点分支 / 预算根因
+# ---------------------------------------------------------------------------
+
+def test_mpc_wait_hold_forecast():
+    """WAIT 保持：单实例单请求，WAIT δ 的推演 F = δ + 独占服务时间。
+
+    修复前 forecast_drain 丢弃 WAIT（闭环 π 同刻立即派发），F 恒等于立即
+    派发值 2.25；修复后 _HoldPi 在唤醒前禁止派发。
+    """
+    from sim.cq.engine import CqEngine
+    from sim.cq.observable import Observable
+    from sim.cq.policies import GuardedEDF
+    from sim.cq.search import build_forecast_engine, forecast_drain
+    from sim.cq.types import Action, JointAction
+    from tests.cq_reference import e20_scenario, e20_specs
+    scn = e20_scenario(m=1)
+    specs = [e20_specs(n_long=0, n_short=1)[0]]
+    obs = Observable(scn, numeric=float)
+    eng = CqEngine(scn, specs, GuardedEDF(), numeric=float,
+                   fallback_policy=GuardedEDF(), observable=obs)
+    obs.attach(eng)
+    eng._physical_step(0.0)
+    snap = obs.snapshot(0.0)
+    est = build_forecast_engine(snap, scn, GuardedEDF())
+    Fs = forecast_drain(est, JointAction((Action("WAIT", 0, (), 0.725),)),
+                        [20000])
+    assert abs(Fs[0] - 2.975) < 1e-9        # 0.725 + 2.25（独占服务时间）
+    est2 = build_forecast_engine(snap, scn, GuardedEDF())
+    Fs2 = forecast_drain(est2, None, [20000])
+    assert abs(Fs2[0] - 2.25) < 1e-9         # 无首动作 = 立即派发
+
+
+def test_mpc_big_budget_deviates():
+    """决策点分支修复：大预算下 MPC 偏离 π 且严格改善（四计划金标小世界）。
+
+    修复前候选从已排空的基础副本克隆，全体得分==基础动作，永远回落 π。
+    """
+    from sim.cq.search import MPCPolicy
+    from tests.cq_reference import e20_scenario, e20_specs
+    for theta, ok in (("T", lambda Fs: sum(Fs) < 31.5 - 1e-9),
+                      ("M", lambda Fs: max(Fs) < 10.75 - 1e-9)):
+        pol = MPCPolicy(pid="m", H=1, theta=theta, c_ref=3.625, budget_s=10.0)
+        eng = run_case(e20_scenario(), e20_specs(), pol)
+        Fs = [float(rr.F_s) for rr in eng.w.requests.values()]
+        assert pol.n_scored > 0, theta
+        assert ok(Fs), (theta, sorted(Fs))
+    # θ=S：最优候选主目标与保底打平（0 超时 = 0 超时）→ gate 拒绝 → 保底轨迹
+    pol = MPCPolicy(pid="m", H=1, theta="S", c_ref=3.625, budget_s=10.0)
+    eng = run_case(e20_scenario(), e20_specs(), pol)
+    Fs = sorted(float(rr.F_s) for rr in eng.w.requests.values())
+    assert Fs == [5.0, 5.0, 10.75, 10.75]
+
+
+def test_mpc_zero_budget_starves_and_h_clamped():
+    """预算根因与 H 截断的确定性回归。
+
+    真实 trace 上 2ms 软预算低于单次基础排空成本（审计实测 decide
+    P50≈23ms），候选零评分——本测试用近零预算构造同一现象；H>1 因逐
+    决策点分支未实现而被按 H=1 执行并计数。
+    """
+    from sim.cq.search import MPCPolicy
+    from tests.cq_reference import e20_scenario, e20_specs
+    pol = MPCPolicy(pid="m", H=1, theta="T", c_ref=3.625, budget_s=1e-9)
+    eng = run_case(e20_scenario(), e20_specs(), pol)
+    assert pol.n_scored == 0                 # 预算耗尽：候选零评分
+    assert pol.n_overrun >= 1
+    pol2 = MPCPolicy(pid="m", H=2, theta="T", c_ref=3.625, budget_s=10.0)
+    eng2 = run_case(e20_scenario(), e20_specs(), pol2)
+    assert pol2.n_depth_clamped >= 1         # H=2 被 clamp 为 H=1 并记录

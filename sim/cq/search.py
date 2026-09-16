@@ -241,28 +241,56 @@ def build_forecast_engine(snap: ObservableSnapshot, scn: CqScenario,
 
 
 class _LocalObservable(Observable):
-    """cq_local 评分消融：每个 worker 的带宽独立 B_hat，不计跨 worker 竞争。"""
+    """cq_local 评分消融：每个 worker 的带宽独立 B_hat，不计跨 worker 竞争。
+
+    注意：当前为占位实现（与普通 Observable 行为一致），"独立带宽"评分
+    尚未真正生效——cq_local 的结果应视为与 cq_mpc 同配置对照，不能作为
+    "忽略跨 worker 干扰"的消融证据（见 E25 报告 MPC 收益审计一节）。
+    """
 
     def _sample(self, t):
         super()._sample(t)
 
 
-class _LocalEngineMixin:
-    pass
+class _HoldPi:
+    """推演期的等待保持器：wake 时刻之前，π 不得向被 HOLD 的 worker 派批。
+
+    规格 §7.5 要求候选落实后"推进至严格未来的可决策事件"；没有本包装时，
+    闭环 π 会在同刻立即向等待中的 worker 派批，使 WAIT 候选的推演退化为
+    基础动作（MPC 因此永远选不出等待——20260917 审计发现并修复）。
+    """
+
+    def __init__(self, pi, holds: Dict[int, float]):
+        self.pi = pi
+        self.holds = holds
+
+    def decide(self, snap, scn):
+        base = self.pi.decide(snap, scn)
+        now = float(snap.now)
+        acts = tuple(a for a in base.actions
+                     if not (a.worker_id in self.holds
+                             and now < float(self.holds[a.worker_id])))
+        return JointAction(acts)
 
 
 def forecast_drain(eng: CqEngine, first_action: Optional[JointAction],
                    event_budget: List[int]) -> Optional[dict]:
-    """落实首动作后用 π 排空；返回各请求 F（None=预算耗尽/不可排空）。"""
-    from .policies import GuardedEDF
+    """落实首动作（含 WAIT）后用 π 排空；返回各请求 F（None=超预算/不可排空）。
+
+    首动作经引擎自身的 _apply_action 落实：DISPATCH 正常派批，WAIT 写入
+    wake_timers；随后用 _HoldPi 包装 π/fallback，在唤醒时刻前禁止向等待
+    worker 派批，唤醒事件（engine._next_event 已含 wake_timers）到达后
+    恢复正常闭环。无 WAIT 的动作路径与修复前行为一致。
+    """
+    holds: Dict[int, float] = {}
     if first_action is not None:
-        for a in sorted(first_action.actions, key=lambda x: x.worker_id):
-            if a.kind == "DISPATCH":
-                if eng.w.workers[a.worker_id].batch_id is None and all(
-                        eng.w.requests.get(r) is not None and
-                        eng.w.requests[r].state == "QUEUED" for r in a.members):
-                    eng._dispatch(eng.w.t, a.worker_id, a.members)
-        eng._closure(eng.w.t)
+        for a in first_action.actions:
+            if a.kind == "WAIT" and a.wake_at is not None:
+                holds[a.worker_id] = float(a.wake_at)
+        eng._apply_action(eng.w.t, first_action, stale=False)
+    if holds:
+        eng.policy = _HoldPi(eng.policy, holds)
+        eng.fallback = _HoldPi(eng.fallback, holds)
     eng.max_events = event_budget[0]
     eng.events_processed = 0
     status = eng.run(drain_deadline=None)
@@ -331,6 +359,8 @@ class MPCPolicy:
         self.pi = GuardedEDF()
         self.n_fallback = 0
         self.n_overrun = 0
+        self.n_scored = 0          # 成功评分的候选动作数（审计用）
+        self.n_depth_clamped = 0   # H>1 被按 H=1 执行的决策数（审计用）
 
     def decide(self, snap, scn) -> JointAction:
         t0 = _time.perf_counter()
@@ -338,9 +368,12 @@ class MPCPolicy:
         base = self.pi.decide(snap, scn)
         if not snap.idle_workers or not snap.queued:
             return base
-        # base tail
-        est = build_forecast_engine(snap, scn, self.pi, local=self.local)
-        Fs = forecast_drain(est, base, budget)
+        # 决策点原始副本：基础排空与每个候选都从"当前状态"出发。
+        # 20260917 审计修复：此前候选从已排空的 base 副本克隆，DISPATCH 验证
+        # 必然失败、全体候选得分==基础动作，搜索从未真正分支。
+        est0 = build_forecast_engine(snap, scn, self.pi, local=self.local)
+        est_base = self._clone_forecast(est0)
+        Fs = forecast_drain(est_base, base, budget)
         if Fs is None:
             self.n_fallback += 1
             return base
@@ -349,38 +382,28 @@ class MPCPolicy:
             self.n_fallback += 1
             return base
         best = (base_score, base)
-        # 深度 1..H 的 beam
-        beam = [(est, base_score, [])]
-        for depth in range(self.H):
+        # H>1 的逐决策点分支未实现（原 beam 从排空态展开，无效）：统一按
+        # H=1 语义执行并记录，避免静默的假深度。
+        if self.H > 1:
+            self.n_depth_clamped += 1
+        node_snap = est0.observable.snapshot(est0.w.t)
+        batches = build_batches(node_snap, scn, self.pi, self.K_req, self.K_batch)
+        idle = sorted(node_snap.idle_workers)
+        actions = self._joint_actions(est0, node_snap, scn, batches, idle)
+        for act in actions:
             if _time.perf_counter() - t0 > self.budget_s or budget[0] <= 0:
                 self.n_overrun += 1
                 break
-            expanded = []
-            for (node, _s, prefix) in beam:
-                if _time.perf_counter() - t0 > self.budget_s or budget[0] <= 0:
-                    break
-                node_snap = node.observable.snapshot(node.w.t)
-                batches = build_batches(node_snap, scn, self.pi,
-                                        self.K_req, self.K_batch)
-                idle = sorted(node_snap.idle_workers)
-                actions = self._joint_actions(node, node_snap, scn, batches, idle)
-                for act in actions:
-                    if _time.perf_counter() - t0 > self.budget_s or budget[0] <= 0:
-                        break
-                    child = self._clone_forecast(node)
-                    Fs2 = forecast_drain(child, act, budget)
-                    if Fs2 is None:
-                        continue
-                    sc = score_of(Fs2, snap, self.theta)
-                    if sc is None:
-                        continue
-                    if sc < best[0]:
-                        best = (sc, act if depth == 0 else best[1])
-                    expanded.append((child, sc, prefix + [act]))
-            if not expanded:
-                break
-            expanded.sort(key=lambda x: x[1])
-            beam = expanded[:self.beam_width]
+            child = self._clone_forecast(est0)
+            Fs2 = forecast_drain(child, act, budget)
+            if Fs2 is None:
+                continue
+            sc = score_of(Fs2, snap, self.theta)
+            if sc is None:
+                continue
+            self.n_scored += 1
+            if sc < best[0]:
+                best = (sc, act)
         # gate：主目标须严格改善（默认 gate=0）
         if best[1] is not base and best[0][0] < base_score[0] - self.gate:
             return best[1]
