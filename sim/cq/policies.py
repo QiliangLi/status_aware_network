@@ -128,7 +128,7 @@ class SimplePolicy:
         ra = ratio(a)
         if not self.r_ref:
             import math as _m
-            pos = [ratio(r.rid) for r in queued if ratio(r.rid)]
+            pos = [ratio(r) for r in queued if ratio(r)]
             self.r_ref = (_m.exp(sum(_m.log(x) for x in pos) / len(pos))
                           if pos else 1.0)
         r_ref = self.r_ref

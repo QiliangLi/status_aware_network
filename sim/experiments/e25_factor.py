@@ -50,6 +50,7 @@ PROFILES = {
 }
 
 MIN_REQS = 16          # 窗口最小有效请求数（不足则记 skip，不静默缺失）
+MPC_BUDGET_S = 3600.0  # 20260917 重跑：MPC 理想上限档（CPU 放开，事件预算 2 万仍为硬界）
 TS_WINDOW_DEFAULT = 9  # 时间序列图默认窗口
 
 
@@ -192,13 +193,29 @@ def run_cell_specs(cell: dict, specs, d: str, records: list, progress: dict,
     thash = trace_hash(specs)[:16]
 
     def _one(pid, theta):
-        pol = build_policy(pid, theta, c_ref, H=1)
+        # MPC/local 用"理想上限"配置（20260917 重跑）：CPU 预算放开，
+        # 仅保留 2 万事件确定性硬界——衡量当前候选集/H=1 结构下的可达
+        # 上限；实际开销经 ctrl_p50/p95_ms 与 n_scored/n_overrun 落盘。
+        if pid in MPC_LIKE:
+            from sim.cq.search import MPCPolicy
+            pol = MPCPolicy(pid=pid, local=(pid == "cq_local"), H=1,
+                            theta=theta, c_ref=c_ref,
+                            budget_s=MPC_BUDGET_S)
+        else:
+            pol = build_policy(pid, theta, c_ref, H=1)
         if extra is not None and pid in SIMPLE_POLICIES:
             pol.feasibility_extra = extra
         eng = run_case(scn, specs, pol, numeric=float, seed=cell["window"],
                        record_intervals=True)
         s = summarize(eng, scn,
                       arrival_stop=(d_sim if cell["mode"] == "OL" else None))
+        ctrl = sorted(d["ctrl_s"] for d in eng.decisions) or [0.0]
+        s["ctrl_p50_ms"] = 1000.0 * ctrl[len(ctrl) // 2]
+        s["ctrl_p95_ms"] = 1000.0 * ctrl[max(0, int(0.95 * len(ctrl)) - 1)]
+        s["n_scored"] = getattr(pol, "n_scored", None)
+        s["n_overrun"] = getattr(pol, "n_overrun", None)
+        s["mpc_budget_s"] = (MPC_BUDGET_S if pid in MPC_LIKE else None)
+        s["code_rev"] = "mpc-fixed-20260917"
         bstat = _batch_stats(eng, scn, specs, med_h, med_u)
         ts_rel, delta, ovf = None, None, None
         if specs:
