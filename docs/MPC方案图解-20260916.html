@@ -126,17 +126,18 @@
   </div>
   <div class="selfbox">
     <b>本页自足。</b>看懂例子需要的全部背景在 <a href="#pre">§1 预备知识</a>（90 秒读完）；
-    所有数字都可以用 §1.4 的"手算钥匙"自己验算；动画在 <a href="#demo">§4</a>；
-    公式汇总在 <a href="#formulas">§7</a>。不需要先读任何其他文档。
+    所有数字都可以用 §1.4 的"手算钥匙"自己验算；候选枚举在 <a href="#cands">§4</a>；动画在 <a href="#demo">§5</a>；
+    公式汇总在 <a href="#formulas">§8</a>。不需要先读任何其他文档。
   </div>
   <nav class="toc">
     <a href="#pre">① 预备知识（90 秒）</a>
     <a href="#why">② 为什么调度难</a>
     <a href="#idea">③ MPC 的想法与五步</a>
-    <a href="#demo">④ 动画：三个候选的命运</a>
-    <a href="#score">⑤ 打分与落子</a>
-    <a href="#edf">⑥ 为什么实验里常等于 EDF</a>
-    <a href="#formulas">⑦ 公式速查</a>
+    <a href="#cands">④ 候选从哪来</a>
+    <a href="#demo">⑤ 动画：三个候选的命运</a>
+    <a href="#score">⑥ 打分与落子</a>
+    <a href="#edf">⑦ 为什么实验里常等于 EDF</a>
+    <a href="#formulas">⑧ 公式速查</a>
   </nav>
 </header>
 
@@ -191,6 +192,10 @@
   </tbody>
 </table>
 <p class="note" style="margin-top:4px">
+<b>批的大小（batch size）有硬上限：本例每批最多 2 条请求</b>（真实实验里是 8 条）。
+所以 4 条请求无论怎么拼，最多同时组成 2 个"2 条批"，分给 2 个实例。
+</p>
+<p class="note" style="margin-top:4px">
 期限（SLO）：短请求要求 6.75 s 内完成、长请求 15 s 内。F 超过期限 = 该请求"超时"。
 </p>
 
@@ -230,8 +235,8 @@
     <p style="font-size:14px"><b>例子里：</b>候选 A=同类批同发；B=两个混批；C=SS 立即发 + 实例2 <b>等 0.5 s</b> 再领 LL。</p>
   </div>
   <div class="card" style="margin:0"><h3 style="margin-top:0">第 3 步 · 推演到排空并打分</h3>
-    <p style="font-size:14px;color:var(--ink-soft)">每个候选在副本上落实，之后统一由 π 接管，直到当前所有请求完成，得到每条的完成时刻 F̂。按优化目标 θ 的词典序打分（§5）。</p>
-    <p style="font-size:14px"><b>例子里：</b>就是 §4 动画推演出的三张时间线。</p>
+    <p style="font-size:14px;color:var(--ink-soft)">每个候选在副本上落实，之后统一由 π 接管，直到当前所有请求完成，得到每条的完成时刻 F̂。按优化目标 θ 的词典序打分（§6）。</p>
+    <p style="font-size:14px"><b>例子里：</b>就是 §5 动画推演出的三张时间线。</p>
   </div>
   <div class="card" style="margin:0"><h3 style="margin-top:0">第 4 步 · 门槛校验，只落第一步</h3>
     <p style="font-size:14px;color:var(--ink-soft)">最优候选的主目标必须严格小于保底动作，否则回落 π；无论推演多深，<b>只执行第一个动作</b>，下一个事件到来全部重来。预算 2 ms / 2 万事件。</p>
@@ -244,7 +249,48 @@
 </div>
 
 <!-- ============================================================ -->
-<h2 id="demo"><span class="no">④</span>动画：三个候选各自的命运</h2>
+<h2 id="cands"><span class="no">④</span>候选从哪来？——动画前的最后一块拼图</h2>
+<p>
+"候选"就是 MPC 此刻<b>可以考虑采取的动作</b>。它由两个维度组合出来：
+<b>怎么分批</b>（哪些请求拼一批给哪个实例）× <b>什么时候发</b>（立即，还是让某个实例等一会儿）。
+本例只有 4 条请求、2 个实例、每批最多 2 条，所以可以把候选<b>完整枚举</b>出来：
+</p>
+<h3>维度一：分批方式（本质不同的只有两种）</h3>
+<table>
+  <thead><tr><th class="l">分法</th><th class="l">内容</th><th class="l">谁会想到它</th></tr></thead>
+  <tbody>
+    <tr><td class="l"><b>同类分批</b></td><td class="l">[S0,S1] 给实例1，[L0,L1] 给实例2（短归短、长归长）</td><td class="l">"同形"排序：把形状相近的请求排在一起逐个装批</td></tr>
+    <tr><td class="l"><b>混合分批</b></td><td class="l">[S0,L0] 给实例1，[S1,L1] 给实例2（每批一短一长）</td><td class="l">"互补"排序：倾向把读取重的和计算重的配对；<span style="color:var(--ink-soft)">另一配法 [S0,L1]+[S1,L0] 在本例数值完全等价（两条 S 相同、两条 L 相同），不再单列</span></td></tr>
+  </tbody>
+</table>
+<p style="font-size:14px;color:var(--ink-soft)">
+（也有"先只发一批、剩两条留队列"的做法——它其实就是维度二里"另一个实例等一会儿"的变形，被下面覆盖了。）
+</p>
+<h3>维度二：发送时机（两种）</h3>
+<table>
+  <thead><tr><th class="l">时机</th><th class="l">含义</th></tr></thead>
+  <tbody>
+    <tr><td class="l"><b>同时发</b></td><td class="l">两个实例都在 t=0 领批（谁先提交读取流按实例编号排）</td></tr>
+    <tr><td class="l"><b>错峰发</b></td><td class="l">一个实例先发，另一个<b>等 δ 再领</b>。δ 的候选值：{0.05, 0.1, 0.2}×C_ref（C_ref=已到请求参考时长的中位数），<b>以及"预测某条读取完成的时刻"</b>——本例取 δ=0.5，正好是 SS 首层读完的时刻（§1.4：0.5s）</td></tr>
+  </tbody>
+</table>
+<h3>两个维度一组合 → 本页的三个候选</h3>
+<table>
+  <thead><tr><th class="l" style="width:90px">候选</th><th class="l">= 分批 × 时机</th><th class="l">一句话</th></tr></thead>
+  <tbody>
+    <tr><td class="l"><b>A（同类）</b></td><td class="l">同类分批 × 同时发</td><td class="l">先来后到的直观做法；<b>恰好也是保底策略 π（EDF）此刻的选择</b>，所以它是"参照系"</td></tr>
+    <tr><td class="l"><b>B（混批）</b></td><td class="l">混合分批 × 同时发</td><td class="l">两批负载均衡，看谁能最快全部做完</td></tr>
+    <tr><td class="l"><b>C（错峰）</b></td><td class="l">同类分批 × 等 0.5 s</td><td class="l">MPC 的"等待"类候选：只晚半步，让 SS 的下层读流插到 LL 前面</td></tr>
+  </tbody>
+</table>
+<div class="note">
+<b>真实系统里候选远不止三个</b>：每轮从队列选最多 32 个候选请求、按三种排序生成最多 24 个候选批，
+再逐空闲实例组合、附加等待候选，在 2 ms 预算内能推演几十个联合动作。本例只有 4 条请求，
+恰好枚举得完，我们就挑这<b>三个最有代表性的</b>来展示机制：一个保底、一个换分法、一个换时机。
+</div>
+
+<!-- ============================================================ -->
+<h2 id="demo"><span class="no">⑤</span>动画：三个候选各自的命运</h2>
 
 <div class="reqs">
   <div class="req s"><b>S0 / S1</b>（短）<div class="row"><span>每层读 1 GB</span><span>每层算 1 s</span></div><div class="row"><span>期限 6.75 s</span><span>2 层</span></div></div>
@@ -262,6 +308,11 @@
 </div>
 
 <div class="stage">
+  <div class="selfbox" style="margin:0 0 12px">
+    <b>怎么读这个动画：</b>下面三个面板是同一时刻（t=0）的三个<b>"如果……会怎样"的平行推演</b>——
+    在系统副本里想象出来的三种未来，不是真的跑了三遍。红色竖线是<b>想象中的时刻</b>，
+    按步进按钮（或 ←/→ 键）看每个未来怎么展开；推演结束后到 §6 打分选出一个，才真正落地第一步。
+  </div>
   <div class="ctrl">
     <button class="primary" id="btn-play">▶ 播放</button>
     <button id="btn-prev">← 上一步</button>
@@ -273,7 +324,8 @@
 
   <div class="plan" data-plan="p1">
     <h4><span class="tag" style="background:var(--p1)">候选 A</span>同类批、两个实例同时发
-      <span style="color:var(--ink-soft);font-weight:400">实例1←SS（两条短），实例2←LL（两条长）。这也是基础动作 π 的选择</span></h4>
+      <span style="color:var(--ink-soft);font-weight:400">首步 = 实例1←SS、实例2←LL，都在 t=0</span>
+      <span style="color:var(--ink-soft);font-weight:400">（这也是基础动作 π 的选择）</span></h4>
     <p class="desc">实例1 的首层流先提交（FCFS 排前），实例2 的首层流排队。</p>
     <div class="tl">
       <div class="rowlab">实例1 · 算/等</div><div class="rowlab" style="top:38px">实例1 · 读</div>
@@ -293,7 +345,8 @@
 
   <div class="plan" data-plan="p3">
     <h4><span class="tag" style="background:var(--p3)">候选 B</span>两个"短+长"混批、同时发
-      <span style="color:var(--ink-soft);font-weight:400">每批读 5 GB/层、算 3 s/层（§1.4 手算钥匙）</span></h4>
+      <span style="color:var(--ink-soft);font-weight:400">首步 = 实例1←{S0,L0}、实例2←{S1,L1}，都在 t=0</span>
+      <span style="color:var(--ink-soft);font-weight:400">（每批读 5 GB/层、算 3 s/层，见 §1.4）</span></h4>
     <p class="desc">两条批负载均衡；实例2 的首层流排在实例1 之后。</p>
     <div class="tl">
       <div class="rowlab">实例1 · 算/等</div><div class="rowlab" style="top:38px">实例1 · 读</div>
@@ -312,7 +365,8 @@
   </div>
 
   <div class="plan" data-plan="p4">
-    <h4><span class="tag" style="background:var(--p4)">候选 C</span>SS 立即发，实例2 等 0.5 s 再领 LL（MPC 的"等待"候选）
+    <h4><span class="tag" style="background:var(--p4)">候选 C</span>SS 立即发，实例2 等 0.5 s 再领 LL（"等待"候选）
+      <span style="color:var(--ink-soft);font-weight:400">首步 = 实例1←SS(t=0)，实例2 只设一个 0.5 s 的闹钟（不领批、不占带宽）</span>
     </h4>
     <p class="desc">只晚半步，SS 的下层读流就能排在 LL 首层<b>前面</b>、且只要 1 GB/s。</p>
     <div class="tl">
@@ -339,7 +393,7 @@
 </div>
 
 <!-- ============================================================ -->
-<h2 id="score"><span class="no">⑤</span>推演结束：按 θ 打分、MPC 落子</h2>
+<h2 id="score"><span class="no">⑥</span>推演结束：按 θ 打分、MPC 落子</h2>
 <p>
 四个优化目标 θ 是四把不同的尺子（都是越小越好）。切换按钮，看每把尺子选出谁：
 </p>
@@ -368,7 +422,7 @@
 </div>
 
 <!-- ============================================================ -->
-<h2 id="edf"><span class="no">⑥</span>为什么实验里 MPC 常常和 EDF 一模一样</h2>
+<h2 id="edf"><span class="no">⑦</span>为什么实验里 MPC 常常和 EDF 一模一样</h2>
 <p>我们的全量实验（7080 次运行）里，MPC 相对 EDF 的差别在四个目标、全部场景上都是 <b>0.000</b>。四个原因，每个都能在上面的例子里找到影子：</p>
 <table>
   <thead><tr><th class="l">原因</th><th class="l">解释（对照本页例子）</th></tr></thead>
@@ -382,7 +436,7 @@
 <p>反过来这四条也指明了 MPC <b>什么时候会有增量</b>：带宽紧张且峰值打满（有旧流可保护）、突发之间有空隙（等得来请求）、短 token 负载（拼批有计算收益）、更松的门槛与更深的推演。</p>
 
 <!-- ============================================================ -->
-<h2 id="formulas"><span class="no">⑦</span>公式速查（与代码实现一一对应）</h2>
+<h2 id="formulas"><span class="no">⑧</span>公式速查（与代码实现一一对应）</h2>
 <details open>
   <summary>打分：θ 的词典序元组（首项是主目标，其余只用来破平局）</summary>
   <div>
@@ -493,8 +547,8 @@
   }
 
   var STEPS = [
-    {t:0,    focus:["p1","p3","p4"], cap:"<b>t=0 · 决策时刻。</b>队列里 4 条请求全部到达，两个实例都空闲。MPC 生成三个候选：A=同类批同发（也是保底 π 的选择）、B=两个混批、C=SS 立即发 + 实例2 等 0.5 s 再领 LL。现在开始把三个候选各自在副本上推演。"},
-    {t:0.25, focus:["p1","p3","p4"], cap:"推演刚开始。注意候选 C 的实例2 此刻是<b>灰色闲置</b>——请求还在中央队列，没有预取、没有占带宽；A/B 的实例2 则已领批、排队等数据（橙色）。"},
+    {t:0,    focus:["p1","p3","p4"], cap:"<b>t=0 · 决策时刻。</b>队列里 4 条请求全部到达，两个实例都空闲。按 §4 的枚举，MPC 此刻拿到的三个候选是：A=同类批同发（也是保底 π 的选择）、B=混批同发、C=SS 立即发+实例2 等 0.5 s。现在把三个候选<b>各自在副本上推演</b>——三个面板就是三种未来。"},
+    {t:0.25, focus:["p1","p3","p4"], cap:"推演刚开始。看各面板实例2 的第一格：<b>A/B 已领批</b>（橙色=批领了、排队等数据）；<b>C 是灰色闲置</b>——它只设了闹钟，请求还在中央队列，没有预取、没有占带宽。"},
     {t:0.5,  focus:["p1","p4"], cap:"<b>★ 关键时刻：FCFS 序位在这里分岔。</b>候选 A：SS 首层读完退场，LL 独占带宽，但 SS 的下层读流（只要 1 GB/s）<b>排在 LL 后面拿 0</b>。候选 C：SS 的下层流<b>先提交</b>拿 1 GB/s，刚领取的 LL 拿到剩下的 3 GB/s——<b>两边同时前进</b>。看下方带宽账本。"},
     {t:2,    focus:["p1","p4"], cap:"候选 C：SS 边算第 1 层边慢速读第 2 层（规则二：申请率=字节÷计算时长，刚好藏进计算）；LL 稳定以 3 GB/s 读。候选 A：LL 独占带宽读首层，SS 的下层流还在排队。"},
     {t:2.5,  focus:["p1","p4"], cap:"候选 A：LL 首层读完、开始算 4 s；SS 下层流<b>到期提速</b>补读（规则二后半句）。候选 C：SS 的下层流恰好读完（0.5–2.5，1 GB/s × 2 s = 2 GB ✓），LL 开始独占带宽收尾。"},
@@ -502,7 +556,7 @@
     {t:5.5,  focus:["p1"], cap:"<b>候选 A 的短批完成：F=5 s</b>，实例1 转为闲置。此刻 A 与 C 的总等待几乎打平，胜负在长请求身上。"},
     {t:7,    focus:["p1","p4"], cap:"候选 C：LL 开始算末层（F 将为 11）。候选 A：LL 在 6.5–6.75 提速补完最后 1 GB，马上开始算末层（F 将为 10.75）。"},
     {t:8.6,  focus:["p3"], cap:"<b>候选 B（混批）最先全部完成：M=8.72 s</b>——但注意它的两条短请求在 7.77/8.72 才完成，<b>都超过了 6.75 s 的期限</b>（打分表 S 列=2）。"},
-    {t:11,   focus:["p1","p3","p4"], cap:"<b>推演结束。</b>A：F=5,5,10.75,10.75；B：F=7.77,7.77,8.72,8.72；C：F=4.5,4.5,11,11。往下到 §5——四把尺子（θ）各选谁？"}
+    {t:11,   focus:["p1","p3","p4"], cap:"<b>推演结束。</b>A：F=5,5,10.75,10.75；B：F=7.77,7.77,8.72,8.72；C：F=4.5,4.5,11,11。往下到 §6——四把尺子（θ）各选谁？"}
   ];
   var cur = 0, playing = false, timer = null;
   var caps = document.getElementById("cap");
