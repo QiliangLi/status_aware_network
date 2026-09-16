@@ -438,7 +438,7 @@
     <tr><td class="l"><b>R1 · 预算耗尽</b>（真实 trace 主因）</td><td class="l">2 ms CPU 软预算<b>低于单次基础排空推演的成本</b>（审计实测：真实负载上单次 decide P50≈23 ms、P95≈45 ms）——候选循环在评分第一个候选前就被打断，n_scored=0。规格当年自己预警过"synthetic 服务很快、2 ms 可能明显超预算"。</td></tr>
     <tr><td class="l"><b>R2 · 候选从排空态分支</b>（实现缺陷，已修复）</td><td class="l">基础动作的推演把副本一路跑到全部完成，候选再从这个"已终结的世界"克隆——DISPATCH 验证必然失败，<b>全体候选得分==基础动作</b>，搜索从未真正分支。修复：候选一律从决策点原始状态克隆。</td></tr>
     <tr><td class="l"><b>R3 · WAIT 被推演丢弃</b>（实现缺陷，已修复）</td><td class="l">推演落实首动作时只处理 DISPATCH、跳过 WAIT，闭环 π 又会在同一时刻向等待的 worker 派批——<b>等待候选的推演退化为立即派发</b>，MPC 永远选不出等待。修复：_HoldPi 在唤醒时刻前保持该 worker 空闲（单测：WAIT@0.725 的推演 F=0.725+2.25，精确）。</td></tr>
-    <tr><td class="l"><b>R4 · cq_local 占位</b>（未修，已声明）</td><td class="l">"独立带宽"评分消融是空壳实现——local≡mpc 是构造使然，不是实验发现。</td></tr>
+    <tr><td class="l"><b>R4 · cq_local 曾是占位</b>（已实现）</td><td class="l">"独立带宽"评分消融曾与普通观察者行为完全相同——local≡mpc 是构造使然。现已实现独立带宽推演（每流各得 min(申请率, B̂)）：B=80 下与 MPC 差异 &lt;0.1%（无竞争则建模无价值），B=20 竞争下 local 比 MPC 差 0.6pp——干扰建模的价值随竞争强度增长。</td></tr>
     <tr><td class="l">保底本身很强</td><td class="l">π（EDF）在 deadline∝T0 的负载里等价于 SPT，已接近时延最优；θ=S 的平局回退（本页落子步演示过）在真实负载里高频发生。</td></tr>
   </tbody>
 </table>

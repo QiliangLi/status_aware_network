@@ -95,7 +95,7 @@ class WorldState:
             nw = _copy.copy(wk)
             nw.segments = wk.segments if keep_segments else []
             w.workers[k] = nw
-        st = StorageSim.__new__(StorageSim)
+        st = type(self.storage).__new__(type(self.storage))
         st.num, st.zero, st.b_schedule, st.q_max = (
             self.num, self.zero, self.storage.b_schedule, self.storage.q_max)
         st.flows = {seq: _copy.copy(f) for seq, f in self.storage.flows.items()}

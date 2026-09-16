@@ -90,7 +90,10 @@ def real_panel():
                         ("mpc_std", MPCPolicy(pid="mpc_std", H=1, theta=theta,
                                               c_ref=c_ref)),
                         ("mpc_big", MPCPolicy(pid="mpc_big", H=1, theta=theta,
-                                              c_ref=c_ref, budget_s=30.0))):
+                                              c_ref=c_ref, budget_s=30.0)),
+                        ("local_big", MPCPolicy(pid="local_big", local=True, H=1,
+                                                theta=theta, c_ref=c_ref,
+                                                budget_s=30.0))):
                     eng = run_case(scn, specs, pol, numeric=float, seed=9)
                     s = summarize(eng, scn, arrival_stop=d_sim)
                     ctrl = sorted(d["ctrl_s"] for d in eng.decisions) or [0]
@@ -131,10 +134,14 @@ def real_panel():
                 dt_big = 100 * (edf["ttft"] - big["ttft"]) / edf["ttft"]
                 ds_big = 100 * (big["slo"] - edf["slo"])
                 dt_std = 100 * (edf["ttft"] - std["ttft"]) / edf["ttft"]
+                loc = idx[(f, B, theta, "local_big")]
+                dt_loc = 100 * (edf["ttft"] - loc["ttft"]) / edf["ttft"]
+                ds_loc = 100 * (loc["slo"] - edf["slo"])
                 print(f"  θ={theta} B{B:g} {f[:14]:15s}: big vs edf "
                       f"TTFT {dt_big:+6.2f}% SLO {ds_big:+6.2f}pp | "
+                      f"local vs edf TTFT {dt_loc:+6.2f}% SLO {ds_loc:+6.2f}pp | "
                       f"std vs edf TTFT {dt_std:+6.2f}%  "
-                      f"(big scored={big['scored']} std scored={std['scored']})")
+                      f"(scored big/std/loc={big['scored']}/{std['scored']}/{loc['scored']})")
 
 
 if __name__ == "__main__":

@@ -361,3 +361,32 @@ def test_mpc_zero_budget_starves_and_h_clamped():
     pol2 = MPCPolicy(pid="m", H=2, theta="T", c_ref=3.625, budget_s=10.0)
     eng2 = run_case(e20_scenario(), e20_specs(), pol2)
     assert pol2.n_depth_clamped >= 1         # H=2 被 clamp 为 H=1 并记录
+
+
+def test_mpc_local_ablation_diverges():
+    """cq_local 消融（20260917 真实实现）：独立带宽与共享 FCFS 推演分岔。
+
+    同一决策点、同一 π 动作：共享推演复现金标 P1（Σ=31.5）；独立带宽
+    推演中 LL 首层不被 SS 挤占，Σ=29.0（手算解析值）。两者分岔证明
+    "是否建模跨 worker 干扰"的评分差异真实存在。
+    """
+    from sim.cq.engine import CqEngine
+    from sim.cq.observable import Observable
+    from sim.cq.policies import GuardedEDF
+    from sim.cq.search import build_forecast_engine, forecast_drain
+    from tests.cq_reference import e20_scenario, e20_specs
+    scn = e20_scenario()
+    specs = e20_specs()
+    obs = Observable(scn, numeric=float)
+    eng = CqEngine(scn, specs, GuardedEDF(), numeric=float,
+                   fallback_policy=GuardedEDF(), observable=obs)
+    obs.attach(eng)
+    eng._physical_step(0.0)
+    snap = obs.snapshot(0.0)
+    est_s = build_forecast_engine(snap, scn, GuardedEDF())
+    Fs_s = forecast_drain(est_s, None, [20000])
+    assert abs(sum(Fs_s.values()) - 31.5) < 1e-9          # 金标 P1
+    est_l = build_forecast_engine(snap, scn, GuardedEDF(), local=True)
+    Fs_l = forecast_drain(est_l, None, [20000])
+    assert abs(sum(Fs_l.values()) - 29.0) < 1e-9          # 独立带宽解析值
+    assert sum(Fs_l.values()) < sum(Fs_s.values())

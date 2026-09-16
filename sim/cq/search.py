@@ -17,6 +17,7 @@ from typing import Dict, List, Optional, Sequence, Tuple
 
 from .config import CqScenario
 from .engine import CqEngine
+from .storage import StorageSim
 from .observable import Observable, ObservableSnapshot
 from .policies import GuardedEDF, _specs_of, aged_anchor
 from .profile import is_feasible, layer_read_gb
@@ -178,12 +179,15 @@ def build_forecast_engine(snap: ObservableSnapshot, scn: CqScenario,
                                  h_tokens=r.h_tokens, u_tokens=r.u_tokens,
                                  class_id="", T0_s=r.T0_s, deadline_s=r.deadline_s))
     obs = Observable(scn_est, numeric=float)
-    if local:
-        obs = _LocalObservable(scn_est)
     eng = CqEngine(scn_est, specs, policy=pi, numeric=float, observable=obs,
                    record_decisions=False)
     obs.attach(eng)
     w = eng.w
+    if local:
+        # 独立带宽评分世界：替换推演存储（须在流注入前；clone 按类型保留子类）
+        w.storage = _IndependentBWStorage(
+            ((Fraction(0), Fraction(int(bw * 1e9), 10**9)),),
+            scn_est.storage.q_max_gbps, float)
     now = float(snap.now)
     # QUEUED 请求直接入队
     for r in snap.requests:
@@ -240,16 +244,17 @@ def build_forecast_engine(snap: ObservableSnapshot, scn: CqScenario,
     return eng
 
 
-class _LocalObservable(Observable):
-    """cq_local 评分消融：每个 worker 的带宽独立 B_hat，不计跨 worker 竞争。
-
-    注意：当前为占位实现（与普通 Observable 行为一致），"独立带宽"评分
-    尚未真正生效——cq_local 的结果应视为与 cq_mpc 同配置对照，不能作为
-    "忽略跨 worker 干扰"的消融证据（见 E25 报告 MPC 收益审计一节）。
+class _IndependentBWStorage(StorageSim):
+    """cq_local 评分消融（20260917 真实实现）：带宽独立——每个流各得
+    min(申请率, B̂)，忽略 FCFS 共享竞争。仅用于推演评分世界（物理执行
+    仍走共享 FCFS）；作用是隔离"预测时是否建模跨 worker 干扰"的价值：
+    带宽不紧张时与共享预测几乎一致，竞争紧张时系统性乐观（低估等待）。
     """
 
-    def _sample(self, t):
-        super()._sample(t)
+    def allocate(self, t):
+        cap = self.b_at(t)
+        for f in sorted(self.flows.values(), key=lambda x: x.submit_seq):
+            f.rate_gbps = min(f.q_gbps, cap)
 
 
 class _HoldPi:
