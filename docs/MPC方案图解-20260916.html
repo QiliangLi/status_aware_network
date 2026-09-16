@@ -70,6 +70,9 @@
   .cap b{color:var(--accent)}
   .plan{border:1px solid var(--line); border-radius:10px; padding:12px 14px 20px; margin:14px 0; transition:opacity .4s}
   .plan.dimmed{opacity:.38}
+  .plan.chosen{border:2.5px solid var(--good); box-shadow:0 0 0 4px rgba(46,139,87,.15)}
+  .plan .chosen-badge{display:none; background:var(--good); color:#fff; font-size:12px; border-radius:4px; padding:1px 8px}
+  .plan.chosen .chosen-badge{display:inline-block}
   .plan h4{margin:0 0 2px; font-size:14.5px; display:flex; align-items:baseline; gap:10px; flex-wrap:wrap}
   .plan h4 .tag{font-size:12px; color:#fff; border-radius:4px; padding:1px 8px}
   .plan .desc{font-size:13px; color:var(--ink-soft); margin:0 0 6px}
@@ -311,7 +314,7 @@
   <div class="selfbox" style="margin:0 0 12px">
     <b>怎么读这个动画：</b>下面三个面板是同一时刻（t=0）的三个<b>"如果……会怎样"的平行推演</b>——
     在系统副本里想象出来的三种未来，不是真的跑了三遍。红色竖线是<b>想象中的时刻</b>，
-    按步进按钮（或 ←/→ 键）看每个未来怎么展开；推演结束后到 §6 打分选出一个，才真正落地第一步。
+    按步进按钮（或 ←/→ 键）看每个未来怎么展开；<b>推演结束后，最后两步会当场打分并给出最终选择</b>（绿框 + "落子"徽章），打分明细在 §6。
   </div>
   <div class="ctrl">
     <button class="primary" id="btn-play">▶ 播放</button>
@@ -325,7 +328,7 @@
   <div class="plan" data-plan="p1">
     <h4><span class="tag" style="background:var(--p1)">候选 A</span>同类批、两个实例同时发
       <span style="color:var(--ink-soft);font-weight:400">首步 = 实例1←SS、实例2←LL，都在 t=0</span>
-      <span style="color:var(--ink-soft);font-weight:400">（这也是基础动作 π 的选择）</span></h4>
+      <span style="color:var(--ink-soft);font-weight:400">（这也是基础动作 π 的选择）</span><span class="chosen-badge">✔ MPC 落子</span></h4>
     <p class="desc">实例1 的首层流先提交（FCFS 排前），实例2 的首层流排队。</p>
     <div class="tl">
       <div class="rowlab">实例1 · 算/等</div><div class="rowlab" style="top:38px">实例1 · 读</div>
@@ -346,7 +349,7 @@
   <div class="plan" data-plan="p3">
     <h4><span class="tag" style="background:var(--p3)">候选 B</span>两个"短+长"混批、同时发
       <span style="color:var(--ink-soft);font-weight:400">首步 = 实例1←{S0,L0}、实例2←{S1,L1}，都在 t=0</span>
-      <span style="color:var(--ink-soft);font-weight:400">（每批读 5 GB/层、算 3 s/层，见 §1.4）</span></h4>
+      <span style="color:var(--ink-soft);font-weight:400">（每批读 5 GB/层、算 3 s/层，见 §1.4）</span><span class="chosen-badge">✔ MPC 落子</span></h4>
     <p class="desc">两条批负载均衡；实例2 的首层流排在实例1 之后。</p>
     <div class="tl">
       <div class="rowlab">实例1 · 算/等</div><div class="rowlab" style="top:38px">实例1 · 读</div>
@@ -366,7 +369,7 @@
 
   <div class="plan" data-plan="p4">
     <h4><span class="tag" style="background:var(--p4)">候选 C</span>SS 立即发，实例2 等 0.5 s 再领 LL（"等待"候选）
-      <span style="color:var(--ink-soft);font-weight:400">首步 = 实例1←SS(t=0)，实例2 只设一个 0.5 s 的闹钟（不领批、不占带宽）</span>
+      <span style="color:var(--ink-soft);font-weight:400">首步 = 实例1←SS(t=0)，实例2 只设一个 0.5 s 的闹钟（不领批、不占带宽）</span><span class="chosen-badge">✔ MPC 落子</span>
     </h4>
     <p class="desc">只晚半步，SS 的下层读流就能排在 LL 首层<b>前面</b>、且只要 1 GB/s。</p>
     <div class="tl">
@@ -390,19 +393,23 @@
     <div class="ledger" data-ledger="p1"><h5>候选 A</h5><div class="body">—</div></div>
     <div class="ledger" data-ledger="p4"><h5>候选 C</h5><div class="body">—</div></div>
   </div>
+
+  <h3 style="margin-top:20px">推演结束 → 打分 → 落子（动画最后两步对应这里）</h3>
+  <div class="thetas" role="group" aria-label="选择优化目标">
+    <button data-th="M" aria-pressed="false">θ=M · 最快全部做完</button>
+    <button data-th="S" aria-pressed="false">θ=S · 超时请求数最少</button>
+    <button data-th="T" aria-pressed="true">θ=T · 平均等待（TTFT）最短</button>
+    <button data-th="R" aria-pressed="false">θ=R · 相对等待（TTFT/T0）最短</button>
+  </div>
+  <div class="verdict" id="verdict"></div>
 </div>
 
 <!-- ============================================================ -->
-<h2 id="score"><span class="no">⑥</span>推演结束：按 θ 打分、MPC 落子</h2>
+<h2 id="score"><span class="no">⑥</span>打分明细（动画结尾已当场选过，这里是账本）</h2>
 <p>
-四个优化目标 θ 是四把不同的尺子（都是越小越好）。切换按钮，看每把尺子选出谁：
+四个优化目标 θ 是四把不同的尺子（都是越小越好）。上面动画的最后两步已经按当前 θ 选过一次；
+切换上方按钮重看，这里给出三候选的完整对照：
 </p>
-<div class="thetas" role="group" aria-label="选择优化目标">
-  <button data-th="M" aria-pressed="false">θ=M · 最快全部做完</button>
-  <button data-th="S" aria-pressed="false">θ=S · 超时请求数最少</button>
-  <button data-th="T" aria-pressed="true">θ=T · 平均等待（TTFT）最短</button>
-  <button data-th="R" aria-pressed="false">θ=R · 相对等待（TTFT/T0）最短</button>
-</div>
 <table id="score">
   <thead><tr>
     <th class="l">候选</th><th>M：最后完成<br>(s)</th><th>S：超时条数<br>(期限 S=6.75, L=15)</th>
@@ -414,7 +421,6 @@
     <tr data-plan="p4"><td class="l">C 等待错峰</td><td>11</td><td>0</td><td>31</td><td>2.10</td></tr>
   </tbody>
 </table>
-<div class="verdict" id="verdict"></div>
 <div class="note" style="margin-top:14px">
 注意候选 B 的教训：它<b>最快做完所有请求</b>（M=8.72 全场最佳），却让两条短请求各超时——
 "做得快"和"按时"不是一回事。候选 C 则展示了错峰的本质：用 0.5 s 的闲置换 SS 的下层读流插队（只要 1 GB/s），
@@ -556,16 +562,40 @@
     {t:5.5,  focus:["p1"], cap:"<b>候选 A 的短批完成：F=5 s</b>，实例1 转为闲置。此刻 A 与 C 的总等待几乎打平，胜负在长请求身上。"},
     {t:7,    focus:["p1","p4"], cap:"候选 C：LL 开始算末层（F 将为 11）。候选 A：LL 在 6.5–6.75 提速补完最后 1 GB，马上开始算末层（F 将为 10.75）。"},
     {t:8.6,  focus:["p3"], cap:"<b>候选 B（混批）最先全部完成：M=8.72 s</b>——但注意它的两条短请求在 7.77/8.72 才完成，<b>都超过了 6.75 s 的期限</b>（打分表 S 列=2）。"},
-    {t:11,   focus:["p1","p3","p4"], cap:"<b>推演结束。</b>A：F=5,5,10.75,10.75；B：F=7.77,7.77,8.72,8.72；C：F=4.5,4.5,11,11。往下到 §6——四把尺子（θ）各选谁？"}
+    {t:11,   focus:["p1","p3","p4"], cap:"<b>推演结束，三个结局摆在一起：</b>A：F=5,5,10.75,10.75；B：F=7.77,7.77,8.72,8.72；C：F=4.5,4.5,11,11。<b>下一步：按 θ 打分并落子</b>（选中的候选会亮绿框）。"},
+    {t:11, phase:"commit", focus:["p1","p3","p4"]},
+    {t:11, phase:"loop",   focus:["p1","p3","p4"]}
   ];
   var cur = 0, playing = false, timer = null;
   var caps = document.getElementById("cap");
   var tnow = document.getElementById("t-now");
+  var curTheta = "T";
+
+  /* 落子（commit）与下一轮（loop）两步的解说随 θ 变化 */
+  var COMMIT = {
+    M: "<b>最终选择：候选 B（混批）。</b>门槛校验：B 的主目标 8.72 <b>严格小于</b>保底 A 的 10.75 ✓ 允许切换。真实世界现在才动：<b>实例1 领 {S0,L0}、实例2 领 {S1,L1}，t=0 提交首层读取</b>。推演出的后续（7.77/8.72 完成）不会被执行——那只是估值。",
+    S: "<b>最终选择：保底 A（不是 C！）。</b>词典序最优本是 C（超时同为 0，总等待 31&lt;31.5），但<b>主目标与保底打平</b>——门槛要求主目标严格改善，平局不切换（保守性）。真实动作 = 保底：实例1←SS、实例2←LL。这正是 §7 第一条『实验里 MPC≡EDF』的同一机制，只是发生在一只脚上。",
+    T: "<b>最终选择：候选 C（等待错峰）。</b>门槛校验：总等待 31 <b>严格小于</b>保底的 31.5 ✓。真实世界现在才动：<b>实例1 领 SS 并提交首层读取；实例2 什么都不领，只登记一个 0.5 s 后的唤醒闹钟</b>。",
+    R: "<b>最终选择：候选 C（等待错峰）。</b>门槛校验：平均相对等待 2.10 <b>严格小于</b>保底的 2.19 ✓。真实首步与 θ=T 相同：实例1←SS，实例2 设 0.5 s 闹钟。"
+  };
+  var LOOP_CAP = "<b>之后呢？（以 θ=T 选了 C 为例）</b>t=0.5 闹钟响 → 触发新一轮决策：此刻队列空、没有新到达，实例2 直接领 LL——<b>推演里看到的那条 LL 时间线，从这一刻起成为现实</b>。再往后每个事件（到达 / 批完成 / 读取完成 / 闹钟）都会像 t=0 这样重新推演一轮：MPC 永远只落实一步，其余全是想象。";
+
+  function chosenOf(){
+    return curTheta === "S" ? "p1" : THETA[curTheta].best;
+  }
+  function setChosen(pid){
+    document.querySelectorAll(".plan").forEach(function(p){
+      p.classList.toggle("chosen", pid !== null && p.dataset.plan === pid);
+    });
+  }
 
   function render(){
     var s = STEPS[cur];
-    caps.innerHTML = s.cap + ' <span style="color:#8a8271">（第 ' + (cur+1) + '/' + STEPS.length + ' 步，←/→ 键也可翻页）</span>';
-    tnow.textContent = "t = " + s.t.toFixed(1) + " s";
+    var body = s.cap;
+    if(s.phase === "commit"){ body = COMMIT[curTheta]; }
+    if(s.phase === "loop"){ body = LOOP_CAP; }
+    caps.innerHTML = body + ' <span style="color:#8a8271">（第 ' + (cur+1) + '/' + STEPS.length + ' 步，←/→ 键也可翻页）</span>';
+    tnow.textContent = s.phase === "commit" ? "★ 落子" : (s.phase === "loop" ? "↻ 下一轮" : "t = " + s.t.toFixed(1) + " s");
     document.querySelectorAll(".tl").forEach(function(tl){
       var track = tl.querySelector(".track");
       var frac = s.t / T_MAX;
@@ -577,6 +607,7 @@
     document.querySelectorAll(".plan").forEach(function(p){
       p.classList.toggle("dimmed", s.focus.indexOf(p.dataset.plan) < 0);
     });
+    setChosen(s.phase ? chosenOf() : null);
     document.querySelectorAll(".ledger").forEach(function(lg){
       var plan = lg.dataset.ledger;
       lg.querySelector(".body").innerHTML = ledgerHTML(plan, s.t);
@@ -602,13 +633,14 @@
 
   /* ---- θ 选择 ---- */
   var THETA = {
-    M:{col:1, best:"p3", txt:"<b>选候选 B（混批）</b>：M=8.72 最小，最快做完所有请求。但注意它的超时数是 2——做得最快≠按时。"},
-    S:{col:2, best:"p4", txt:"<b>选候选 C（等待错峰）</b>：A 与 C 都是 0 超时，比总等待破平局（31 &lt; 31.5）；B 直接出局。"},
-    T:{col:3, best:"p4", txt:"<b>选候选 C</b>：总等待 31 &lt; 31.5（A）&lt; 32.98（B）。短请求提前拿首 token 的收益，略大于长请求被拖后的损失。"},
-    R:{col:4, best:"p4", txt:"<b>选候选 C</b>：2.10 &lt; 2.19（A）&lt; 2.66（B）。短请求独占时间短，同样的提前在相对口径下权重更大。"}
+    M:{col:1, best:"p3", txt:"<b>选候选 B（混批）</b>：主目标 M=8.72 严格优于保底 10.75，门槛通过。注意它的超时数是 2——做得最快≠按时。"},
+    S:{col:2, best:"p4", txt:"<b>词典序最优是 C</b>（超时同为 0，总等待 31 破平局胜出），<b>但主目标与保底打平 → 门槛拒绝切换，落子 = 保底 A</b>。平局回退是 MPC 的保守性，也是实验里它常与 EDF 相同的直接原因。"},
+    T:{col:3, best:"p4", txt:"<b>选候选 C</b>：总等待 31 &lt; 31.5（A）&lt; 32.98（B），主目标严格改善，门槛通过。短请求提前拿首 token 的收益，略大于长请求被拖后的损失。"},
+    R:{col:4, best:"p4", txt:"<b>选候选 C</b>：2.10 &lt; 2.19（A）&lt; 2.66（B），门槛通过。短请求独占时间短，同样的提前在相对口径下权重更大。"}
   };
   var verdict = document.getElementById("verdict");
   function setTheta(th){
+    curTheta = th;
     document.querySelectorAll(".thetas button").forEach(function(b){
       b.setAttribute("aria-pressed", String(b.dataset.th === th));
     });
@@ -618,8 +650,10 @@
         td.classList.toggle("win", tr.dataset.plan === cfg.best && i === cfg.col);
       });
     });
-    verdict.innerHTML = "<b>MPC 落子（θ=" + th + "）：</b>" + cfg.txt +
-      " 落实的首步是当前这一个动作（如 C：实例1 发 SS、实例2 设 0.5 s 闹钟）；推演出的后续计划不执行，下一个事件到来全部重算。";
+    var landed = th === "S" ? "A（保底）" : (th === "M" ? "B（混批）" : "C（等待错峰）");
+    verdict.innerHTML = "<b>θ=" + th + " 的落子结果：候选 " + landed + "。</b>" + cfg.txt +
+      " 推演出的后续计划不执行，下一个事件到来全部重算。";
+    if(STEPS[cur].phase){ render(); }   // 动画停在落子/下一轮步时，切换 θ 即时刷新选择
   }
   document.querySelectorAll(".thetas button").forEach(function(b){
     b.onclick = function(){ setTheta(b.dataset.th); };
