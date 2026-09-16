@@ -1,0 +1,521 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>MPC 方案图解 —— 共享 KV 调度的滚动预测控制</title>
+<style>
+  :root{
+    --ink:#1c2733; --ink-soft:#4a5a6a; --paper:#faf9f6; --card:#ffffff;
+    --line:#d8d2c4; --accent:#0f6b6b;
+    --compute:#4C72B0; --stall:#DD8452; --idle:#b9b3a5; --read:#7aa6d8;
+    --p1:#4C72B0; --p3:#937860; --p4:#2e8b57;
+    --good:#2e8b57; --bad:#c0554d;
+  }
+  *{box-sizing:border-box}
+  html{scroll-behavior:smooth}
+  body{
+    margin:0; color:var(--ink); background:var(--paper);
+    font-family:"PingFang SC","Hiragino Sans GB","Microsoft YaHei",system-ui,sans-serif;
+    line-height:1.75; font-size:16px;
+  }
+  main{max-width:980px; margin:0 auto; padding:0 20px 80px}
+  header{border-bottom:2px solid var(--ink); padding:44px 0 22px; margin-bottom:34px}
+  header h1{font-size:30px; margin:0 0 10px; letter-spacing:.5px}
+  header .sub{color:var(--ink-soft); font-size:15px; max-width:760px}
+  h2{font-size:22px; margin:52px 0 14px; padding-top:10px; border-top:1px solid var(--line)}
+  h2 .no{color:var(--accent); font-family:Georgia,serif; margin-right:8px}
+  h3{font-size:17px; margin:26px 0 8px}
+  p{margin:10px 0}
+  .lead{font-size:17.5px}
+  .toc{display:flex; flex-wrap:wrap; gap:8px; margin-top:14px}
+  .toc a{
+    text-decoration:none; color:var(--accent); border:1px solid var(--line);
+    background:var(--card); border-radius:999px; padding:4px 14px; font-size:14px;
+  }
+  .toc a:hover,.toc a:focus{border-color:var(--accent)}
+  .card{background:var(--card); border:1px solid var(--line); border-radius:10px; padding:18px 20px; margin:16px 0}
+  .note{background:#f2efe6; border-left:4px solid var(--accent); padding:10px 16px; border-radius:0 8px 8px 0; font-size:14.5px; color:var(--ink-soft)}
+  .note b{color:var(--ink)}
+  code,.f{font-family:"SF Mono",Menlo,Consolas,monospace; font-size:14px; background:#f0ede4; padding:1px 6px; border-radius:4px}
+  .formula{background:#f7f5ee; border:1px dashed var(--line); border-radius:8px; padding:12px 16px; margin:12px 0; font-family:"SF Mono",Menlo,Consolas,monospace; font-size:14.5px; overflow-x:auto; white-space:nowrap}
+  .formula .cm{color:var(--ink-soft); font-family:"PingFang SC",sans-serif; font-size:13px}
+  table{border-collapse:collapse; width:100%; margin:14px 0; font-size:14.5px; background:var(--card)}
+  th,td{border:1px solid var(--line); padding:7px 10px; text-align:center}
+  th{background:#efece2; font-weight:600}
+  td.l,th.l{text-align:left}
+  .win{outline:2.5px solid var(--good); outline-offset:-2.5px; font-weight:700; color:var(--good)}
+  .lose{color:var(--bad)}
+  /* ---------- 步骤卡 ---------- */
+  .steps{display:grid; grid-template-columns:repeat(auto-fit,minmax(280px,1fr)); gap:14px; margin:18px 0}
+  .step{background:var(--card); border:1px solid var(--line); border-radius:10px; padding:16px 18px; position:relative}
+  .step .k{position:absolute; top:-13px; left:14px; background:var(--accent); color:#fff; border-radius:999px; width:26px; height:26px; display:flex; align-items:center; justify-content:center; font-size:14px; font-weight:700}
+  .step h3{margin:6px 0 6px; font-size:15.5px}
+  .step p{font-size:14px; margin:6px 0; color:var(--ink-soft)}
+  .step .f{display:block; margin:8px 0 2px; white-space:normal}
+  /* ---------- 系统示意 ---------- */
+  .sys{display:flex; align-items:center; gap:10px; flex-wrap:wrap; margin:14px 0}
+  .sys .box{border:1.5px solid var(--ink); border-radius:8px; padding:6px 12px; background:var(--card); font-size:13.5px; text-align:center}
+  .sys .box.q{border-style:dashed; padding:10px 14px}
+  .sys .arr{color:var(--ink-soft); font-size:18px}
+  .sys .store{background:#e8e2d2}
+  /* ---------- 动画区 ---------- */
+  .stage{background:var(--card); border:1.5px solid var(--ink); border-radius:12px; padding:20px; margin:18px 0}
+  .ctrl{display:flex; align-items:center; gap:10px; flex-wrap:wrap; margin-bottom:6px}
+  .ctrl button{
+    border:1.5px solid var(--ink); background:var(--card); color:var(--ink);
+    border-radius:8px; padding:6px 16px; font-size:14.5px; cursor:pointer; font-family:inherit;
+  }
+  .ctrl button:hover,.ctrl button:focus{background:#efece2}
+  .ctrl button.primary{background:var(--accent); border-color:var(--accent); color:#fff}
+  .ctrl .t-now{font-family:Menlo,Consolas,monospace; font-size:15px; margin-left:auto}
+  .cap{min-height:64px; background:#f4f1e8; border-radius:8px; padding:10px 14px; font-size:14.5px; margin:8px 0 14px}
+  .cap b{color:var(--accent)}
+  .plans{display:grid; grid-template-columns:1fr; gap:16px}
+  .plan{border:1px solid var(--line); border-radius:10px; padding:12px 14px 8px}
+  .plan h4{margin:0 0 2px; font-size:14.5px; display:flex; align-items:baseline; gap:10px}
+  .plan h4 .tag{font-size:12px; color:#fff; border-radius:4px; padding:1px 8px}
+  .plan .desc{font-size:13px; color:var(--ink-soft); margin:0 0 8px}
+  .tl{position:relative; height:118px; margin:4px 0 2px}
+  .tl .rowlab{position:absolute; left:0; top:0; bottom:0; width:74px; font-size:12px; color:var(--ink-soft); display:flex; align-items:center}
+  .tl .track{position:absolute; left:80px; right:34px; top:0; bottom:0}
+  .tl .lane{position:absolute; left:0; right:0; height:40px; top:44px; border-bottom:1px dotted var(--line)}
+  .tl .track .scan + .lane{top:2px}
+  .blk{position:absolute; height:30px; top:5px; border-radius:5px; font-size:11px; color:#fff; display:flex; align-items:center; justify-content:center; overflow:hidden; transition:opacity .45s}
+  .blk.read{background:var(--read); color:#123a5e}
+  .blk.compute{background:var(--compute)}
+  .blk.stall{background:var(--stall)}
+  .blk.idle{background:var(--idle); color:#5c574b}
+  .blk.dim{opacity:.13}
+  .blk .lb{white-space:nowrap; padding:0 2px}
+  .scan{position:absolute; top:-4px; bottom:-4px; width:2px; background:var(--bad); left:80px; transition:left .6s linear; z-index:3}
+  .scan::after{content:"t"; position:absolute; top:-18px; left:-4px; color:var(--bad); font-size:11px; font-family:Menlo,monospace}
+  .axis{position:absolute; left:80px; right:34px; bottom:-16px; height:14px; font-size:10.5px; color:var(--ink-soft); font-family:Menlo,monospace}
+  .axis span{position:absolute; transform:translateX(-50%)}
+  .fmark{position:absolute; top:-14px; font-size:11px; font-weight:700; font-family:Menlo,monospace; transform:translateX(-50%); z-index:2}
+  /* θ 选择与打分 */
+  .thetas{display:flex; gap:8px; margin:6px 0 10px; flex-wrap:wrap}
+  .thetas button{border:1.5px solid var(--line); background:var(--card); border-radius:999px; padding:4px 16px; font-size:14px; cursor:pointer; font-family:inherit}
+  .thetas button[aria-pressed="true"]{background:var(--ink); color:#fff; border-color:var(--ink)}
+  .verdict{font-size:15px; margin-top:10px; padding:10px 14px; background:#eef4ee; border:1px solid #cfe0cf; border-radius:8px}
+  details{margin:12px 0; border:1px solid var(--line); border-radius:8px; background:var(--card)}
+  summary{cursor:pointer; padding:10px 16px; font-weight:600; font-size:15px}
+  details > div{padding:2px 18px 14px}
+  footer{margin-top:60px; padding-top:14px; border-top:1px solid var(--line); color:var(--ink-soft); font-size:13px}
+  @media (prefers-reduced-motion: reduce){
+    .blk,.scan{transition:none}
+  }
+  @media (max-width:640px){
+    .tl .rowlab{width:56px}
+    .tl .track{left:60px}
+    .axis{left:60px}
+  }
+</style>
+</head>
+<body>
+<main>
+
+<header>
+  <h1>MPC 方案图解</h1>
+  <div class="sub">
+    共享 KV 统一队列调度中的<b>滚动预测控制</b>（<code>cq_mpc</code>）：它每一步怎么决策、依据哪些公式，
+    以及一个用真实金标数字逐步推演的动画例子。读完你应该能回答：
+    MPC 在等什么信息、在什么集合里选、怎么打分、为什么实验里它常常和 EDF 一模一样。
+  </div>
+  <nav class="toc">
+    <a href="#bg">① 30 秒背景</a>
+    <a href="#how">② 一次决策的五步</a>
+    <a href="#demo">③ 动画实例：三条时间线</a>
+    <a href="#why">④ 为什么常与 EDF 相同</a>
+    <a href="#formulas">⑤ 公式速查</a>
+  </nav>
+</header>
+
+<!-- ============================================================ -->
+<h2 id="bg"><span class="no">①</span>30 秒背景：MPC 活在什么系统里</h2>
+<p class="lead">
+多个推理实例共用一份 KV 存储。请求带着"已命中前缀"进入<b>唯一的中央等待队列</b>；
+空闲实例从队列<b>取走一批</b>请求，逐层执行"读这层 KV → 算这层"，算本层时预取下层；
+所有实例的读取挤<b>同一条带宽</b>，存储按 FCFS（先提交先服务）分配。
+</p>
+<div class="sys">
+  <div class="box q">请求到达<br>(h=要读的KV, u=要算的token)</div>
+  <div class="arr">→</div>
+  <div class="box q"><b>中央等待队列</b></div>
+  <div class="arr">→</div>
+  <div class="box">实例1<br>(一次一批)</div>
+  <div class="box">实例2</div>
+  <div class="arr">…</div>
+  <div class="arr">→</div>
+  <div class="box store"><b>共享存储</b><br>FCFS · B GB/s</div>
+</div>
+<p>
+调度器只能决定三件事：<b>哪些请求拼一批、哪个实例先领、要不要晚点领</b>。
+简单规则（FCFS / SPT / EDF）用一条排序键回答这三个问题；MPC 的思路不同——
+<b>像下棋一样，把每个候选走法在脑子里推演到终局，再落子</b>。
+</p>
+
+<!-- ============================================================ -->
+<h2 id="how"><span class="no">②</span>一次决策的五步</h2>
+<p>每当"有空闲实例且队列非空"（到达/完成/报价更新等事件触发），MPC 执行：</p>
+
+<div class="steps">
+  <div class="step"><span class="k">0</span>
+    <h3>先拿一个保底动作</h3>
+    <p>基础策略 <b>π = guarded EDF</b>（带老化保护的最早截止优先）给出联合动作。它是参照系，也是兜底。</p>
+  </div>
+  <div class="step"><span class="k">1</span>
+    <h3>从观测重建预测世界</h3>
+    <p>MPC 不能看内部真值，只能用<b>可观测信息</b>：最新带宽报价 <code>bw_hat</code>（之后恒值外推）、自己提交过的读取流账本（已传字节、完成确认）、已到达请求的 h/u/deadline。</p>
+    <span class="f">预测带宽 B̂(t) ≡ bw_hat（常值）</span>
+  </div>
+  <div class="step"><span class="k">2</span>
+    <h3>生成候选动作</h3>
+    <p>从队列挑 ≤32 个候选请求（到达最早 / T0 最短 / 截止最早 / 余量最小 四池轮询，最老请求必入），按<b>三种顺序</b>贪心填出 ≤24 个候选批；再逐空闲实例组合成联合动作，并加入<b>等待</b>候选：</p>
+    <span class="f">wait ∈ now + {0.05, 0.1, 0.2}·C_ref<br>（C_ref = 已到达请求 T0 的中位数；<br>另加预测的读取完成时刻）</span>
+  </div>
+  <div class="step"><span class="k">3</span>
+    <h3>在副本上推演到排空并打分</h3>
+    <p>每个候选动作落实到一个<b>系统副本</b>上，之后固定用 π 继续执行，直到当前所有已到达请求全部完成，得到每条请求的预测完成时间 F̂。用 θ 的词典序元组打分：</p>
+    <span class="f">θ=M: (max F̂, ΣTTFT)<br>θ=S: (失败数, ΣTTFT)<br>θ=T: (ΣTTFT, 失败数)<br>θ=R: (Σ TTFT/T0, ΣTTFT)</span>
+  </div>
+  <div class="step"><span class="k">4</span>
+    <h3>门槛校验，只落第一步</h3>
+    <p>最优候选的主目标必须<b>严格优于</b>基础动作（gate=0 时即严格小），否则回落到 π。无论推演多深，<b>只落实第一个动作</b>；推演中的未来计划只是估值。预算：2 ms CPU / 2 万事件，超了就用保底。</p>
+  </div>
+</div>
+<div class="note">
+<b>两个容易误解的点：</b>① 推演用的 FCFS、层依赖、批屏障与真实引擎完全同规则，但跑在"预测状态"上（带宽恒值、无未来到达），所以估值可能错——这就是 gate 存在的原因；
+② 等待不是预订请求：WAIT 只设一个唤醒时刻，请求仍留在中央队列，任何新事件都可提前重评。
+</div>
+
+<!-- ============================================================ -->
+<h2 id="demo"><span class="no">③</span>动画实例：一次决策的三条时间线</h2>
+<p class="lead">
+这是规格 §11.2 的<b>四计划金标算例</b>（测试逐数复现过）：2 个实例、2 层、队列里 4 条请求——
+两条短请求 S（每层读 1 GB、单条算 1 s/层）、两条长请求 L（每层读 4 GB、单条算 2 s/层）；
+组成批后每层计算量线性相加（无合批加速）。带宽 B = 4 GB/s。t=0 全部到达。
+</p>
+<p>MPC 此刻生成三个代表性候选，按下方的 <b>播放</b> 看它们各自推演出的命运：</p>
+
+<div class="stage">
+  <div class="ctrl">
+    <button class="primary" id="btn-play">▶ 播放</button>
+    <button id="btn-prev">← 上一步</button>
+    <button id="btn-next">下一步 →</button>
+    <button id="btn-reset">重置</button>
+    <span class="t-now" id="t-now">t = 0.0 s</span>
+  </div>
+  <div class="cap" id="cap"></div>
+
+  <div class="plans">
+
+    <div class="plan" id="plan-p1">
+      <h4><span class="tag" style="background:var(--p1)">候选 A</span>同类批同时发（P1）
+        <span style="color:var(--ink-soft);font-weight:400">实例1 领 SS（两条短），实例2 领 LL（两条长）</span></h4>
+      <p class="desc">到达序的直观做法：SS 首层流先提交，LL 首层排在后面。</p>
+      <div class="tl" data-plan="p1">
+        <div class="rowlab">实例1 · SS</div>
+        <div class="track">
+          <div class="scan"></div>
+          <div class="lane">
+            <div class="blk read"   data-t="0"    data-d="0.5">读L0</div>
+            <div class="blk compute" data-t="0.5" data-d="2">算L0</div>
+            <div class="blk read"   data-t="2.5" data-d="0.5">读L1</div>
+            <div class="blk compute" data-t="3"   data-d="2">算L1</div>
+          </div>
+          <div class="lane">
+            <div class="blk stall"  data-t="0"    data-d="0.5">等流</div>
+            <div class="blk read"   data-t="0.5" data-d="2">读L0</div>
+            <div class="blk compute" data-t="2.5" data-d="4">算L0</div>
+            <div class="blk read"   data-t="3"   data-d="3.75">读L1@2</div>
+            <div class="blk compute" data-t="6.75" data-d="4">算L1</div>
+          </div>
+        </div>
+        <span class="fmark" style="color:var(--p1)" data-x="5">F=5,5</span>
+        <span class="fmark" style="color:var(--p1)" data-x="10.75">F=10.75,10.75</span>
+        <div class="axis"><span style="left:0%">0</span><span style="left:25%">2.9s</span><span style="left:50%">5.8s</span><span style="left:75%">8.6s</span><span style="left:100%">11.5s</span></div>
+      </div>
+    </div>
+
+    <div class="plan" id="plan-p3">
+      <h4><span class="tag" style="background:var(--p3)">候选 B</span>两个长短混批（P3）
+        <span style="color:var(--ink-soft);font-weight:400">每批 1 短 + 1 长：读 5 GB/层、算 3 s/层</span></h4>
+      <p class="desc">混批让两实例负载均衡（下图分段为示意，完成时刻为金标精确值）。</p>
+      <div class="tl" data-plan="p3">
+        <div class="rowlab">实例1 · {S,L}</div>
+        <div class="track">
+          <div class="scan"></div>
+          <div class="lane">
+            <div class="blk read"    data-t="0" data-d="1.3">读L0</div>
+            <div class="blk compute" data-t="1.3" data-d="1.7">算L0</div>
+            <div class="blk read"    data-t="3" data-d="1.4">读L1</div>
+            <div class="blk compute" data-t="4.4" data-d="1.6">算L1</div>
+          </div>
+          <div class="lane">
+            <div class="blk read"    data-t="0.5" data-d="1.5">读L0</div>
+            <div class="blk compute" data-t="2" data-d="1.8">算L0</div>
+            <div class="blk read"    data-t="3.8" data-d="1.5">读L1</div>
+            <div class="blk compute" data-t="5.3" data-d="1.9">算L1</div>
+          </div>
+        </div>
+        <span class="fmark" style="color:var(--p3)" data-x="7.770833">F=7.77</span>
+        <span class="fmark" style="color:var(--p3)" data-x="8.717014">F=8.72</span>
+        <div class="axis"><span style="left:0%">0</span><span style="left:25%">2.9s</span><span style="left:50%">5.8s</span><span style="left:75%">8.6s</span><span style="left:100%">11.5s</span></div>
+      </div>
+    </div>
+
+    <div class="plan" id="plan-p4">
+      <h4><span class="tag" style="background:var(--p4)">候选 C</span>短批先发、长批等 0.5 s（P4）
+        <span style="color:var(--ink-soft);font-weight:400">实例1 立即领 SS；实例2 WAIT 到 t=0.5 再领 LL</span></h4>
+      <p class="desc">这就是 MPC 的"等待"候选：只晚半步，SS 的下层读流就能排在 LL 首层<b>前面</b>。</p>
+      <div class="tl" data-plan="p4">
+        <div class="rowlab">实例1 · SS</div>
+        <div class="track">
+          <div class="scan"></div>
+          <div class="lane">
+            <div class="blk read"    data-t="0" data-d="0.5">读L0</div>
+            <div class="blk compute" data-t="0.5" data-d="2">算L0</div>
+            <div class="blk read"    data-t="0.5" data-d="2">读L1@1</div>
+            <div class="blk compute" data-t="2.5" data-d="2">算L1</div>
+          </div>
+          <div class="lane">
+            <div class="blk idle"    data-t="0" data-d="0.5">闲置</div>
+            <div class="blk read"    data-t="0.5" data-d="2.5">读L0@3→4</div>
+            <div class="blk compute" data-t="3" data-d="4">算L0</div>
+            <div class="blk read"    data-t="3" data-d="4">读L1@2</div>
+            <div class="blk compute" data-t="7" data-d="4">算L1</div>
+          </div>
+        </div>
+        <span class="fmark" style="color:var(--p4)" data-x="4.5">F=4.5,4.5</span>
+        <span class="fmark" style="color:var(--p4)" data-x="11">F=11,11</span>
+        <div class="axis"><span style="left:0%">0</span><span style="left:25%">2.9s</span><span style="left:50%">5.8s</span><span style="left:75%">8.6s</span><span style="left:100%">11.5s</span></div>
+      </div>
+    </div>
+
+  </div>
+
+  <h3 style="margin-top:22px">推演结束：按 θ 打分（金标精确值）</h3>
+  <div class="thetas" role="group" aria-label="选择优化目标">
+    <button data-th="M" aria-pressed="false">θ = M（最快全部做完）</button>
+    <button data-th="S" aria-pressed="false">θ = S（最少超时）</button>
+    <button data-th="T" aria-pressed="true">θ = T（平均 TTFT 最小）</button>
+    <button data-th="R" aria-pressed="false">θ = R（归一化 TTFT 最小）</button>
+  </div>
+  <table id="score">
+    <thead><tr>
+      <th class="l">候选</th><th>M（最后完成 s）</th><th>SLO 失败数</th>
+      <th>ΣTTFT（s）</th><th>平均归一化 TTFT</th>
+    </tr></thead>
+    <tbody>
+      <tr data-plan="p1"><td class="l">A 同类批（P1）</td><td>10.75</td><td>0</td><td>31.5</td><td>2.186</td></tr>
+      <tr data-plan="p3"><td class="l">B 混批（P3）</td><td>8.72</td><td>2</td><td>32.98</td><td>2.656</td></tr>
+      <tr data-plan="p4"><td class="l">C 等待错峰（P4）</td><td>11</td><td>0</td><td>31</td><td>2.10</td></tr>
+    </tbody>
+  </table>
+  <div class="verdict" id="verdict"></div>
+</div>
+
+<div class="note">
+这个例子浓缩了 MPC 的全部要素：<b>候选 C 就是一个 WAIT 动作</b>（等 0.5 s 再领长批）。
+它让 SS 的下层读流插到 LL 首层前面（FCFS 序位改变），于是短请求 4.5 s 就拿到首 token
+（比候选 A 快 10%）、设备 STALL 从 3.75 降到 3 worker·s——代价是最后完成时间从 10.75 拖到 11。
+<b>没有候选在四列同时最优</b>，选谁由 θ 决定：切换上面的按钮看看。
+</div>
+
+<!-- ============================================================ -->
+<h2 id="why"><span class="no">④</span>为什么实验里 MPC 常常和 EDF 一模一样</h2>
+<p>E25 全矩阵（7080 次运行）中，MPC 相对 EDF 的配对差在四个目标、全部因子线上都是 <b>0.000</b>。机制上有四个原因，每个都能在动画例子里找到影子：</p>
+<table>
+  <thead><tr><th class="l">原因</th><th class="l">解释</th></tr></thead>
+  <tbody>
+    <tr><td class="l"><b>参照系太强</b></td><td class="l">基础动作 π = guarded EDF 在深队列下已接近时延最优；MPC 只有找到<b>严格更好</b>的首动作（gate=0）才偏离——多数时刻找不到。</td></tr>
+    <tr><td class="l"><b>组批没有收益可挖</b></td><td class="l">真实 trace 的批内新 token 远超计算饱和点（N≫N_sat），换批成员不省计算（G≈1），重排只剩同步损失的移动。</td></tr>
+    <tr><td class="l"><b>等待等不来东西</b></td><td class="l">同刻突发型 trace（如 Conversation 同刻组占 100%）里，等 0.05–0.2·C_ref 期间不会到达新请求；带宽充裕时（STALL≈0）也没有要保护的旧流。</td></tr>
+    <tr><td class="l"><b>预算有限</b></td><td class="l">2 ms / 2 万事件内只推演浅层（H=1）；候选评分大多与基础动作打平，平局不切换。</td></tr>
+  </tbody>
+</table>
+<p>
+反过来，这四个条件也指出 MPC 什么时候<b>会</b>有增量：B=20 且峰值利用率打满（有旧流可保护）、
+突发之间有空隙（等得来新请求）、短 token 负载（换批成员有计算收益）、更松的 gate 与更深的预算。
+这些正是 E25 报告 §7 列出的下一批实验格点。
+</p>
+
+<!-- ============================================================ -->
+<h2 id="formulas"><span class="no">⑤</span>公式速查（与实现一一对应）</h2>
+<details open>
+  <summary>评分：θ 的词典序元组（首项是主目标，其余只破平局）</summary>
+  <div>
+    <div class="formula">
+      θ=M: ( max<sub>i</sub> F̂<sub>i</sub> , Σ TTFT )&nbsp;&nbsp;
+      θ=S: ( #{F̂<sub>i</sub>&gt;deadline<sub>i</sub>} , Σ TTFT )<br>
+      θ=T: ( Σ TTFT , 失败数 )&nbsp;&nbsp;
+      θ=R: ( Σ TTFT<sub>i</sub>/T0<sub>i</sub> , Σ TTFT )&nbsp;&nbsp;
+      <span class="cm">越小越好；F̂ 为推演排空的预测完成时刻</span>
+    </div>
+    <p>对应 <code>sim/cq/search.py: score_of()</code>。注意 M 不能用"最大提前量"替代，S 是阶跃目标（救回 10.1→10 的请求才算数）。</p>
+  </div>
+</details>
+<details>
+  <summary>候选批的三种排序（对每个锚请求 a 生成贪心批，保留每个中间不满批）</summary>
+  <div>
+    <div class="formula">
+      同形: |log1p h<sub>i</sub> − log1p h<sub>a</sub>| + |log1p u<sub>i</sub> − log1p u<sub>a</sub><br>
+      互补: |log r<sub>i</sub> + log r<sub>a</sub> − 2 log r<sub>ref</sub>| ,&nbsp; r = V/K（读算比）<br>
+      紧迫: ( deadline<sub>i</sub>, arrival<sub>i</sub>, rid<sub>i</sub> )
+    </div>
+    <p>排序后逐项尝试加入，第一项违反硬约束（≤8 请求 / ≤token 上限 / ≤内存）即停批。候选预排序键 <code>(−G_batch, min_slack, ΣV/ΣK, members)</code> 取前 24。</p>
+  </div>
+</details>
+<details>
+  <summary>等待候选与唤醒</summary>
+  <div>
+    <div class="formula">
+      wait ∈ now + {0.05, 0.1, 0.2} · C_ref &nbsp;∪&nbsp; {预测读取完成时刻 ≤ now+0.2·C_ref}<br>
+      C_ref = median{ T0<sub>i</sub> : 已到达 } <span class="cm">（在线滚动，v1.4）</span>
+    </div>
+    <p>纯 WAIT 必须有严格未来的唤醒时刻；等待中的请求仍在中央队列，任何新事件都可提前重评。</p>
+  </div>
+</details>
+<details>
+  <summary>门槛、预算与回退</summary>
+  <div>
+    <div class="formula">
+      切换条件: score<sub>best</sub>[0] &lt; score<sub>base</sub>[0] − gate&nbsp;&nbsp;(gate=0 ⇒ 严格改善)<br>
+      预算: 2 ms CPU（软） · 20000 事件（硬） · 深度 H=1（E21/E23 eval 先例）<br>
+      超预算/不可排空/状态失效 ⇒ 回落 π 并记账 fallback
+    </div>
+  </div>
+</details>
+<details>
+  <summary>预测状态的重建（信息边界）</summary>
+  <div>
+    <div class="formula">
+      带宽: B̂(t) ≡ bw_hat（最近一次报价，之后恒值）<br>
+      流剩余: 以最近上报字节为锚，按预测服务扣减；完成确认强制清零<br>
+      计算剩余: max(0, ĉ − 已进行时长)&nbsp;&nbsp;<span class="cm">（默认真值可见；误差模式对称施加）</span>
+    </div>
+    <p>推演引擎与真实引擎共用同一套 FCFS/层依赖代码，但输入是重建的估计状态——估错的后果由 gate 与回退兜住。</p>
+  </div>
+</details>
+
+<footer>
+  数字出处：三条时间线与打分表的全部数值来自规格 §11.2 四计划金标（Fraction 严格相等逐数复现，见
+  <a href="测试报告-E25实施-20260916.md">E25 测试报告</a> §1）；公式对应
+  <code>sim/cq/search.py</code> 与规格 §7 的实现合同。候选 B（P3）的分段为示意，两个完成时刻为金标精确值。
+</footer>
+
+</main>
+
+<script>
+(function(){
+  "use strict";
+  var T_MAX = 11.5;
+  // ---- 时间线块定位 ----
+  document.querySelectorAll(".tl").forEach(function(tl){
+    var track = tl.querySelector(".track");
+    var W = track.clientWidth || 700;
+    var X0 = track.offsetLeft || 80;   // fmark 相对 .tl 定位，需加 track 偏移
+    function px(t){ return (t / T_MAX) * W; }
+    tl.querySelectorAll(".blk").forEach(function(b){
+      var t0 = parseFloat(b.dataset.t), d = parseFloat(b.dataset.d);
+      b.style.left  = px(t0) + "px";
+      b.style.width = Math.max(px(d) - 1, 4) + "px";
+    });
+    tl.querySelectorAll(".fmark").forEach(function(f){
+      f.style.left = (X0 + px(parseFloat(f.dataset.x))) + "px";
+    });
+    var scan = tl.querySelector(".scan");
+    scan.style.left = "0px";
+  });
+
+  // ---- 步进脚本（时间点 + 解说）----
+  var STEPS = [
+    {t:0.0,  cap:"<b>t=0 · 决策点。</b>队列里 4 条请求（S0,S1,L0,L1）全部到达，两个实例都空闲。MPC 取基础动作 π（guarded EDF），同时生成候选：A=同类批同发、B=两个混批、C=SS 立即发 + 实例2 等待 0.5 s 再领 LL。"},
+    {t:0.25, cap:"<b>推演开始（在系统副本上）。</b>三个候选各自落实首步，之后统一由 π 接管直到排空。注意候选 C 的实例2 此刻是<b>闲置</b>——请求仍留在中央队列，没有预取、没有占位。"},
+    {t:0.5,  cap:"<b>t=0.5 · FCFS 序位在此分岔。</b>候选 A：LL 首层排 SS 首层之后（橙块=已提交但无带宽）。候选 C：SS 的下层读流此刻提交、<b>排在 LL 首层前面</b>，以 1 GB/s 慢速读——它申请多少就给多少，多余的 3 GB/s 留给了刚领取的 LL。"},
+    {t:2.0,  cap:"<b>读与算的重叠。</b>候选 A 的 SS 在算 L0（读 L1 被压在 LL 后面）；候选 C 的 SS 边算边等自己的慢速 L1 读，LL 以 3 GB/s 稳定读 L0。混批 B 的两条批负载更均衡。"},
+    {t:3.0,  cap:"<b>带宽的接力。</b>候选 A：SS 的 L1 读到期提速（0.5 s 补完）；候选 C：LL 的 L0 读完、开始算 4 s，其 L1 读以 2 GB/s 藏在计算里。"},
+    {t:4.5,  cap:"<b>候选 C 的短请求率先拿到首 token：F=4.5 s</b>（比候选 A 的 5 s 快 10%）。这就是错峰保护旧流的收益——代价要到最后才显现。"},
+    {t:5.5,  cap:"<b>候选 A 的 SS 完成（F=5,5）</b>；实例转为闲置。此刻 A 与 C 的 ΣTTFT 几乎打平，胜负在长请求身上。"},
+    {t:7.0,  cap:"<b>候选 C 的 LL 开始算末层</b>（F 将为 11）；候选 A 的 LL 还差 0.75 s 补读（6.5–6.75 到期提速）。"},
+    {t:8.6,  cap:"<b>接近排空。</b>候选 A 的 LL 在算末层（F=10.75），候选 C 的 LL 还在算（F=11）——<b>等待错峰把最后完成时间拖后了 0.25 s</b>，混批 B 反而最先做完（F=8.72）。"},
+    {t:11.0, cap:"<b>推演结束，三条时间线全部排空。</b>候选 A：F=5,5,10.75,10.75；B：F=7.77,7.77,8.72,8.72；C：F=4.5,4.5,11,11。往下看打分表——<b>没有候选四列同时最优，MPC 落子由 θ 决定</b>。"}
+  ];
+  var cur = 0;
+  var caps = document.getElementById("cap");
+  var tnow = document.getElementById("t-now");
+  var playing = false, timer = null;
+
+  function render(){
+    var s = STEPS[cur];
+    caps.innerHTML = s.cap + ' <span style="color:#8a8271">（第 ' + (cur+1) + '/' + STEPS.length + ' 步）</span>';
+    tnow.textContent = "t = " + s.t.toFixed(1) + " s";
+    document.querySelectorAll(".tl").forEach(function(tl){
+      var track = tl.querySelector(".track");
+      var W = track.clientWidth || 700;
+      var frac = s.t / T_MAX;
+      tl.querySelector(".scan").style.left = (frac * W) + "px";
+      tl.querySelectorAll(".blk").forEach(function(b){
+        var t0 = parseFloat(b.dataset.t);
+        var past = t0 <= s.t + 1e-9;
+        b.classList.toggle("dim", !past);
+      });
+    });
+  }
+  function go(i){ cur = Math.max(0, Math.min(STEPS.length-1, i)); render(); }
+  function play(){
+    if(playing){ stop(); return; }
+    playing = true; document.getElementById("btn-play").textContent = "⏸ 暂停";
+    timer = setInterval(function(){
+      if(cur >= STEPS.length-1){ stop(); return; }
+      go(cur+1);
+    }, 1700);
+  }
+  function stop(){
+    playing = false; document.getElementById("btn-play").textContent = "▶ 播放";
+    if(timer){ clearInterval(timer); timer = null; }
+  }
+  document.getElementById("btn-next").onclick = function(){ stop(); go(cur+1); };
+  document.getElementById("btn-prev").onclick = function(){ stop(); go(cur-1); };
+  document.getElementById("btn-play").onclick = play;
+  document.getElementById("btn-reset").onclick = function(){ stop(); go(0); };
+  document.addEventListener("keydown", function(e){
+    if(e.target.tagName === "BUTTON") return;
+    if(e.key === "ArrowRight"){ stop(); go(cur+1); }
+    if(e.key === "ArrowLeft"){ stop(); go(cur-1); }
+  });
+
+  // ---- θ 选择与打分 ----
+  var THETA = {
+    M:{col:1, best:"p3", txt:"θ=M（最快全部做完）：<b>选候选 B（混批）</b>——M=8.72 最小。等待错峰 C 的 M=11 反而最差：它把带宽让给短请求，拖后了最后完工。"},
+    S:{col:2, best:"p4", txt:"θ=S（最少超时）：候选 A 与 C 都零失败，比 ΣTTFT 破平局（31 &lt; 31.5）→ <b>选候选 C（等待错峰）</b>；混批 B 有 2 条请求超时，直接出局。"},
+    T:{col:3, best:"p4", txt:"θ=T（平均 TTFT 最小）：<b>选候选 C</b>，ΣTTFT=31 < 31.5（A）< 32.98（B）。短请求提前拿首 token 的收益略大于长请求的延后。"},
+    R:{col:4, best:"p4", txt:"θ=R（归一化 TTFT 最小）：<b>选候选 C</b>，2.10 < 2.186（A）< 2.656（B）。短请求的 T0 小，同样的提前在归一化口径下权重更大。"}
+  };
+  var verdict = document.getElementById("verdict");
+  function setTheta(th){
+    document.querySelectorAll(".thetas button").forEach(function(b){
+      b.setAttribute("aria-pressed", String(b.dataset.th === th));
+    });
+    var cfg = THETA[th];
+    document.querySelectorAll("#score tbody tr").forEach(function(tr){
+      tr.querySelectorAll("td").forEach(function(td, i){
+        td.classList.toggle("win", tr.dataset.plan === cfg.best && i === cfg.col);
+      });
+    });
+    verdict.innerHTML = "MPC 将落实的首步动作：" + cfg.txt +
+      ' <span style="color:#8a8271">（推演出的未来计划不落地，下一个事件到来重新决策）</span>';
+  }
+  document.querySelectorAll(".thetas button").forEach(function(b){
+    b.onclick = function(){ setTheta(b.dataset.th); };
+  });
+
+  // ---- reduced-motion / 初值 ----
+  render();
+  setTheta("T");
+  window.addEventListener("resize", render);
+})();
+</script>
+</body>
+</html>
