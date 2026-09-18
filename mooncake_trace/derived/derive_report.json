@@ -1,0 +1,39 @@
+{
+ "schema_version": 1,
+ "algorithm": "first_seen(D1/D2/D3/D7)",
+ "files": [
+  {
+   "file": "conversation_trace.jsonl",
+   "n_rows": 12031,
+   "timestamps": 1180,
+   "max_same_ts_group": 28,
+   "token_hit_ratio": 0.37358842994289887,
+   "request_hit_ratio": 0.9991688138974316,
+   "full_hit_rows": 117,
+   "input_sha256": "b8cbb061a85206d729d91cdc2981f43c9e0d99209dce588d3af5f7934408b9df",
+   "derived_sha256": "0684cf8adfcc6683ba45b4a9e22cb68ec3c0a5fd82bf407ededb4ef71e84b6a3"
+  },
+  {
+   "file": "toolagent_trace.jsonl",
+   "n_rows": 23608,
+   "timestamps": 1180,
+   "max_same_ts_group": 47,
+   "token_hit_ratio": 0.5704770527245865,
+   "request_hit_ratio": 0.9993222636394442,
+   "full_hit_rows": 256,
+   "input_sha256": "48a2db1a13d3bc05e6330140c64f604ba366df20d3c9e128b5c35a01c1fa5f71",
+   "derived_sha256": "1a06a13ccf2f26c9fc226e429c3a7259dd737dbb3878d2f932e49b08e48a3aa9"
+  },
+  {
+   "file": "synthetic_trace.jsonl",
+   "n_rows": 3993,
+   "timestamps": 3982,
+   "max_same_ts_group": 2,
+   "token_hit_ratio": 0.6512409553335302,
+   "request_hit_ratio": 0.4462809917355372,
+   "full_hit_rows": 213,
+   "input_sha256": "bd070915a98fc0ed264d7cfef2ce746002eb3076a695ec31ba2674c0111ec131",
+   "derived_sha256": "0eb209cce41b0f48d4a036b26e6e4b8ae5dbb098a03cd52b52011dded63ff63c"
+  }
+ ]
+}
