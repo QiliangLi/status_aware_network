@@ -123,7 +123,7 @@ def fig_objectives(plt, recs):
                  "MPC/local 按指标对应 θ 取数）")
     fig.tight_layout(rect=(0, 0, 1, 0.94))
     fig.savefig(os.path.join(FIG, "cq_fig_e25_objectives.png"), dpi=DPI)
-    plt.close(fig)
+    return fig
 
 
 # ---------------------------------------------------------------- 图 C（条形）
@@ -163,7 +163,7 @@ def fig_pareto(plt, recs):
                  "5 窗中位；正值=更快；Synthetic 队列空、全策略与 FCFS 相同）")
     fig.tight_layout(rect=(0, 0, 1, 0.90))
     fig.savefig(os.path.join(FIG, "cq_fig_e25_pareto.png"), dpi=DPI)
-    plt.close(fig)
+    return fig
 
 
 # ---------------------------------------------------------------- 图 G（两线制）
