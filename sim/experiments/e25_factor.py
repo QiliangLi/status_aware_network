@@ -652,11 +652,16 @@ def fig_timeseries(kind: str, records, d: str, plt):
 
 
 def publish_figures(d: str, docs_dir: str):
-    """仅新增 cq_fig_e25_*，不触碰任何旧图（FG05）。"""
+    """仅新增 cq_fig_e25_*，不触碰任何旧图（FG05）。
+
+    图 A/C（objectives/pareto）的正式版为箱线/条形设计，由
+    tools/e25_redraw.py 生成——此处跳过，防止本文件的旧散点版覆盖正式图。
+    """
     os.makedirs(docs_dir, exist_ok=True)
     n = 0
+    skip = {"fig_e25_objectives.png", "fig_e25_pareto.png"}
     for fn in sorted(os.listdir(d)):
-        if fn.startswith("fig_e25_") and fn.endswith(".png"):
+        if fn.startswith("fig_e25_") and fn.endswith(".png") and fn not in skip:
             shutil.copy2(os.path.join(d, fn),
                          os.path.join(docs_dir, f"cq_{fn}"))
             n += 1

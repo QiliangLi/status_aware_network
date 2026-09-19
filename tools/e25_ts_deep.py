@@ -1,10 +1,11 @@
-"""E25 时间序列深挖：每 NPU 三状态与带宽利用率折线（图 G/H）。
+"""E25 时间序列深挖：带宽利用率折线（图 H）与深挖读数。
 
 重跑代表性 OL 格点（窗口 9、基线 ρ=0.6/α=4，B∈{80,20}，fcfs/spt），
 用扩展聚合器（rows.workers 每 NPU 分桶三态）生成：
-- cq_fig_e25_ts_per_npu_B{80,20}.png：行=NPU0..3、列=三文件，每 NPU 三色堆叠
 - cq_fig_e25_ts_bandwidth.png：行=B{80,20}、列=三文件，fcfs/spt 利用率折线 + B(t) 阶梯
 并打印深挖读数（峰值利用率时刻、该时刻各 NPU 状态、队列水平）。
+注：图 G（cq_fig_e25_ts_per_npu_B*，每 NPU 计算/等待两线制）由
+tools/e25_redraw.py --all 生成；本工具不再写图 G，避免旧三色堆叠版覆盖。
 轨迹与正式矩阵同种子同配置（确定性一致），仅时间序列扩展字段为新。
 """
 from __future__ import annotations
@@ -55,41 +56,7 @@ def main():
                                f"T_end={ts['meta']['T_end_s']:.1f}s")
     files = [f for f, _n, _m, _s in MOONCAKE_FILES]
 
-    # ---- 图 G：每 NPU 三状态（行=NPU，列=文件；B 各一张） ----
-    for B in (80.0, 20.0):
-        fig, axes = plt.subplots(4, len(files), figsize=(5.0 * len(files), 8.2),
-                                 squeeze=False)
-        for ci, f in enumerate(files):
-            ts = cache[(f, B, "cq_fcfs")]
-            rows = ts["rows"]
-            xs_all = [r["t_start_s"] for r in rows]
-            for wi in range(4):
-                ax = axes[wi][ci]
-                xs, cc, ss, ii = [], [], [], []
-                for r in rows:
-                    if r["width_s"] <= 0:
-                        continue
-                    xs.append(r["t_start_s"])
-                    c, s, i2 = r["workers"][wi]
-                    cc.append(c / r["width_s"])
-                    ss.append(s / r["width_s"])
-                    ii.append(i2 / r["width_s"])
-                ax.stackplot(xs, cc, ss, ii, colors=["#4C72B0", "#DD8452", "#B0B0B0"],
-                             labels=["Compute", "STALL", "Idle"], alpha=.92)
-                ax.set_ylim(0, 1)
-                ax.set_ylabel(f"NPU{wi}", fontsize=9)
-                if wi == 0:
-                    ax.set_title(f"{TRACE_LABEL[f]}", fontsize=11)
-                if wi == 3:
-                    ax.set_xlabel("仿真时间 (s)")
-                if ci == 0 and wi == 0:
-                    ax.legend(loc="upper right", fontsize=7)
-        fig.suptitle(f"图G｜每个 NPU 的三状态时间线（OL 在线流窗口{WINDOW}、FCFS、B={B:g} GB/s；"
-                     "蓝=在算、橙=等数据、灰=闲置）")
-        fig.tight_layout()
-        fig.savefig(os.path.join(REPO, "docs", "figures",
-                                 f"cq_fig_e25_ts_per_npu_B{B:g}.png"), dpi=130)
-        plt.close(fig)
+    # ---- 图 G 已移至 tools/e25_redraw.py（两线制），此处不再生成 ----
 
     # ---- 图 H：带宽利用率折线（fcfs vs spt + B(t) 阶梯） ----
     fig, axes = plt.subplots(2, len(files), figsize=(5.4 * len(files), 6.4),
@@ -152,7 +119,7 @@ def main():
             print(f"B{B:g} {TRACE_LABEL[f]:18s} 峰值桶 t≈{pk['t_start_s']:.0f}s "
                   f"util={u:.0%} 队列={pk['queue_mean']:.0f} "
                   f"各NPU算/等={','.join(per)}")
-    print_progress(f"deep figures -> docs/figures (per_npu×2 + bandwidth×1)")
+    print_progress("deep figures -> docs/figures (bandwidth×1；图G 由 e25_redraw.py 生成)")
 
 
 if __name__ == "__main__":

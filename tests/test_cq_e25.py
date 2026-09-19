@@ -274,21 +274,24 @@ def test_fg05_publish_isolation(tmp_path):
     old = docs / "cq_fig_e19_trace_profile.png"
     old.write_bytes(b"OLD")
     old_mtime = old.stat().st_mtime_ns
-    (res / "fig_e25_objectives.png").write_bytes(b"NEW_A")
+    (res / "fig_e25_objectives.png").write_bytes(b"OLD_DESIGN_A")
+    (res / "fig_e25_pareto.png").write_bytes(b"OLD_DESIGN_C")
     (res / "fig_e25_ts_queue.png").write_bytes(b"NEW_F")
     n = e5.publish_figures(str(res), str(docs))
-    assert n == 2
-    assert (docs / "cq_fig_e25_objectives.png").read_bytes() == b"NEW_A"
+    # 图 A/C（objectives/pareto）的正式版为箱线/条形设计，由 tools/e25_redraw.py
+    # 生成——发布步骤必须跳过，防止本文件的旧散点版覆盖正式图。
+    assert n == 1
+    assert not (docs / "cq_fig_e25_objectives.png").exists()
+    assert not (docs / "cq_fig_e25_pareto.png").exists()
     assert (docs / "cq_fig_e25_ts_queue.png").read_bytes() == b"NEW_F"
     assert old.read_bytes() == b"OLD"
     assert old.stat().st_mtime_ns == old_mtime
     assert not any(f.startswith("cq_fig_e2") and "e25" not in f
                    for f in os.listdir(docs) for f in [f]
                    if f != "cq_fig_e19_trace_profile.png") or True
-    # 精确断言：docs 下只有 1 个旧文件 + 2 个新文件
+    # 精确断言：docs 下只有 1 个旧文件 + 1 个新发布文件（A/C 被跳过）
     assert sorted(os.listdir(docs)) == [
-        "cq_fig_e19_trace_profile.png", "cq_fig_e25_objectives.png",
-        "cq_fig_e25_ts_queue.png"]
+        "cq_fig_e19_trace_profile.png", "cq_fig_e25_ts_queue.png"]
 
 
 # ---------------------------------------------------------------------------
