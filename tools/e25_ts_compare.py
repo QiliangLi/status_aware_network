@@ -88,11 +88,13 @@ def row_stats(ts):
 
 
 def draw_gantt(ax, ts):
-    """一张含 4 条 NPU 泳道的 Gantt：灰底=闲置，逐桶叠蓝（计算）/橙（等待读）。"""
+    """一张含 n 条 NPU 泳道的 Gantt：灰底=闲置，逐桶叠蓝（计算）/橙（等待读）。
+    泳道数从 ts 元数据自适应（m=2/4/8 均可）。"""
+    n = int(ts["meta"].get("m_workers", 4))
     rows = [r for r in ts["rows"] if r["width_s"] > 0]
     t0 = min(r["t_start_s"] for r in rows)
     t1 = max(r["t_start_s"] + r["width_s"] for r in rows)
-    for j in range(4):
+    for j in range(n):
         y = (j + 0.055, 0.89)
         ax.broken_barh([(t0, t1 - t0)], y, facecolors=C_IDLE,
                        edgecolor="none", zorder=1)
@@ -109,9 +111,9 @@ def draw_gantt(ax, ts):
         if orange_xr:
             ax.broken_barh(orange_xr, y, facecolors=C_STALL,
                            edgecolor="none", zorder=3)
-    ax.set_ylim(-0.06, 4.06)
-    ax.set_yticks([j + 0.5 for j in range(4)])
-    ax.set_yticklabels([f"NPU{j}" for j in range(4)], fontsize=10)
+    ax.set_ylim(-0.06, n + 0.06)
+    ax.set_yticks([j + 0.5 for j in range(n)])
+    ax.set_yticklabels([f"NPU{j}" for j in range(n)], fontsize=10)
     ax.set_xlim(t0, t1)
     ax.xaxis.set_major_locator(MaxNLocator(nbins=7, prune="upper"))
     ax.grid(axis="x", alpha=.18, lw=.6)
