@@ -66,6 +66,11 @@ for _f, _n, _m, _s in MOONCAKE_FILES:
     for _m in (2, 8):
         NEW_CELLS.append(dict(file=_f, B=80.0, rho=0.6, m=_m))
 
+# 20 窗全量验证格点：Conversation 的收益最大（B80ρ0.3）与最小（B20ρ1.1）case
+FULL_CELLS = [dict(file="conversation_trace.jsonl", B=80.0, rho=0.3, m=4),
+              dict(file="conversation_trace.jsonl", B=20.0, rho=1.1, m=4)]
+W20 = list(range(20))
+
 TCOL = {"conversation_trace.jsonl": "#4C72B0",
         "toolagent_trace.jsonl": "#DD8452",
         "synthetic_trace.jsonl": "#55A868"}
@@ -110,19 +115,21 @@ def save_progress(prog):
                          encoding="utf-8"), ensure_ascii=False, indent=1)
 
 
-def run_all():
+def run_all(cells=None, windows=None):
     from sim.cq.search import MPCPolicy
+    cells = NEW_CELLS if cells is None else cells
+    windows = W5 if windows is None else windows
     prog = load_progress()
     recs_path = os.path.join(ROOT, "e25_regime_records.json")
     recs = (json.load(open(recs_path, encoding="utf-8"))
             if os.path.exists(recs_path) else [])
     srcs = {}
-    for c in NEW_CELLS:
+    for c in cells:
         f = c["file"]
         if f not in srcs:
             srcs[f] = MooncakeSource(f, TRACE_DIR_DEFAULT)
         src = srcs[f]
-        for w in W5:
+        for w in windows:
             cid = cid_new(c, w)
             if cid in prog:
                 continue
@@ -407,10 +414,60 @@ def figs():
     print("图K + case 图完成")
 
 
+def validate_full():
+    """20 窗全量验证：FULL_CELLS（Conversation 收益最大/最小格点）的
+    5 窗 vs 20 窗配对收益对照——检验 5 窗中位数是否被窗口选择放大。"""
+    recs = json.load(open(os.path.join(ROOT, "e25_regime_records.json"),
+                          encoding="utf-8"))
+    out = []
+    for c in FULL_CELLS:
+        sub = [r for r in recs if r["file"] == c["file"] and r["B"] == c["B"]
+               and r["rho"] == c["rho"] and r.get("m") == c["m"]]
+        by = {}
+        for r in sub:
+            k = ((r["policy"], r.get("theta", ""), r["window"])
+                 if r["policy"] == "cq_mpc" else (r["policy"], "", r["window"]))
+            by[k] = r
+
+        def gain(windows):
+            tg, sg = [], []
+            for w in windows:
+                e = by.get(("cq_edf", "", w))
+                mT = by.get(("cq_mpc", "T", w))
+                mS = by.get(("cq_mpc", "S", w))
+                if e and mT and e["ttft_mean_lower"]:
+                    tg.append((e["ttft_mean_lower"] - mT["ttft_mean_lower"])
+                              / e["ttft_mean_lower"] * 100.0)
+                if e and mS:
+                    sg.append((mS["slo_success"] / mS["n_cohort"]
+                               - e["slo_success"] / e["n_cohort"]) * 100.0)
+            return tg, sg
+
+        tg5, sg5 = gain(W5)
+        tg20, sg20 = gain(W20)
+        row = dict(cell=f"{c['file'].split('_')[0]}|B{c['B']:g}|rho{c['rho']:g}|m{c['m']}",
+                   n5=len(tg5), n20=len(tg20),
+                   ttft5=float(np.median(tg5)) if tg5 else None,
+                   slo5=float(np.median(sg5)) if sg5 else None,
+                   ttft20=float(np.median(tg20)) if tg20 else None,
+                   slo20=float(np.median(sg20)) if sg20 else None)
+        out.append(row)
+        print(f"{row['cell']}: 5窗(n={row['n5']}) TTFT {row['ttft5']:+.1f}% / "
+              f"SLO {row['slo5']:+.1f}pp   ||   20窗(n={row['n20']}) TTFT "
+              f"{row['ttft20']:+.1f}% / SLO {row['slo20']:+.1f}pp")
+    json.dump(out, open(os.path.join(ROOT, "full_validation.json"), "w",
+                        encoding="utf-8"), ensure_ascii=False, indent=1)
+    print("已保存 -> results/cq/eval/e25_regime/full_validation.json")
+
+
 def main():
     mode = sys.argv[1] if len(sys.argv) > 1 else "all"
     if mode in ("run", "all"):
         run_all()
+    if mode == "full":
+        run_all(FULL_CELLS, W20)
+    if mode == "validate":
+        validate_full()
     if mode in ("analyze", "all"):
         analyze()
     if mode in ("figs", "all"):
