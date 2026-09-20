@@ -106,6 +106,52 @@
     .fc-aside{position:static}
     .phasebar{display:flex; position:sticky; top:0; z-index:20; background:var(--paper); gap:5px; padding:8px 2px; border-bottom:1px solid var(--line); flex-wrap:wrap; align-items:center}
   }
+  /* ---------- 决策舞台（第 0–2 步：队列→排序挑选→组批→候选） ---------- */
+  .dstage{border:1.5px dashed var(--accent); border-radius:12px; padding:12px 16px 14px; margin:0 0 14px; background:#fbf7ec}
+  .ds-head{display:flex; align-items:baseline; gap:10px; flex-wrap:wrap; font-size:14px}
+  .ds-head b{font-size:15px}
+  .ds-head .ds-sub{color:var(--ink-soft); font-size:12.5px}
+  #ds-summary{margin-left:auto; font-size:12.5px; color:var(--accent); background:#eef4f0; border-radius:6px; padding:2px 10px}
+  .ds-body{max-height:640px; overflow:hidden; transition:max-height .45s ease, opacity .45s ease}
+  .dstage.collapsed .ds-body{max-height:0; opacity:0}
+  .ds-grid{display:grid; grid-template-columns:minmax(0,1fr) 250px; gap:12px; margin-top:10px}
+  .ds-queuewrap{position:relative}
+  .ds-qlab{font-size:12px; color:var(--ink-soft)}
+  .ds-chips{display:flex; gap:8px; flex-wrap:wrap; padding:6px 0 30px}
+  .dschip{border:1.5px solid var(--line); border-radius:8px; background:var(--card); padding:4px 10px; text-align:center; transition:box-shadow .3s, border-color .3s}
+  .dschip b{display:block; font-size:14px}
+  .dschip i{display:block; font-style:normal; font-size:10px; color:var(--ink-soft)}
+  .dschip.cS{border-color:var(--read)}
+  .dschip.cL{border-color:var(--stall)}
+  .dschip.picked{border-color:var(--accent); box-shadow:0 0 0 3px rgba(15,107,107,.18)}
+  .dschip.mv{animation:chipflash .9s}
+  @keyframes chipflash{0%{background:#dcefe9}100%{background:var(--card)}}
+  .ds-brackets{position:absolute; left:0; right:0; height:24px; pointer-events:none}
+  .ds-bk{position:absolute; top:0; height:7px; border:2px solid var(--accent); border-top:none; border-radius:0 0 7px 7px}
+  .ds-bk i{position:absolute; top:9px; left:50%; transform:translateX(-50%); font-style:normal; font-size:10.5px; color:var(--accent); font-weight:700; white-space:nowrap}
+  .ds-sortkey{margin-top:6px; font-size:12.5px; color:var(--ink-soft); background:#f4f1e8; border-radius:6px; padding:5px 10px; min-height:32px; line-height:1.6}
+  .ds-sortkey b{color:var(--ink); margin-right:8px}
+  .ds-sortkey .dim{color:#a09a8a}
+  .ds-side{display:flex; flex-direction:column; gap:6px}
+  .ds-inst{border:1.5px solid var(--line); border-radius:8px; background:var(--card); padding:5px 10px; font-size:12.5px; display:flex; justify-content:space-between; gap:8px; align-items:baseline}
+  .ds-inst .slot{color:var(--accent); font-weight:700; text-align:right}
+  .ds-copy{border:1.5px solid #cfe0d5; background:#eef4f0; border-radius:8px; padding:6px 10px; font-size:11.5px; line-height:1.55; opacity:.3; transition:opacity .5s}
+  .ds-copy.on{opacity:1}
+  .ds-copy b{font-size:12px}
+  .ds-copy ul{margin:2px 0 0; padding-left:16px}
+  .ds-copy .no{color:var(--bad)}
+  .ds-cands{display:grid; grid-template-columns:repeat(auto-fit,minmax(200px,1fr)); gap:10px; margin-top:10px}
+  .dscand{display:none; border:1.5px solid var(--pc); border-radius:10px; background:var(--card); padding:8px 12px; font-size:12.5px; line-height:1.65; opacity:0; transform:scale(.96); transition:opacity .4s, transform .4s, box-shadow .3s}
+  .dscand.show{display:block; opacity:1; transform:scale(1)}
+  .dscand.active{box-shadow:0 0 0 4px rgba(15,107,107,.16)}
+  .dsc-tag{color:#fff; border-radius:4px; padding:1px 8px; font-size:11.5px; background:var(--pc); white-space:nowrap}
+  .dsc-badge{font-size:11px; color:var(--good); border:1px solid var(--good); border-radius:4px; padding:0 6px; margin-left:6px; white-space:nowrap}
+  .dsc-time b{color:var(--ink)}
+  .dsc-src{color:var(--ink-soft); font-size:11.5px}
+  @media (prefers-reduced-motion: reduce){
+    .dschip.mv{animation:none}
+    .ds-body,.dscand,.dschip,.ds-copy{transition:none}
+  }
   /* ---------- 动画舞台 ---------- */
   .stage{background:var(--card); border:1.5px solid var(--ink); border-radius:12px; padding:20px; margin:18px 0}
   .ctrl{display:flex; align-items:center; gap:10px; flex-wrap:wrap; margin-bottom:6px}
@@ -168,6 +214,12 @@
     .tl .rowlab{width:60px; font-size:10px}
     .tl .track,.axis{left:64px}
     .ledgers{grid-template-columns:1fr}
+    .ds-grid{grid-template-columns:1fr}
+    .dschip{padding:2px 5px}
+    .dschip b{font-size:12px}
+    .dschip .ty{display:none}
+    .dschip i{font-size:9px}
+    .ds-chips{gap:6px}
   }
 </style>
 </head>
@@ -189,9 +241,11 @@
     打分明细在 <a href="#score">§6</a>；公式汇总在 <a href="#formulas">§8</a>。不需要先读任何其他文档。
   </div>
   <div class="selfbox" style="background:#f2efe6; border-color:#e0d9c8">
-    <b>v2（20260920）改了什么：</b>§5 重构为"流程图 + 例子"双栏联动——动画步骤按第 0–4 步重新编排、
-    每步解说带环节标签、流程图节点随步进高亮（含门槛的"落子/回落"分支随 θ 联动）、
-    推演结束后各候选当场浮现打分徽章。<b>全部数值与 v1（20260916）一致。</b>
+    <b>v2（20260920）改了什么：</b>§5 重构为"流程图 + 例子"双栏联动——动画步骤与流程图严格一一对应、
+    流程图节点随步进高亮（含门槛的"落子/回落"分支随 θ 联动）、推演结束后各候选当场浮现打分徽章。<br>
+    <b>v2.1（同日）：</b>新增<b>决策舞台</b>——触发与第 0–2 步不再是纯文字：队列到达、EDF 重排、
+    同形/互补/等待三种挑选逐一可视化（挑中的请求芯片高亮 + 配对括号 + 候选卡弹出），第 2 步拆为三个子步。
+    <b>全部数值与 v1（20260916）一致。</b>
   </div>
   <nav class="toc">
     <a href="#pre">① 预备知识（90 秒）</a>
@@ -289,13 +343,15 @@
   <div class="cf trig"><b>触发</b><span>空闲实例 + 队列非空</span></div><span class="arr">→</span>
   <div class="cf"><b>第 0 步 拿保底</b><span>π = 老化 EDF</span></div><span class="arr">→</span>
   <div class="cf"><b>第 1 步 建副本</b><span>只用可观测信息</span></div><span class="arr">→</span>
-  <div class="cf"><b>第 2 步 列候选</b><span>分批 × 时机</span></div><span class="arr">→</span>
+  <div class="cf"><b>第 2 步 挑选组批</b><span>从队列排序挑请求</span></div><span class="arr">→</span>
   <div class="cf"><b>第 3 步 推演打分</b><span>推到排空 → F̂</span></div><span class="arr">→</span>
   <div class="cf"><b>◇ 门槛</b><span>严格更好？</span></div><span class="arr">→</span>
   <div class="cf loopback"><b>落子 / 回落</b><span>只执行第一步</span></div><span class="arr">↺</span>
 </div>
 <p style="font-size:14px;color:var(--ink-soft)">
-落子之后系统只前进一个事件，然后<b>整轮重来</b>——这就是"滚动"的含义。下面把每一步展开：
+落子之后系统只前进一个事件，然后<b>整轮重来</b>——这就是"滚动"的含义。每一步"挑选"的具体过程
+（队列按什么排序、哪些请求被挑中、拼成什么批）在 <a href="#demo">§5</a> 的决策舞台里逐步演示，与流程图严格对应。
+下面把每一步展开：
 </p>
 <div class="steps" style="display:grid; grid-template-columns:repeat(auto-fit,minmax(290px,1fr)); gap:14px; margin:18px 0">
   <div class="card" style="margin:0"><h3 style="margin-top:0">第 0 步 · 先拿保底</h3>
@@ -363,7 +419,8 @@
 <div class="note">
 <b>真实系统里候选远不止三个</b>：每轮从队列选最多 32 个候选请求、按三种排序生成最多 24 个候选批，
 再逐空闲实例组合、附加等待候选，在 2 ms 预算内能推演几十个联合动作。本例只有 4 条请求，
-恰好枚举得完，我们就挑这<b>三个最有代表性的</b>来展示机制：一个保底、一个换分法、一个换时机。
+恰好枚举得完，我们就挑这<b>三个最有代表性的</b>来展示机制：一个保底、一个换分法、一个换时机——
+<b>§5 第 2 步的决策舞台会把这三个候选的挑选过程逐一演出来</b>。
 </div>
 
 <!-- ============================================================ -->
@@ -420,7 +477,7 @@
           <path class="edge" id="e-bB" d="M258,514 L258,538" marker-end="url(#arw)"/>
           <path class="edge" id="e-loop" d="M62,564 L34,564 Q26,564 26,556 L26,36 Q26,28 34,28 L58,28" marker-end="url(#arw)"/>
           <!-- 节点 -->
-          <g class="node trig" id="n-T" data-node="T" data-phase="s0" tabindex="0" role="button" aria-label="触发：跳到第 0 步">
+          <g class="node trig" id="n-T" data-node="T" data-phase="T" tabindex="0" role="button" aria-label="触发：跳到触发步">
             <rect x="62" y="8" width="256" height="40" rx="20"/>
             <text class="t" x="190" y="33">触发：有空闲实例 且 队列非空</text>
           </g>
@@ -434,10 +491,10 @@
             <text class="t" x="190" y="162">第 1 步 · 重建预测世界</text>
             <text class="s" x="190" y="180">带宽报价 · 已提交流进展 · 已到请求</text>
           </g>
-          <g class="node" id="n-2" data-node="2" data-phase="s2" tabindex="0" role="button" aria-label="第 2 步生成候选：跳到该步">
+          <g class="node" id="n-2" data-node="2" data-phase="s2" tabindex="0" role="button" aria-label="第 2 步挑选与生成候选：跳到该步">
             <rect x="62" y="214" width="256" height="50" rx="9"/>
-            <text class="t" x="190" y="234">第 2 步 · 生成候选动作</text>
-            <text class="s" x="190" y="252">同形/互补/紧迫排序 × 立即/等待</text>
+            <text class="t" x="190" y="234">第 2 步 · 挑选与生成候选</text>
+            <text class="s" x="190" y="252">排序挑请求组批 × 时机（含等待）</text>
           </g>
           <g class="node" id="n-3" data-node="3" data-phase="s3" tabindex="0" role="button" aria-label="第 3 步推演打分：跳到该步">
             <rect x="62" y="286" width="256" height="64" rx="9"/>
@@ -473,18 +530,70 @@
 
     <div class="stage">
       <div class="selfbox" style="margin:0 0 12px">
-        <b>怎么读这个动画：</b>左侧流程图常驻显示一轮决策的全貌，<b>每按一次"下一步"，当前环节就会在流程图上高亮</b>
-        （绿=已完成，青框=当前；解说开头的深色标签也标明当前是第几步）。三个面板是同一时刻（t=0）的三个
-        <b>"如果……会怎样"的平行推演</b>——在系统副本里想象出来的三种未来，不是真的跑了三遍。红色竖线是
-        <b>想象中的时刻</b>；<b>推演结束后，最后两步会当场打分并给出最终选择</b>（绿框 + "落子"徽章），打分明细在 §6。
+        <b>怎么读这个动画：</b>共 18 步，先决策、后推演。<b>触发与第 0–2 步在上方"决策舞台"真实演出决策的准备过程</b>——
+        请求到达队列、EDF 按截止重排、三种排序各自<b>挑中哪些请求、拼成什么批</b>（被挑中的芯片高亮并画配对括号，
+        候选卡逐张弹出，与左侧流程图逐步对应）。<b>第 3 步起决策舞台收起</b>，三个推演面板（颜色与候选卡一一对应）
+        是三个"如果……会怎样"的平行未来，红色竖线是想象中的时刻；<b>最后两步当场打分并落子</b>（绿框+落子徽章）。
         也可以直接<b>点击流程图的节点</b>跳到对应环节。
       </div>
+
+      <div class="dstage" id="dstage">
+        <div class="ds-head">
+          <b>决策舞台</b><span class="ds-sub">中央队列 → 排序挑选 → 组批 → 候选（对应流程图第 0–2 步）</span>
+          <span id="ds-summary">—</span>
+        </div>
+        <div class="ds-body">
+          <div class="ds-grid">
+            <div class="ds-queuewrap">
+              <div class="ds-qlab">中央队列（当前排序 = 此刻的挑选次序）</div>
+              <div class="ds-chips" id="ds-chips"></div>
+              <div class="ds-brackets" id="ds-brackets"></div>
+              <div class="ds-sortkey" id="ds-sortkey"></div>
+            </div>
+            <div class="ds-side">
+              <div class="ds-inst"><b>实例1</b><span class="slot" id="ds-i1">空闲</span></div>
+              <div class="ds-inst"><b>实例2</b><span class="slot" id="ds-i2">空闲</span></div>
+              <div class="ds-copy" id="ds-copy">
+                <b>系统副本（第 1 步搭好）</b>
+                <ul>
+                  <li>✓ 最新带宽报价 B̂ = 4 GB/s（推演期间当常数）</li>
+                  <li>✓ 已到请求参数（h、u、T0、期限）</li>
+                  <li>✓ 自己提交过的读取流进展（本例：尚无）</li>
+                  <li class="no">✗ 存储内部真值（队列/背景负载）不可见</li>
+                  <li class="no">✗ 未来到达不可知（本例恰好无）</li>
+                </ul>
+              </div>
+            </div>
+          </div>
+          <div class="ds-cands">
+            <div class="dscand" data-c="A" style="--pc:var(--p1)">
+              <div><span class="dsc-tag">候选 A · 同类批</span><span class="dsc-badge">✔ 保底 π 的选择</span></div>
+              <div>实例1←[S0,S1] · 实例2←[L0,L1]</div>
+              <div class="dsc-time">时机：<b>同发（t=0）</b></div>
+              <div class="dsc-src">来源：同形排序 × 同发</div>
+            </div>
+            <div class="dscand" data-c="B" style="--pc:var(--p3)">
+              <div><span class="dsc-tag">候选 B · 混批</span></div>
+              <div>实例1←[S0,L0] · 实例2←[S1,L1]</div>
+              <div class="dsc-time">时机：<b>同发（t=0）</b></div>
+              <div class="dsc-src">来源：互补排序 × 同发（每批读 5GB/层、算 3s/层）</div>
+            </div>
+            <div class="dscand" data-c="C" style="--pc:var(--p4)">
+              <div><span class="dsc-tag">候选 C · 错峰</span></div>
+              <div>实例1←[S0,S1] · 实例2 ⏰0.5s 后←[L0,L1]</div>
+              <div class="dsc-time">时机：<b>实例2 等 0.5 s</b></div>
+              <div class="dsc-src">来源：同类分批 × 等待（δ=SS 首层读完时刻）</div>
+            </div>
+          </div>
+        </div>
+      </div>
+
       <div class="ctrl">
         <button class="primary" id="btn-play">▶ 播放</button>
         <button id="btn-prev">← 上一步</button>
         <button id="btn-next">下一步 →</button>
         <button id="btn-reset">重置</button>
-        <span class="t-now" id="t-now">第 0 步 · 保底</span>
+        <span class="t-now" id="t-now">触发</span>
       </div>
       <div class="cap" id="cap"></div>
 
@@ -660,7 +769,7 @@
   其中"读L1（断续）"等分段为可视化近似，完成时刻 F 为精确值。实验结论部分对应
   <a href="../测试报告-E25实施-20260919.md">E25 测试报告</a> §5–§7。
   姊妹篇：<a href="多ASU多Path组批错峰与带宽协同图解-20260917.html">多ASU多Path组批错峰与带宽协同图解</a>。
-  本页为 v2（20260920，流程图联动版），取代 <a href="MPC方案图解-20260916.html">v1（20260916）</a>；数值口径两版一致。2026-09-20。
+  本页为 v2.1（20260920，流程图联动 + 决策舞台版），取代 <a href="MPC方案图解-20260916.html">v1（20260916）</a>；数值口径各版一致。2026-09-20。
 </footer>
 
 </main>
@@ -726,12 +835,15 @@
     return h + '</table>';
   }
 
-  /* ---- 步进脚本：phase = 流程图环节；t = 想象时刻；focus = 聚焦计划 ---- */
+  /* ---- 步进脚本：phase = 流程图环节；sub = 第 2 步的挑选子步；t = 想象时刻；focus = 聚焦计划 ---- */
   var STEPS = [
-    {phase:"s0", t:0, focus:["p1","p3","p4"], cap:"触发条件成立：两个实例空闲、队列里 4 条请求全部到达。基础策略 π（带老化保护的 EDF）先给出<b>保底动作</b>：'实例1←SS、实例2←LL，都立即发'——恰好就是候选 A。它是参照系：任何候选想取代它，必须<b>严格更好</b>（第 4 步的门槛会查这件事）。"},
-    {phase:"s1", t:0, focus:["p1","p3","p4"], cap:"MPC 不许看系统内部真值，只用可观测信息搭一个<b>'系统副本'</b>：最新带宽报价（推演期间当常数）、自己提交过的读取流进展、已到请求的参数。本例：带宽恒 4 GB/s、4 条请求全知、无未来到达——<b>预测世界 = 真实世界</b>（教学例的理想化；真实系统里估值可能错，这正是要有门槛兜底的原因）。"},
-    {phase:"s2", t:0, focus:["p1","p3","p4"], cap:"按 §4 的两个维度组合候选：<b>怎么分批</b>（同形/互补排序）× <b>什么时候发</b>（立即/等待）。本例枚举出三个代表：<b>A</b>=同类批同发（=保底）、<b>B</b>=两个混批、<b>C</b>=SS 立即发+实例2 等 0.5 s。真实系统里这一步会生成几十个联合动作，再按预算挑着推演。"},
-    {phase:"s3", t:0, focus:["p1","p3","p4"], cap:"<b>推演开始。</b>三个面板 = 三个'如果……会怎样'的<b>平行未来</b>，在副本里逐个推到所有请求完成（不是真跑三遍）。红色竖线是<b>想象中的时刻</b>——按'下一步'看每个未来怎么展开。"},
+    {phase:"T", t:0, focus:[], cap:"<b>触发。</b>t=0，4 条请求<b>全部到达中央队列</b>（并列到达，按提交序显示为 S0,L0,S1,L1），两个实例都空闲——触发条件'有空闲实例 且 队列非空'成立，一轮决策开始。左侧流程图的'触发'节点已经走完（变绿），接下来 MPC 要做的是第 0–4 步。"},
+    {phase:"s0", t:0, focus:[], cap:"基础策略 π = 带老化保护的 EDF 先干活：<b>把队列按截止时刻重排</b>（S0,S1 的期限 6.75s 排到 L0,L1 的 15s 前面——看队列里芯片的换位），再从队首贪心装批：<b>挑中 S0,S1 拼 SS 给实例1，L0,L1 拼 LL 给实例2，都立即发</b>。这个联合动作就是<b>保底</b>——它恰好就是候选 A（看候选卡上的徽章）。想取代它，第 4 步的门槛要求<b>严格更好</b>。"},
+    {phase:"s1", t:0, focus:[], cap:"MPC 不许看系统内部真值，只用可观测信息搭一个<b>'系统副本'</b>（右侧绿框逐条点亮）：最新带宽报价 B̂=4 GB/s（推演期间当常数）、已到请求的参数、自己提交过的读取流进展（本例尚无）。注意两个 <b style=\"color:var(--bad)\">✗</b>：存储内部真值与未来到达都不可见。本例恰好无未来到达，<b>预测世界 = 真实世界</b>（教学例的理想化；真实系统里估值可能错——这正是要有门槛兜底的原因）。"},
+    {phase:"s2", sub:"A", t:0, focus:[], cap:"候选生成的第一种方式：<b>同形排序</b>——把命中前缀 h 和新算量 u 都相近的请求排在一起（|log1p h−log1p hₐ|+|log1p u−log1p uₐ| 小者优先），从队首贪心填批。看队列里的挑选：<b>S0、S1 被挑中拼成 SS；L0、L1 拼成 LL</b>，配上'同发'时机 → <b>候选 A</b>（同形分法在本例数值下与保底重合，候选卡上可以看到）。"},
+    {phase:"s2", sub:"B", t:0, focus:[], cap:"第二种方式：<b>互补排序</b>——按读算比 r=读取量/计算量 配对，读重的配计算重的，让每批读写均衡。看挑选（队列换了一种排序）：<b>S0+L0 拼成混批给实例1，S1+L1 给实例2</b>（每批读 5 GB/层、算 3 s/层，§1.4），同发 → <b>候选 B</b>。"},
+    {phase:"s2", sub:"C", t:0, focus:[], cap:"第三种变化不在'怎么分'而在'<b>什么时候发</b>'：一个实例先发，另一个等 δ 再领。δ 的候选值 {0.05, 0.1, 0.2}×C_ref，外加'预测某条读取完成的时刻'——本例取 <b>δ=0.5 s，正好是 SS 首层读完的时刻</b>（§1.4：2GB÷4GB/s）。→ <b>候选 C</b>：SS 立即发；实例2 只设一个 0.5 s 的闹钟（不领批、不占带宽），到点再进队列重新决策。"},
+    {phase:"s3", t:0, focus:["p1","p3","p4"], cap:"<b>推演开始。</b>三个候选（上方候选卡 A/B/C 与下方三个面板颜色一一对应）各自在副本上推到所有请求完成——不是真跑三遍，是想象出来的三种未来。红色竖线是<b>想象中的时刻</b>——按'下一步'看每个未来怎么展开。"},
     {phase:"s3", t:0.25, focus:["p1","p3","p4"], cap:"推演刚开始。看各面板实例2 的第一格：<b>A/B 已领批</b>（橙色=批领了、排队等数据）；<b>C 是灰色闲置</b>——它只设了闹钟，请求还在中央队列，没有预取、没有占带宽。"},
     {phase:"s3", t:0.5,  focus:["p1","p4"], cap:"<b>★ 关键时刻：FCFS 序位在这里分岔。</b>候选 A：SS 首层读完退场，LL 独占带宽，但 SS 的下层读流（只要 1 GB/s）<b>排在 LL 后面拿 0</b>。候选 C：SS 的下层流<b>先提交</b>拿 1 GB/s，刚领取的 LL 拿到剩下的 3 GB/s——<b>两边同时前进</b>。看下方带宽账本。"},
     {phase:"s3", t:2,    focus:["p1","p4"], cap:"候选 C：SS 边算第 1 层边慢速读第 2 层（规则二：申请率=字节÷计算时长，刚好藏进计算）；LL 稳定以 3 GB/s 读。候选 A：LL 独占带宽读首层，SS 的下层流还在排队。"},
@@ -769,19 +881,23 @@
 
   /* ---- 流程图联动 ---- */
   var PHASES = {
+    T:   {done:[], act:["T"], ed:[], ea:[], label:"触发 · 决策条件成立（空闲实例 + 队列非空）"},
     s0:  {done:["T"], act:["0"], ed:[], ea:["e-t0"], label:"第 0 步 · 拿保底"},
     s1:  {done:["T","0"], act:["1"], ed:["e-t0"], ea:["e-01"], label:"第 1 步 · 重建预测世界"},
-    s2:  {done:["T","0","1"], act:["2"], ed:["e-t0","e-01"], ea:["e-12"], label:"第 2 步 · 生成候选动作"},
+    s2:  {done:["T","0","1"], act:["2"], ed:["e-t0","e-01"], ea:["e-12"], label:"第 2 步 · 挑选与生成候选"},
     s3:  {done:["T","0","1","2"], act:["3"], ed:["e-t0","e-01","e-12"], ea:["e-23"], label:"第 3 步 · 逐候选推演"},
     s4:  {done:["T","0","1","2","3"], act:["4"], ed:["e-t0","e-01","e-12","e-23"], ea:["e-34"], label:"第 4 步 · 门槛校验"},
     loop:{done:[], act:["B","T"], ed:[], ea:["e-loop"], label:"循环 · 等待下一个事件"}
   };
   function fmtT(t){ return String(parseFloat(t.toFixed(2))); }
-  function setPhase(ph, t){
+  function setPhase(ph, t, sub){
     var cfg = PHASES[ph] || PHASES.s3;
     var done = cfg.done.slice(), act = cfg.act.slice();
     var ed = cfg.ed.slice(), ea = cfg.ea.slice();
     var label = cfg.label;
+    if(ph === "s2"){
+      label = "第 2 步 · 挑选" + (sub === "A" ? "①（同形排序）" : sub === "B" ? "②（互补排序）" : "③（等待时机）");
+    }
     if(ph === "s4"){
       if(curTheta === "S"){ act.push("5b"); ea.push("e-4b"); label = "第 4 步 · 门槛：平局 → 回落保底 π"; }
       else { act.push("5a"); ea.push("e-4a"); label = "第 4 步 · 门槛：严格更好 → 落子候选首步"; }
@@ -805,11 +921,12 @@
     if(ph === "s3"){ dyn.textContent = (t >= 11) ? "三个结局已齐 · 待打分" : "推演中 · 想象时刻 t = " + fmtT(t) + " s"; }
     else if(ph === "s4"){ dyn.textContent = "打分完毕 → 交门槛"; }
     else if(ph === "loop"){ dyn.textContent = "（推演结果不执行，已丢弃）"; }
+    else if(ph === "s2"){ dyn.textContent = "（正在挑选：排序 → 组批 → 时机）"; }
     else { dyn.textContent = "（等待推演）"; }
     document.getElementById("fc-now").innerHTML = "<b>当前：</b>" + label;
     /* 窄屏步骤条 */
     var order = ["T","0","1","2","3","4","loop"];
-    var curPb = {"s0":"0","s1":"1","s2":"2","s3":"3","s4":"4","loop":"loop"}[ph] || "3";
+    var curPb = {"T":"T","s0":"0","s1":"1","s2":"2","s3":"3","s4":"4","loop":"loop"}[ph] || "3";
     document.querySelectorAll("#phasebar .pb").forEach(function(ch){
       var k = ch.dataset.pb;
       ch.classList.remove("active","done");
@@ -846,19 +963,125 @@
     });
   }
 
-  /* ---- 步骤标签与时刻显示 ---- */
+  /* ---- 决策舞台：队列 → 排序挑选 → 组批 → 候选（触发与第 0–2 步的可视化，与流程图严格对应） ---- */
+  var REQ_META = { S0:["短","6.75"], S1:["短","6.75"], L0:["长","15"], L1:["长","15"] };
+  var DS = {
+    T:   {order:["S0","L0","S1","L1"], sort:null, pairs:null, inst:["空闲","空闲"], copy:0, cands:[], active:null,
+          sum:"触发：4 条请求到达 · 2 实例空闲"},
+    s0:  {order:["S0","S1","L0","L1"],
+          sort:{k:"π = 带老化保护的 EDF", d:"排序键：截止时刻升序 → S0,S1（6.75s）排在 L0,L1（15s）前，从队首贪心装批"},
+          pairs:[["S0","S1","SS"],["L0","L1","LL"]], inst:["← SS","← LL"], copy:0, cands:["A"], active:"A",
+          sum:"保底动作 = 候选 A：SS→实例1 · LL→实例2 · 同发"},
+    s1:  {order:["S0","S1","L0","L1"],
+          sort:{k:"π = 带老化保护的 EDF", d:"排序键：截止时刻升序 → S0,S1（6.75s）排在 L0,L1（15s）前，从队首贪心装批"},
+          pairs:[["S0","S1","SS"],["L0","L1","LL"]], inst:["← SS","← LL"], copy:1, cands:["A"], active:null,
+          sum:"副本就绪：B̂=4GB/s（常数）· 请求全知 · 无未来到达"},
+    s2A: {order:["S0","S1","L0","L1"],
+          sort:{k:"挑选① 同形排序", d:"形状相近的排一起：|log1p h−log1p hₐ| + |log1p u−log1p uₐ| 小者优先配对"},
+          pairs:[["S0","S1","SS"],["L0","L1","LL"]], inst:["← SS","← LL"], copy:1, cands:["A"], active:"A",
+          sum:"挑选①：同形 → SS + LL（= 候选 A，与保底重合）"},
+    s2B: {order:["S0","L0","S1","L1"],
+          sort:{k:"挑选② 互补排序", d:"按读算比 r=读取量/计算量 配对：读重的配计算重的"},
+          pairs:[["S0","L0","混批Ⅰ"],["S1","L1","混批Ⅱ"]], inst:["← [S0,L0]","← [S1,L1]"], copy:1, cands:["A","B"], active:"B",
+          sum:"挑选②：互补 → 两个混批（= 候选 B）"},
+    s2C: {order:["S0","S1","L0","L1"],
+          sort:{k:"挑选③ 时机维度：立即 ∪ 等待", d:"δ ∈ {0.05,0.1,0.2}×C_ref ∪ 预测读取完成时刻 → 取 0.5s（SS 首层读完）"},
+          pairs:[["S0","S1","SS"],["L0","L1","LL"]], inst:["← SS（t=0）","⏰ 0.5s 后 ← LL"], copy:1, cands:["A","B","C"], active:"C",
+          sum:"挑选③：同类分批 × 等待 0.5s（= 候选 C）"}
+  };
+  var CHIP = {};
+  ["S0","S1","L0","L1"].forEach(function(r){
+    var el = document.createElement("span");
+    el.className = "dschip " + (r.charAt(0) === "S" ? "cS" : "cL");
+    el.innerHTML = "<b>" + r + "</b><i><span class='ty'>" + REQ_META[r][0] + " · </span>D=" + REQ_META[r][1] + "s</i>";
+    CHIP[r] = el;
+    document.getElementById("ds-chips").appendChild(el);
+  });
+  var dsPrevOrder = null;
+  function drawBrackets(pairs){
+    var layer = document.getElementById("ds-brackets");
+    var chips = document.getElementById("ds-chips");
+    layer.innerHTML = "";
+    layer.style.top = (chips.offsetTop + chips.clientHeight - 28) + "px";
+    if(!pairs) return;
+    pairs.forEach(function(p){
+      var a = CHIP[p[0]], b = CHIP[p[1]];
+      if(!a || !b || a.offsetTop !== b.offsetTop) return;   /* 换行时不画括号 */
+      var c1 = a.offsetLeft + a.offsetWidth / 2, c2 = b.offsetLeft + b.offsetWidth / 2;
+      var d = document.createElement("div");
+      d.className = "ds-bk";
+      d.style.left = Math.min(c1, c2) + "px";
+      d.style.width = Math.abs(c2 - c1) + "px";
+      d.innerHTML = "<i>" + p[2] + "</i>";
+      layer.appendChild(d);
+    });
+  }
+  function dsSummary(s){
+    if(s.phase === "s3") return "候选已定：A（保底）· B · C — 推演中 →";
+    if(s.phase === "s4"){
+      if(curTheta === "S") return "落子：平局 → 执行保底 A（SS→1 · LL→2）";
+      if(curTheta === "M") return "落子：候选 B 首步（两个混批同发）";
+      return "落子：候选 C 首步（实例1←SS · 实例2 设 0.5s 闹钟）";
+    }
+    if(s.phase === "loop") return "已落一步 · 等待下一个事件重新决策";
+    return "";
+  }
+  function renderDStage(s){
+    var stage = document.getElementById("dstage");
+    var key = null;
+    if(s.phase === "s2") key = "s2" + s.sub;
+    else if(DS[s.phase]) key = s.phase;
+    var collapsed = key === null;
+    stage.classList.toggle("collapsed", collapsed);
+    document.getElementById("ds-summary").textContent = collapsed ? dsSummary(s) : DS[key].sum;
+    if(collapsed) return;
+    var d = DS[key];
+    /* 队列芯片按当前排序重排；换位的芯片闪烁一下，被挑中的高亮 */
+    var row = document.getElementById("ds-chips");
+    d.order.forEach(function(r){ row.appendChild(CHIP[r]); });
+    if(dsPrevOrder && dsPrevOrder.join(",") !== d.order.join(",")){
+      d.order.forEach(function(r, i){
+        if(dsPrevOrder.indexOf(r) !== i){
+          CHIP[r].classList.remove("mv"); void CHIP[r].offsetWidth; CHIP[r].classList.add("mv");
+        }
+      });
+    }
+    dsPrevOrder = d.order.slice();
+    d.order.forEach(function(r){
+      CHIP[r].classList.toggle("picked", !!(d.pairs && d.pairs.some(function(p){ return p.indexOf(r) >= 0; })));
+    });
+    /* 排序键说明 */
+    var sk = document.getElementById("ds-sortkey");
+    sk.innerHTML = d.sort ? "<b>" + d.sort.k + "</b><span>" + d.sort.d + "</span>"
+                          : "<span class='dim'>（尚未排序：按到达/提交序排列）</span>";
+    /* 实例槽位与副本 */
+    document.getElementById("ds-i1").textContent = d.inst[0];
+    document.getElementById("ds-i2").textContent = d.inst[1];
+    document.getElementById("ds-copy").classList.toggle("on", !!d.copy);
+    /* 候选卡 */
+    document.querySelectorAll(".dscand").forEach(function(c){
+      var k = c.dataset.c;
+      c.classList.toggle("show", d.cands.indexOf(k) >= 0);
+      c.classList.toggle("active", d.active === k);
+    });
+    /* 同步绘制：offsetLeft 读取会强制排版，无需等待帧回调 */
+    drawBrackets(d.pairs);
+  }
+
   function phaseTag(s){
+    if(s.phase === "T") return "触发";
     if(s.phase === "s0") return "第 0 步 · 拿保底";
     if(s.phase === "s1") return "第 1 步 · 建副本";
-    if(s.phase === "s2") return "第 2 步 · 列候选";
+    if(s.phase === "s2") return s.sub === "A" ? "第 2 步 · 挑选① 同形" : (s.sub === "B" ? "第 2 步 · 挑选② 互补" : "第 2 步 · 挑选③ 等待");
     if(s.phase === "s4") return "第 4 步 · 门槛与落子";
     if(s.phase === "loop") return "↻ 下一轮";
     return "第 3 步 · 推演 t=" + fmtT(s.t) + "s";
   }
   function tnowText(s){
+    if(s.phase === "T") return "触发";
     if(s.phase === "s0") return "第 0 步 · 保底";
     if(s.phase === "s1") return "第 1 步 · 副本";
-    if(s.phase === "s2") return "第 2 步 · 候选";
+    if(s.phase === "s2") return "第 2 步 · 挑选 " + (s.sub === "A" ? "①" : s.sub === "B" ? "②" : "③");
     if(s.phase === "s4") return "★ 第 4 步 · 落子";
     if(s.phase === "loop") return "↻ 下一轮";
     return "推演 t = " + fmtT(s.t) + " s";
@@ -887,7 +1110,8 @@
       lg.querySelector(".body").innerHTML = ledgerHTML(plan, s.t);
       lg.classList.toggle("dimmed", s.focus.indexOf(plan) < 0);
     });
-    setPhase(s.phase || "s3", s.t);
+    setPhase(s.phase || "s3", s.t, s.sub);
+    renderDStage(s);
     updateScoreChips();
   }
   function go(i){ cur = Math.max(0, Math.min(STEPS.length-1, i)); render(); }
@@ -922,7 +1146,7 @@
     n.addEventListener("click", function(ev){ jumpTo(ph, ev); });
     n.addEventListener("keydown", function(ev){ jumpTo(ph, ev); });
   });
-  var PB2PH = {"T":"s0","0":"s0","1":"s1","2":"s2","3":"s3","4":"s4","loop":"loop"};
+  var PB2PH = {"T":"T","0":"s0","1":"s1","2":"s2","3":"s3","4":"s4","loop":"loop"};
   document.querySelectorAll("#phasebar .pb").forEach(function(ch){
     var ph = PB2PH[ch.dataset.pb];
     ch.addEventListener("click", function(ev){ jumpTo(ph, ev); });
@@ -959,12 +1183,12 @@
 
   layout(); render(); setTheta("T");
   window.addEventListener("resize", function(){ layout(); render(); });
-  /* 视口模拟/某些场景不派发 resize 事件，用 ResizeObserver 兜底重排时间线 */
+  /* 视口模拟/某些场景不派发 resize 事件，用 ResizeObserver 兜底重排时间线（setTimeout 兜底：后台页 rAF 不触发） */
   if (window.ResizeObserver){
-    var roQ = null;
+    var roT = null;
     var ro = new ResizeObserver(function(){
-      if(roQ) cancelAnimationFrame(roQ);
-      roQ = requestAnimationFrame(function(){ layout(); render(); });
+      if(roT) clearTimeout(roT);
+      roT = setTimeout(function(){ layout(); render(); }, 80);
     });
     document.querySelectorAll(".tl .track").forEach(function(t){ ro.observe(t); });
   }
