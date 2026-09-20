@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>MPC 方案图解 —— 共享 KV 调度的滚动预测控制（自足教学页）</title>
+<title>MPC 方案图解 v2 —— 共享 KV 调度的滚动预测控制（流程图联动教学页）</title>
 <style>
   :root{
     --ink:#1c2733; --ink-soft:#4a5a6a; --paper:#faf9f6; --card:#ffffff;
@@ -11,6 +11,7 @@
     --compute:#4C72B0; --stall:#DD8452; --idle:#b9b3a5; --read:#8fb8e0;
     --p1:#4C72B0; --p3:#937860; --p4:#2e8b57;
     --good:#2e8b57; --bad:#c0554d;
+    --doneN:#eaf2ea; --doneB:#a8c6ae;
   }
   *{box-sizing:border-box}
   html{scroll-behavior:smooth}
@@ -49,6 +50,14 @@
   .layerloop .n.r{border-color:var(--read)}
   .layerloop .n.c{border-color:var(--compute)}
   .layerloop .arr{color:var(--ink-soft)}
+  /* ---------- §3 流程一览（chip 流） ---------- */
+  .chipflow{display:flex; flex-wrap:wrap; align-items:stretch; gap:6px; margin:16px 0 8px; font-size:13px}
+  .chipflow .cf{border:1.5px solid var(--line); border-radius:9px; background:var(--card); padding:6px 12px; line-height:1.5; min-width:92px}
+  .chipflow .cf b{display:block; font-size:13.5px}
+  .chipflow .cf span{color:var(--ink-soft); font-size:12px}
+  .chipflow .cf.trig{border-style:dashed; border-color:var(--accent); background:#eef4f0}
+  .chipflow .cf.loopback{border-style:dashed}
+  .chipflow .arr{align-self:center; color:var(--ink-soft); font-size:15px}
   /* ---------- 请求卡片 ---------- */
   .reqs{display:grid; grid-template-columns:repeat(auto-fit,minmax(210px,1fr)); gap:10px; margin:12px 0}
   .req{border:1.5px solid var(--line); border-radius:10px; background:var(--card); padding:10px 14px; font-size:13.5px}
@@ -59,6 +68,44 @@
   /* ---------- 图例 ---------- */
   .legend{display:flex; flex-wrap:wrap; gap:14px; align-items:center; font-size:13.5px; margin:10px 0; padding:10px 14px; background:#f4f1e8; border-radius:8px}
   .legend .sw{display:inline-block; width:22px; height:13px; border-radius:3px; vertical-align:-1px; margin-right:5px}
+  /* ---------- §5 双栏：流程图 + 舞台 ---------- */
+  .demo-wide{width:min(1180px, calc(100vw - 40px)); margin-inline:auto}
+  .demo-grid{display:grid; grid-template-columns:300px minmax(0,1fr); gap:20px; align-items:start; margin-top:6px}
+  .fc-aside{position:sticky; top:14px}
+  .fc-box{background:var(--card); border:1.5px solid var(--ink); border-radius:12px; padding:12px 12px 10px}
+  .fc-box h4{margin:0 0 2px; font-size:14.5px}
+  .fc-box .fc-hint{font-size:11.5px; color:var(--ink-soft); margin:0 0 6px}
+  svg.flow{width:100%; height:auto; display:block}
+  .flow .node{cursor:pointer; transition:opacity .3s}
+  .flow .node rect,.flow .node polygon{fill:#fff; stroke:var(--line); stroke-width:1.5; transition:fill .3s, stroke .3s, stroke-width .3s}
+  .flow .node .t{font-size:13px; font-weight:700; fill:var(--ink); text-anchor:middle}
+  .flow .node .s{font-size:10.5px; fill:var(--ink-soft); text-anchor:middle}
+  .flow .node.trig rect{fill:#eef4f0; stroke-dasharray:5 3}
+  .flow .node.done rect,.flow .node.done polygon{fill:var(--doneN); stroke:var(--doneB)}
+  .flow .node.active rect,.flow .node.active polygon{stroke:var(--accent); stroke-width:3; fill:#fff; filter:drop-shadow(0 0 5px rgba(15,107,107,.35))}
+  .flow .node.active .t{fill:var(--accent)}
+  .flow .node:focus{outline:none}
+  .flow .node:focus rect,.flow .node:focus polygon{stroke:var(--ink); stroke-width:2.5}
+  .flow .edge{stroke:#c9c2b0; stroke-width:1.5; fill:none; transition:stroke .3s}
+  .flow .edge.done{stroke:var(--doneB)}
+  .flow .edge.active{stroke:var(--accent); stroke-width:2.5; stroke-dasharray:7 5; animation:edash 1s linear infinite; marker-end:url(#arwA)}
+  .flow .edge.done{marker-end:url(#arwG)}
+  .flow .elabel{font-size:10.5px; fill:var(--ink-soft); font-weight:700}
+  @keyframes edash{to{stroke-dashoffset:-12}}
+  .fc-legend{font-size:11.5px; color:var(--ink-soft); margin:6px 0 8px}
+  .fc-now{font-size:13px; background:#eef4f0; border-left:4px solid var(--accent); border-radius:0 8px 8px 0; padding:7px 10px; min-height:34px}
+  .fc-now b{color:var(--accent)}
+  /* ---------- 窄屏：横向步骤条 ---------- */
+  .phasebar{display:none}
+  .phasebar .pb{border:1.5px solid var(--line); border-radius:999px; padding:2px 10px; background:var(--card); cursor:pointer; font-family:inherit; font-size:12px}
+  .phasebar .pb.done{background:var(--doneN); border-color:var(--doneB); color:#4c6b52}
+  .phasebar .pb.active{background:var(--accent); color:#fff; border-color:var(--accent); font-weight:700}
+  .phasebar .pa{color:var(--ink-soft); align-self:center; font-size:11px}
+  @media (max-width:1020px){
+    .demo-grid{grid-template-columns:1fr}
+    .fc-aside{position:static}
+    .phasebar{display:flex; position:sticky; top:0; z-index:20; background:var(--paper); gap:5px; padding:8px 2px; border-bottom:1px solid var(--line); flex-wrap:wrap; align-items:center}
+  }
   /* ---------- 动画舞台 ---------- */
   .stage{background:var(--card); border:1.5px solid var(--ink); border-radius:12px; padding:20px; margin:18px 0}
   .ctrl{display:flex; align-items:center; gap:10px; flex-wrap:wrap; margin-bottom:6px}
@@ -68,6 +115,7 @@
   .ctrl .t-now{font-family:Menlo,Consolas,monospace; font-size:15px; margin-left:auto}
   .cap{min-height:58px; background:#f4f1e8; border-radius:8px; padding:10px 14px; font-size:14.5px; margin:8px 0 12px}
   .cap b{color:var(--accent)}
+  .ptag{display:inline-block; background:var(--accent); color:#fff; border-radius:5px; padding:0 8px; font-size:12.5px; font-weight:700; margin-right:6px; vertical-align:1px; white-space:nowrap}
   .plan{border:1px solid var(--line); border-radius:10px; padding:12px 14px 20px; margin:14px 0; transition:opacity .4s}
   .plan.dimmed{opacity:.38}
   .plan.chosen{border:2.5px solid var(--good); box-shadow:0 0 0 4px rgba(46,139,87,.15)}
@@ -76,6 +124,9 @@
   .plan h4{margin:0 0 2px; font-size:14.5px; display:flex; align-items:baseline; gap:10px; flex-wrap:wrap}
   .plan h4 .tag{font-size:12px; color:#fff; border-radius:4px; padding:1px 8px}
   .plan .desc{font-size:13px; color:var(--ink-soft); margin:0 0 6px}
+  .scorechip{display:none; font-family:Menlo,Consolas,monospace; font-size:11px; color:var(--ink-soft); border:1px dashed var(--line); border-radius:6px; padding:1px 8px; margin:2px 0 4px; width:fit-content}
+  .scorechip.show{display:inline-block}
+  .scorechip.win{border-color:var(--good); border-style:solid; color:var(--good); font-weight:700}
   .tl{position:relative; height:150px; margin:22px 0 4px}
   .tl .rowlab{position:absolute; left:0; top:0; width:86px; font-size:11.5px; color:var(--ink-soft); display:flex; align-items:center}
   .tl .track{position:absolute; left:90px; right:12px; top:0; bottom:0}
@@ -108,7 +159,11 @@
   summary{cursor:pointer; padding:10px 16px; font-weight:600; font-size:15px}
   details > div{padding:2px 18px 14px}
   footer{margin-top:60px; padding-top:14px; border-top:1px solid var(--line); color:var(--ink-soft); font-size:13px}
-  @media (prefers-reduced-motion: reduce){ .blk,.scan,.plan,.ledger{transition:none} }
+  @media (prefers-reduced-motion: reduce){
+    .blk,.scan,.plan,.ledger{transition:none}
+    .flow .edge{transition:none}
+    .flow .edge.active{animation:none; stroke-dasharray:none}
+  }
   @media (max-width:640px){
     .tl .rowlab{width:60px; font-size:10px}
     .tl .track,.axis{left:64px}
@@ -120,7 +175,7 @@
 <main>
 
 <header>
-  <h1>MPC 方案图解</h1>
+  <h1>MPC 方案图解 <span style="font-size:16px; color:var(--ink-soft)">v2 · 流程图联动版</span></h1>
   <div class="sub">
     MPC（滚动预测控制，<code>cq_mpc</code>）是我们提出的共享 KV 存储调度方案。
     它的核心想法一句话：<b>每次要做决定时，把每个候选动作在"系统副本"里推演到所有请求完成，
@@ -129,16 +184,21 @@
   </div>
   <div class="selfbox">
     <b>本页自足。</b>看懂例子需要的全部背景在 <a href="#pre">§1 预备知识</a>（90 秒读完）；
-    所有数字都可以用 §1.4 的"手算钥匙"自己验算；候选枚举在 <a href="#cands">§4</a>；动画在 <a href="#demo">§5</a>；
-    公式汇总在 <a href="#formulas">§8</a>。不需要先读任何其他文档。<br>
-    <b>已有升级版：</b><a href="MPC方案图解-20260920.html">v2（20260920）</a>新增五步流程图与例子逐步联动高亮（含门槛"落子/回落"分支随 θ 联动），数值与本页一致，推荐阅读 v2。
+    所有数字都可以用 §1.4 的"手算钥匙"自己验算；候选枚举在 <a href="#cands">§4</a>；
+    <b>§5 的例子每前进一步，左侧流程图会高亮当前所处环节</b>（本版新增）；
+    打分明细在 <a href="#score">§6</a>；公式汇总在 <a href="#formulas">§8</a>。不需要先读任何其他文档。
+  </div>
+  <div class="selfbox" style="background:#f2efe6; border-color:#e0d9c8">
+    <b>v2（20260920）改了什么：</b>§5 重构为"流程图 + 例子"双栏联动——动画步骤按第 0–4 步重新编排、
+    每步解说带环节标签、流程图节点随步进高亮（含门槛的"落子/回落"分支随 θ 联动）、
+    推演结束后各候选当场浮现打分徽章。<b>全部数值与 v1（20260916）一致。</b>
   </div>
   <nav class="toc">
     <a href="#pre">① 预备知识（90 秒）</a>
     <a href="#why">② 为什么调度难</a>
     <a href="#idea">③ MPC 的想法与五步</a>
     <a href="#cands">④ 候选从哪来</a>
-    <a href="#demo">⑤ 动画：三个候选的命运</a>
+    <a href="#demo">⑤ 动画 + 流程图联动</a>
     <a href="#score">⑥ 打分与落子</a>
     <a href="#edf">⑦ 为什么实验里常等于 EDF</a>
     <a href="#formulas">⑧ 公式速查</a>
@@ -221,8 +281,21 @@
 
 <!-- ============================================================ -->
 <h2 id="idea"><span class="no">③</span>MPC 的想法与五步流程</h2>
-<p class="lead">
-每当"有空闲实例且队列非空"，MPC 就做一轮决策。它不是发明新排序键，而是<b>直接比较结局</b>：
+<p>
+每当"有空闲实例且队列非空"，MPC 就做一轮决策。它不是发明新排序键，而是<b>直接比较结局</b>。
+一轮决策的全貌先扫一眼（§5 有可交互的完整流程图）：
+</p>
+<div class="chipflow" aria-label="MPC 一轮决策流程一览">
+  <div class="cf trig"><b>触发</b><span>空闲实例 + 队列非空</span></div><span class="arr">→</span>
+  <div class="cf"><b>第 0 步 拿保底</b><span>π = 老化 EDF</span></div><span class="arr">→</span>
+  <div class="cf"><b>第 1 步 建副本</b><span>只用可观测信息</span></div><span class="arr">→</span>
+  <div class="cf"><b>第 2 步 列候选</b><span>分批 × 时机</span></div><span class="arr">→</span>
+  <div class="cf"><b>第 3 步 推演打分</b><span>推到排空 → F̂</span></div><span class="arr">→</span>
+  <div class="cf"><b>◇ 门槛</b><span>严格更好？</span></div><span class="arr">→</span>
+  <div class="cf loopback"><b>落子 / 回落</b><span>只执行第一步</span></div><span class="arr">↺</span>
+</div>
+<p style="font-size:14px;color:var(--ink-soft)">
+落子之后系统只前进一个事件，然后<b>整轮重来</b>——这就是"滚动"的含义。下面把每一步展开：
 </p>
 <div class="steps" style="display:grid; grid-template-columns:repeat(auto-fit,minmax(290px,1fr)); gap:14px; margin:18px 0">
   <div class="card" style="margin:0"><h3 style="margin-top:0">第 0 步 · 先拿保底</h3>
@@ -294,7 +367,7 @@
 </div>
 
 <!-- ============================================================ -->
-<h2 id="demo"><span class="no">⑤</span>动画：三个候选各自的命运</h2>
+<h2 id="demo"><span class="no">⑤</span>动画：三个候选各自的命运（与流程图联动）</h2>
 
 <div class="reqs">
   <div class="req s"><b>S0 / S1</b>（短）<div class="row"><span>每层读 1 GB</span><span>每层算 1 s</span></div><div class="row"><span>期限 6.75 s</span><span>2 层</span></div></div>
@@ -311,98 +384,193 @@
   <span><b>F=…</b> = 整批完成时刻</span>
 </div>
 
-<div class="stage">
-  <div class="selfbox" style="margin:0 0 12px">
-    <b>怎么读这个动画：</b>下面三个面板是同一时刻（t=0）的三个<b>"如果……会怎样"的平行推演</b>——
-    在系统副本里想象出来的三种未来，不是真的跑了三遍。红色竖线是<b>想象中的时刻</b>，
-    按步进按钮（或 ←/→ 键）看每个未来怎么展开；<b>推演结束后，最后两步会当场打分并给出最终选择</b>（绿框 + "落子"徽章），打分明细在 §6。
+<div class="demo-wide">
+  <div class="phasebar" id="phasebar" aria-label="当前所处环节">
+    <span class="pb" data-pb="T" role="button" tabindex="0">触发</span><span class="pa">›</span>
+    <span class="pb" data-pb="0" role="button" tabindex="0">0 保底</span><span class="pa">›</span>
+    <span class="pb" data-pb="1" role="button" tabindex="0">1 副本</span><span class="pa">›</span>
+    <span class="pb" data-pb="2" role="button" tabindex="0">2 候选</span><span class="pa">›</span>
+    <span class="pb" data-pb="3" role="button" tabindex="0">3 推演</span><span class="pa">›</span>
+    <span class="pb" data-pb="4" role="button" tabindex="0">4 落子</span><span class="pa">›</span>
+    <span class="pb" data-pb="loop" role="button" tabindex="0">↺</span>
   </div>
-  <div class="ctrl">
-    <button class="primary" id="btn-play">▶ 播放</button>
-    <button id="btn-prev">← 上一步</button>
-    <button id="btn-next">下一步 →</button>
-    <button id="btn-reset">重置</button>
-    <span class="t-now" id="t-now">t = 0.0 s</span>
-  </div>
-  <div class="cap" id="cap"></div>
+  <div class="demo-grid">
 
-  <div class="plan" data-plan="p1">
-    <h4><span class="tag" style="background:var(--p1)">候选 A</span>同类批、两个实例同时发
-      <span style="color:var(--ink-soft);font-weight:400">首步 = 实例1←SS、实例2←LL，都在 t=0</span>
-      <span style="color:var(--ink-soft);font-weight:400">（这也是基础动作 π 的选择）</span><span class="chosen-badge">✔ MPC 落子</span></h4>
-    <p class="desc">实例1 的首层流先提交（FCFS 排前），实例2 的首层流排队。</p>
-    <div class="tl">
-      <div class="rowlab">实例1 · 算/等</div><div class="rowlab" style="top:38px">实例1 · 读</div>
-      <div class="rowlab" style="top:74px">实例2 · 算/等</div><div class="rowlab" style="top:110px">实例2 · 读</div>
-      <div class="track">
-        <div class="scan"></div>
-        <div class="lane"><div class="blk stall" data-t="0" data-d="0.5">等L0数据</div><div class="blk compute" data-t="0.5" data-d="2">算L0</div><div class="blk compute" data-t="3" data-d="2">算L1</div></div>
-        <div class="lane"><div class="blk read" data-t="0" data-d="0.5">读L0</div><div class="blk read" data-t="2.5" data-d="0.5">读L1</div></div>
-        <div class="lane"><div class="blk stall" data-t="0" data-d="0.5">排队</div><div class="blk compute" data-t="2.5" data-d="4">算L0</div><div class="blk stall" data-t="6.5" data-d="0.25">等</div><div class="blk compute" data-t="6.75" data-d="4">算L1</div></div>
-        <div class="lane"><div class="blk read" data-t="0.5" data-d="2">读L0</div><div class="blk read" data-t="3" data-d="3.75">读L1（2GB/s，到期提速）</div></div>
+    <aside class="fc-aside" aria-label="MPC 一轮决策流程图">
+      <div class="fc-box">
+        <h4>MPC 一轮决策 · 流程图</h4>
+        <p class="fc-hint">随右侧例子逐步高亮；点击节点可跳到该环节</p>
+        <svg class="flow" id="flow" viewBox="0 0 340 600" role="img" aria-label="MPC 一轮决策流程图：触发后拿保底、建预测副本、生成候选、推演打分、门槛校验后落子或回落，回到触发循环">
+          <defs>
+            <marker id="arw" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="7" markerHeight="7" orient="auto"><path d="M0,0 L10,5 L0,10 z" fill="#c9c2b0"/></marker>
+            <marker id="arwG" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="7" markerHeight="7" orient="auto"><path d="M0,0 L10,5 L0,10 z" fill="#a8c6ae"/></marker>
+            <marker id="arwA" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="7" markerHeight="7" orient="auto"><path d="M0,0 L10,5 L0,10 z" fill="#0f6b6b"/></marker>
+          </defs>
+          <!-- 连线（先画，压在节点下） -->
+          <path class="edge" id="e-t0" d="M190,48 L190,66" marker-end="url(#arw)"/>
+          <path class="edge" id="e-01" d="M190,120 L190,138" marker-end="url(#arw)"/>
+          <path class="edge" id="e-12" d="M190,192 L190,210" marker-end="url(#arw)"/>
+          <path class="edge" id="e-23" d="M190,264 L190,282" marker-end="url(#arw)"/>
+          <path class="edge" id="e-34" d="M190,350 L190,368" marker-end="url(#arw)"/>
+          <path class="edge" id="e-4a" d="M84,408 L84,430 L122,430 L122,454" marker-end="url(#arw)"/>
+          <path class="edge" id="e-4b" d="M296,408 L296,430 L258,430 L258,454" marker-end="url(#arw)"/>
+          <text class="elabel" x="96" y="426">是</text>
+          <text class="elabel" x="270" y="426">否</text>
+          <path class="edge" id="e-aB" d="M122,514 L122,538" marker-end="url(#arw)"/>
+          <path class="edge" id="e-bB" d="M258,514 L258,538" marker-end="url(#arw)"/>
+          <path class="edge" id="e-loop" d="M62,564 L34,564 Q26,564 26,556 L26,36 Q26,28 34,28 L58,28" marker-end="url(#arw)"/>
+          <!-- 节点 -->
+          <g class="node trig" id="n-T" data-node="T" data-phase="s0" tabindex="0" role="button" aria-label="触发：跳到第 0 步">
+            <rect x="62" y="8" width="256" height="40" rx="20"/>
+            <text class="t" x="190" y="33">触发：有空闲实例 且 队列非空</text>
+          </g>
+          <g class="node" id="n-0" data-node="0" data-phase="s0" tabindex="0" role="button" aria-label="第 0 步拿保底：跳到该步">
+            <rect x="62" y="70" width="256" height="50" rx="9"/>
+            <text class="t" x="190" y="90">第 0 步 · 拿保底</text>
+            <text class="s" x="190" y="108">π = 老化保护的 EDF 给出联合动作</text>
+          </g>
+          <g class="node" id="n-1" data-node="1" data-phase="s1" tabindex="0" role="button" aria-label="第 1 步重建预测世界：跳到该步">
+            <rect x="62" y="142" width="256" height="50" rx="9"/>
+            <text class="t" x="190" y="162">第 1 步 · 重建预测世界</text>
+            <text class="s" x="190" y="180">带宽报价 · 已提交流进展 · 已到请求</text>
+          </g>
+          <g class="node" id="n-2" data-node="2" data-phase="s2" tabindex="0" role="button" aria-label="第 2 步生成候选：跳到该步">
+            <rect x="62" y="214" width="256" height="50" rx="9"/>
+            <text class="t" x="190" y="234">第 2 步 · 生成候选动作</text>
+            <text class="s" x="190" y="252">同形/互补/紧迫排序 × 立即/等待</text>
+          </g>
+          <g class="node" id="n-3" data-node="3" data-phase="s3" tabindex="0" role="button" aria-label="第 3 步推演打分：跳到该步">
+            <rect x="62" y="286" width="256" height="64" rx="9"/>
+            <text class="t" x="190" y="306">第 3 步 · 逐候选推演到排空</text>
+            <text class="s" x="190" y="323">副本上跑完所有请求 → 预测完成 F̂</text>
+            <text class="s" id="fc-dyn" x="190" y="340">（等待推演）</text>
+          </g>
+          <g class="node" id="n-4" data-node="4" data-phase="s4" tabindex="0" role="button" aria-label="门槛校验：跳到落子步">
+            <polygon points="190,372 296,408 190,444 84,408"/>
+            <text class="t" x="190" y="404">主目标严格更好？</text>
+            <text class="s" x="190" y="421">平局不切换（gate=0）</text>
+          </g>
+          <g class="node" id="n-5a" data-node="5a" data-phase="s4" tabindex="0" role="button" aria-label="落子：跳到落子步">
+            <rect x="62" y="458" width="120" height="56" rx="9"/>
+            <text class="t" x="122" y="480" style="font-size:12px">落子</text>
+            <text class="s" x="122" y="497">只执行候选第一步</text>
+          </g>
+          <g class="node" id="n-5b" data-node="5b" data-phase="s4" tabindex="0" role="button" aria-label="回落保底：跳到落子步">
+            <rect x="198" y="458" width="120" height="56" rx="9"/>
+            <text class="t" x="258" y="480" style="font-size:12px">回落保底 π</text>
+            <text class="s" x="258" y="497">平局/超预算不切换</text>
+          </g>
+          <g class="node" id="n-B" data-node="B" data-phase="loop" tabindex="0" role="button" aria-label="回到触发：跳到下一轮">
+            <rect x="62" y="540" width="256" height="48" rx="9"/>
+            <text class="t" x="190" y="560" style="font-size:12px">回到触发 · 下一个事件全部重评</text>
+            <text class="s" x="190" y="577">到达 / 批完成 / 读取完成 / 闹钟</text>
+          </g>
+        </svg>
+        <div class="fc-legend">青色粗框 = 当前环节 · 绿色 = 已完成 · 灰色 = 未到</div>
+        <div class="fc-now" id="fc-now">—</div>
       </div>
-      <span class="fmark" style="color:var(--p1)" data-x="5">SS 批 F=5</span>
-      <span class="fmark" style="color:var(--p1)" data-x="10.75">LL 批 F=10.75</span>
-      <div class="axis"><span style="left:0%">0</span><span style="left:25%">2.9s</span><span style="left:50%">5.8s</span><span style="left:75%">8.6s</span><span style="left:100%">11.5s</span></div>
-    </div>
-  </div>
+    </aside>
 
-  <div class="plan" data-plan="p3">
-    <h4><span class="tag" style="background:var(--p3)">候选 B</span>两个"短+长"混批、同时发
-      <span style="color:var(--ink-soft);font-weight:400">首步 = 实例1←{S0,L0}、实例2←{S1,L1}，都在 t=0</span>
-      <span style="color:var(--ink-soft);font-weight:400">（每批读 5 GB/层、算 3 s/层，见 §1.4）</span><span class="chosen-badge">✔ MPC 落子</span></h4>
-    <p class="desc">两条批负载均衡；实例2 的首层流排在实例1 之后。</p>
-    <div class="tl">
-      <div class="rowlab">实例1 · 算/等</div><div class="rowlab" style="top:38px">实例1 · 读</div>
-      <div class="rowlab" style="top:74px">实例2 · 算/等</div><div class="rowlab" style="top:110px">实例2 · 读</div>
-      <div class="track">
-        <div class="scan"></div>
-        <div class="lane"><div class="blk stall" data-t="0" data-d="1.25">等L0</div><div class="blk compute" data-t="1.25" data-d="3">算L0</div><div class="blk stall" data-t="4.25" data-d="0.52">等</div><div class="blk compute" data-t="4.77" data-d="3">算L1</div></div>
-        <div class="lane"><div class="blk read" data-t="0" data-d="1.25">读L0</div><div class="blk read" data-t="2.5" data-d="2.27">读L1（5/3→提速）</div></div>
-        <div class="lane"><div class="blk stall" data-t="0" data-d="2.5">排队等L0</div><div class="blk compute" data-t="2.5" data-d="3">算L0</div><div class="blk stall" data-t="5.5" data-d="0.22">等</div><div class="blk compute" data-t="5.72" data-d="3">算L1</div></div>
-        <div class="lane"><div class="blk read" data-t="1.25" data-d="1.25">读L0</div><div class="blk read" data-t="2.5" data-d="3.22">读L1（断续，5/3→4）</div></div>
+    <div class="stage">
+      <div class="selfbox" style="margin:0 0 12px">
+        <b>怎么读这个动画：</b>左侧流程图常驻显示一轮决策的全貌，<b>每按一次"下一步"，当前环节就会在流程图上高亮</b>
+        （绿=已完成，青框=当前；解说开头的深色标签也标明当前是第几步）。三个面板是同一时刻（t=0）的三个
+        <b>"如果……会怎样"的平行推演</b>——在系统副本里想象出来的三种未来，不是真的跑了三遍。红色竖线是
+        <b>想象中的时刻</b>；<b>推演结束后，最后两步会当场打分并给出最终选择</b>（绿框 + "落子"徽章），打分明细在 §6。
+        也可以直接<b>点击流程图的节点</b>跳到对应环节。
       </div>
-      <span class="fmark" style="color:var(--p3)" data-x="7.770833">F=7.77</span>
-      <span class="fmark" style="color:var(--p3)" data-x="8.717014">F=8.72</span>
-      <div class="axis"><span style="left:0%">0</span><span style="left:25%">2.9s</span><span style="left:50%">5.8s</span><span style="left:75%">8.6s</span><span style="left:100%">11.5s</span></div>
-    </div>
-  </div>
-
-  <div class="plan" data-plan="p4">
-    <h4><span class="tag" style="background:var(--p4)">候选 C</span>SS 立即发，实例2 等 0.5 s 再领 LL（"等待"候选）
-      <span style="color:var(--ink-soft);font-weight:400">首步 = 实例1←SS(t=0)，实例2 只设一个 0.5 s 的闹钟（不领批、不占带宽）</span><span class="chosen-badge">✔ MPC 落子</span>
-    </h4>
-    <p class="desc">只晚半步，SS 的下层读流就能排在 LL 首层<b>前面</b>、且只要 1 GB/s。</p>
-    <div class="tl">
-      <div class="rowlab">实例1 · 算/等</div><div class="rowlab" style="top:38px">实例1 · 读</div>
-      <div class="rowlab" style="top:74px">实例2 · 算/等</div><div class="rowlab" style="top:110px">实例2 · 读</div>
-      <div class="track">
-        <div class="scan"></div>
-        <div class="lane"><div class="blk stall" data-t="0" data-d="0.5">等L0数据</div><div class="blk compute" data-t="0.5" data-d="2">算L0</div><div class="blk compute" data-t="2.5" data-d="2">算L1</div></div>
-        <div class="lane"><div class="blk read" data-t="0" data-d="0.5">读L0</div><div class="blk read" data-t="0.5" data-d="2">读L1（1GB/s）</div></div>
-        <div class="lane"><div class="blk idle" data-t="0" data-d="0.5">闲置（等待）</div><div class="blk compute" data-t="3" data-d="4">算L0</div><div class="blk compute" data-t="7" data-d="4">算L1</div></div>
-        <div class="lane"><div class="blk read" data-t="0.5" data-d="2.5">读L0（3→4GB/s）</div><div class="blk read" data-t="3" data-d="4">读L1（2GB/s）</div></div>
+      <div class="ctrl">
+        <button class="primary" id="btn-play">▶ 播放</button>
+        <button id="btn-prev">← 上一步</button>
+        <button id="btn-next">下一步 →</button>
+        <button id="btn-reset">重置</button>
+        <span class="t-now" id="t-now">第 0 步 · 保底</span>
       </div>
-      <span class="fmark" style="color:var(--p4)" data-x="4.5">SS 批 F=4.5</span>
-      <span class="fmark" style="color:var(--p4)" data-x="11">LL 批 F=11</span>
-      <div class="axis"><span style="left:0%">0</span><span style="left:25%">2.9s</span><span style="left:50%">5.8s</span><span style="left:75%">8.6s</span><span style="left:100%">11.5s</span></div>
+      <div class="cap" id="cap"></div>
+
+      <div class="plan" data-plan="p1">
+        <h4><span class="tag" style="background:var(--p1)">候选 A</span>同类批、两个实例同时发
+          <span style="color:var(--ink-soft);font-weight:400">首步 = 实例1←SS、实例2←LL，都在 t=0</span>
+          <span style="color:var(--ink-soft);font-weight:400">（这也是基础动作 π 的选择）</span><span class="chosen-badge">✔ MPC 落子</span></h4>
+        <p class="desc">实例1 的首层流先提交（FCFS 排前），实例2 的首层流排队。</p>
+        <div class="scorechip" data-sc="p1"></div>
+        <div class="tl">
+          <div class="rowlab">实例1 · 算/等</div><div class="rowlab" style="top:38px">实例1 · 读</div>
+          <div class="rowlab" style="top:74px">实例2 · 算/等</div><div class="rowlab" style="top:110px">实例2 · 读</div>
+          <div class="track">
+            <div class="scan"></div>
+            <div class="lane"><div class="blk stall" data-t="0" data-d="0.5">等L0数据</div><div class="blk compute" data-t="0.5" data-d="2">算L0</div><div class="blk compute" data-t="3" data-d="2">算L1</div></div>
+            <div class="lane"><div class="blk read" data-t="0" data-d="0.5">读L0</div><div class="blk read" data-t="2.5" data-d="0.5">读L1</div></div>
+            <div class="lane"><div class="blk stall" data-t="0" data-d="0.5">排队</div><div class="blk compute" data-t="2.5" data-d="4">算L0</div><div class="blk stall" data-t="6.5" data-d="0.25">等</div><div class="blk compute" data-t="6.75" data-d="4">算L1</div></div>
+            <div class="lane"><div class="blk read" data-t="0.5" data-d="2">读L0</div><div class="blk read" data-t="3" data-d="3.75">读L1（2GB/s，到期提速）</div></div>
+          </div>
+          <span class="fmark" style="color:var(--p1)" data-x="5">SS 批 F=5</span>
+          <span class="fmark" style="color:var(--p1)" data-x="10.75">LL 批 F=10.75</span>
+          <div class="axis"><span style="left:0%">0</span><span style="left:25%">2.9s</span><span style="left:50%">5.8s</span><span style="left:75%">8.6s</span><span style="left:100%">11.5s</span></div>
+        </div>
+      </div>
+
+      <div class="plan" data-plan="p3">
+        <h4><span class="tag" style="background:var(--p3)">候选 B</span>两个"短+长"混批、同时发
+          <span style="color:var(--ink-soft);font-weight:400">首步 = 实例1←{S0,L0}、实例2←{S1,L1}，都在 t=0</span>
+          <span style="color:var(--ink-soft);font-weight:400">（每批读 5 GB/层、算 3 s/层，见 §1.4）</span><span class="chosen-badge">✔ MPC 落子</span></h4>
+        <p class="desc">两条批负载均衡；实例2 的首层流排在实例1 之后。</p>
+        <div class="scorechip" data-sc="p3"></div>
+        <div class="tl">
+          <div class="rowlab">实例1 · 算/等</div><div class="rowlab" style="top:38px">实例1 · 读</div>
+          <div class="rowlab" style="top:74px">实例2 · 算/等</div><div class="rowlab" style="top:110px">实例2 · 读</div>
+          <div class="track">
+            <div class="scan"></div>
+            <div class="lane"><div class="blk stall" data-t="0" data-d="1.25">等L0</div><div class="blk compute" data-t="1.25" data-d="3">算L0</div><div class="blk stall" data-t="4.25" data-d="0.52">等</div><div class="blk compute" data-t="4.77" data-d="3">算L1</div></div>
+            <div class="lane"><div class="blk read" data-t="0" data-d="1.25">读L0</div><div class="blk read" data-t="2.5" data-d="2.27">读L1（5/3→提速）</div></div>
+            <div class="lane"><div class="blk stall" data-t="0" data-d="2.5">排队等L0</div><div class="blk compute" data-t="2.5" data-d="3">算L0</div><div class="blk stall" data-t="5.5" data-d="0.22">等</div><div class="blk compute" data-t="5.72" data-d="3">算L1</div></div>
+            <div class="lane"><div class="blk read" data-t="1.25" data-d="1.25">读L0</div><div class="blk read" data-t="2.5" data-d="3.22">读L1（断续，5/3→4）</div></div>
+          </div>
+          <span class="fmark" style="color:var(--p3)" data-x="7.770833">F=7.77</span>
+          <span class="fmark" style="color:var(--p3)" data-x="8.717014">F=8.72</span>
+          <div class="axis"><span style="left:0%">0</span><span style="left:25%">2.9s</span><span style="left:50%">5.8s</span><span style="left:75%">8.6s</span><span style="left:100%">11.5s</span></div>
+        </div>
+      </div>
+
+      <div class="plan" data-plan="p4">
+        <h4><span class="tag" style="background:var(--p4)">候选 C</span>SS 立即发，实例2 等 0.5 s 再领 LL（"等待"候选）
+          <span style="color:var(--ink-soft);font-weight:400">首步 = 实例1←SS(t=0)，实例2 只设一个 0.5 s 的闹钟（不领批、不占带宽）</span><span class="chosen-badge">✔ MPC 落子</span>
+        </h4>
+        <p class="desc">只晚半步，SS 的下层读流就能排在 LL 首层<b>前面</b>、且只要 1 GB/s。</p>
+        <div class="scorechip" data-sc="p4"></div>
+        <div class="tl">
+          <div class="rowlab">实例1 · 算/等</div><div class="rowlab" style="top:38px">实例1 · 读</div>
+          <div class="rowlab" style="top:74px">实例2 · 算/等</div><div class="rowlab" style="top:110px">实例2 · 读</div>
+          <div class="track">
+            <div class="scan"></div>
+            <div class="lane"><div class="blk stall" data-t="0" data-d="0.5">等L0数据</div><div class="blk compute" data-t="0.5" data-d="2">算L0</div><div class="blk compute" data-t="2.5" data-d="2">算L1</div></div>
+            <div class="lane"><div class="blk read" data-t="0" data-d="0.5">读L0</div><div class="blk read" data-t="0.5" data-d="2">读L1（1GB/s）</div></div>
+            <div class="lane"><div class="blk idle" data-t="0" data-d="0.5">闲置（等待）</div><div class="blk compute" data-t="3" data-d="4">算L0</div><div class="blk compute" data-t="7" data-d="4">算L1</div></div>
+            <div class="lane"><div class="blk read" data-t="0.5" data-d="2.5">读L0（3→4GB/s）</div><div class="blk read" data-t="3" data-d="4">读L1（2GB/s）</div></div>
+          </div>
+          <span class="fmark" style="color:var(--p4)" data-x="4.5">SS 批 F=4.5</span>
+          <span class="fmark" style="color:var(--p4)" data-x="11">LL 批 F=11</span>
+          <div class="axis"><span style="left:0%">0</span><span style="left:25%">2.9s</span><span style="left:50%">5.8s</span><span style="left:75%">8.6s</span><span style="left:100%">11.5s</span></div>
+        </div>
+      </div>
+
+      <h3 style="margin-top:20px">带宽账本（4 GB/s 每一刻分给了谁）</h3>
+      <div class="ledgers">
+        <div class="ledger" data-ledger="p1"><h5>候选 A</h5><div class="body">—</div></div>
+        <div class="ledger" data-ledger="p4"><h5>候选 C</h5><div class="body">—</div></div>
+      </div>
+
+      <h3 style="margin-top:20px">推演结束 → 打分 → 落子（动画最后两步对应这里）</h3>
+      <div class="thetas" role="group" aria-label="选择优化目标">
+        <button data-th="M" aria-pressed="false">θ=M · 最快全部做完</button>
+        <button data-th="S" aria-pressed="false">θ=S · 超时请求数最少</button>
+        <button data-th="T" aria-pressed="true">θ=T · 平均等待（TTFT）最短</button>
+        <button data-th="R" aria-pressed="false">θ=R · 相对等待（TTFT/T0）最短</button>
+      </div>
+      <div class="verdict" id="verdict"></div>
     </div>
-  </div>
 
-  <h3 style="margin-top:20px">带宽账本（4 GB/s 每一刻分给了谁）</h3>
-  <div class="ledgers">
-    <div class="ledger" data-ledger="p1"><h5>候选 A</h5><div class="body">—</div></div>
-    <div class="ledger" data-ledger="p4"><h5>候选 C</h5><div class="body">—</div></div>
   </div>
-
-  <h3 style="margin-top:20px">推演结束 → 打分 → 落子（动画最后两步对应这里）</h3>
-  <div class="thetas" role="group" aria-label="选择优化目标">
-    <button data-th="M" aria-pressed="false">θ=M · 最快全部做完</button>
-    <button data-th="S" aria-pressed="false">θ=S · 超时请求数最少</button>
-    <button data-th="T" aria-pressed="true">θ=T · 平均等待（TTFT）最短</button>
-    <button data-th="R" aria-pressed="false">θ=R · 相对等待（TTFT/T0）最短</button>
-  </div>
-  <div class="verdict" id="verdict"></div>
 </div>
 
 <!-- ============================================================ -->
@@ -491,6 +659,8 @@
   本页三个候选的全部时间线与打分数值来自规格 §11.2 的"四计划金标"（Fraction 严格相等逐数复现，测试覆盖）；
   其中"读L1（断续）"等分段为可视化近似，完成时刻 F 为精确值。实验结论部分对应
   <a href="../测试报告-E25实施-20260919.md">E25 测试报告</a> §5–§7。
+  姊妹篇：<a href="多ASU多Path组批错峰与带宽协同图解-20260917.html">多ASU多Path组批错峰与带宽协同图解</a>。
+  本页为 v2（20260920，流程图联动版），取代 <a href="MPC方案图解-20260916.html">v1（20260916）</a>；数值口径两版一致。2026-09-20。
 </footer>
 
 </main>
@@ -518,7 +688,7 @@
     });
   }
 
-  /* ---- 步进脚本：t 时刻 + 解说 + 聚焦计划 + 带宽账本 ---- */
+  /* ---- 带宽账本 ---- */
   var LED = {
     p1: {
       0:   [["流1 · SS读L0", "4", "4", "首层，要多少给多少"], ["流2 · LL读L0", "4", "0", "排在后面，排队"]],
@@ -556,26 +726,30 @@
     return h + '</table>';
   }
 
+  /* ---- 步进脚本：phase = 流程图环节；t = 想象时刻；focus = 聚焦计划 ---- */
   var STEPS = [
-    {t:0,    focus:["p1","p3","p4"], cap:"<b>t=0 · 决策时刻。</b>队列里 4 条请求全部到达，两个实例都空闲。按 §4 的枚举，MPC 此刻拿到的三个候选是：A=同类批同发（也是保底 π 的选择）、B=混批同发、C=SS 立即发+实例2 等 0.5 s。现在把三个候选<b>各自在副本上推演</b>——三个面板就是三种未来。"},
-    {t:0.25, focus:["p1","p3","p4"], cap:"推演刚开始。看各面板实例2 的第一格：<b>A/B 已领批</b>（橙色=批领了、排队等数据）；<b>C 是灰色闲置</b>——它只设了闹钟，请求还在中央队列，没有预取、没有占带宽。"},
-    {t:0.5,  focus:["p1","p4"], cap:"<b>★ 关键时刻：FCFS 序位在这里分岔。</b>候选 A：SS 首层读完退场，LL 独占带宽，但 SS 的下层读流（只要 1 GB/s）<b>排在 LL 后面拿 0</b>。候选 C：SS 的下层流<b>先提交</b>拿 1 GB/s，刚领取的 LL 拿到剩下的 3 GB/s——<b>两边同时前进</b>。看下方带宽账本。"},
-    {t:2,    focus:["p1","p4"], cap:"候选 C：SS 边算第 1 层边慢速读第 2 层（规则二：申请率=字节÷计算时长，刚好藏进计算）；LL 稳定以 3 GB/s 读。候选 A：LL 独占带宽读首层，SS 的下层流还在排队。"},
-    {t:2.5,  focus:["p1","p4"], cap:"候选 A：LL 首层读完、开始算 4 s；SS 下层流<b>到期提速</b>补读（规则二后半句）。候选 C：SS 的下层流恰好读完（0.5–2.5，1 GB/s × 2 s = 2 GB ✓），LL 开始独占带宽收尾。"},
-    {t:4.5,  focus:["p4"], cap:"<b>候选 C 的短批完成：F=4.5 s</b>（两条短请求此刻拿到首 token，比候选 A 的 5 s 快 10%）。这就是错峰保护旧流的收益——代价要到最后一刻才显现。"},
-    {t:5.5,  focus:["p1"], cap:"<b>候选 A 的短批完成：F=5 s</b>，实例1 转为闲置。此刻 A 与 C 的总等待几乎打平，胜负在长请求身上。"},
-    {t:7,    focus:["p1","p4"], cap:"候选 C：LL 开始算末层（F 将为 11）。候选 A：LL 在 6.5–6.75 提速补完最后 1 GB，马上开始算末层（F 将为 10.75）。"},
-    {t:8.6,  focus:["p3"], cap:"<b>候选 B（混批）最先全部完成：M=8.72 s</b>——但注意它的两条短请求在 7.77/8.72 才完成，<b>都超过了 6.75 s 的期限</b>（打分表 S 列=2）。"},
-    {t:11,   focus:["p1","p3","p4"], cap:"<b>推演结束，三个结局摆在一起：</b>A：F=5,5,10.75,10.75；B：F=7.77,7.77,8.72,8.72；C：F=4.5,4.5,11,11。<b>下一步：按 θ 打分并落子</b>（选中的候选会亮绿框）。"},
-    {t:11, phase:"commit", focus:["p1","p3","p4"]},
-    {t:11, phase:"loop",   focus:["p1","p3","p4"]}
+    {phase:"s0", t:0, focus:["p1","p3","p4"], cap:"触发条件成立：两个实例空闲、队列里 4 条请求全部到达。基础策略 π（带老化保护的 EDF）先给出<b>保底动作</b>：'实例1←SS、实例2←LL，都立即发'——恰好就是候选 A。它是参照系：任何候选想取代它，必须<b>严格更好</b>（第 4 步的门槛会查这件事）。"},
+    {phase:"s1", t:0, focus:["p1","p3","p4"], cap:"MPC 不许看系统内部真值，只用可观测信息搭一个<b>'系统副本'</b>：最新带宽报价（推演期间当常数）、自己提交过的读取流进展、已到请求的参数。本例：带宽恒 4 GB/s、4 条请求全知、无未来到达——<b>预测世界 = 真实世界</b>（教学例的理想化；真实系统里估值可能错，这正是要有门槛兜底的原因）。"},
+    {phase:"s2", t:0, focus:["p1","p3","p4"], cap:"按 §4 的两个维度组合候选：<b>怎么分批</b>（同形/互补排序）× <b>什么时候发</b>（立即/等待）。本例枚举出三个代表：<b>A</b>=同类批同发（=保底）、<b>B</b>=两个混批、<b>C</b>=SS 立即发+实例2 等 0.5 s。真实系统里这一步会生成几十个联合动作，再按预算挑着推演。"},
+    {phase:"s3", t:0, focus:["p1","p3","p4"], cap:"<b>推演开始。</b>三个面板 = 三个'如果……会怎样'的<b>平行未来</b>，在副本里逐个推到所有请求完成（不是真跑三遍）。红色竖线是<b>想象中的时刻</b>——按'下一步'看每个未来怎么展开。"},
+    {phase:"s3", t:0.25, focus:["p1","p3","p4"], cap:"推演刚开始。看各面板实例2 的第一格：<b>A/B 已领批</b>（橙色=批领了、排队等数据）；<b>C 是灰色闲置</b>——它只设了闹钟，请求还在中央队列，没有预取、没有占带宽。"},
+    {phase:"s3", t:0.5,  focus:["p1","p4"], cap:"<b>★ 关键时刻：FCFS 序位在这里分岔。</b>候选 A：SS 首层读完退场，LL 独占带宽，但 SS 的下层读流（只要 1 GB/s）<b>排在 LL 后面拿 0</b>。候选 C：SS 的下层流<b>先提交</b>拿 1 GB/s，刚领取的 LL 拿到剩下的 3 GB/s——<b>两边同时前进</b>。看下方带宽账本。"},
+    {phase:"s3", t:2,    focus:["p1","p4"], cap:"候选 C：SS 边算第 1 层边慢速读第 2 层（规则二：申请率=字节÷计算时长，刚好藏进计算）；LL 稳定以 3 GB/s 读。候选 A：LL 独占带宽读首层，SS 的下层流还在排队。"},
+    {phase:"s3", t:2.5,  focus:["p1","p4"], cap:"候选 A：LL 首层读完、开始算 4 s；SS 下层流<b>到期提速</b>补读（规则二后半句）。候选 C：SS 的下层流恰好读完（0.5–2.5，1 GB/s × 2 s = 2 GB ✓），LL 开始独占带宽收尾。"},
+    {phase:"s3", t:4.5,  focus:["p4"], cap:"<b>候选 C 的短批完成：F=4.5 s</b>（两条短请求此刻拿到首 token，比候选 A 的 5 s 快 10%）。这就是错峰保护旧流的收益——代价要到最后一刻才显现。"},
+    {phase:"s3", t:5.5,  focus:["p1"], cap:"<b>候选 A 的短批完成：F=5 s</b>，实例1 转为闲置。此刻 A 与 C 的总等待几乎打平，胜负在长请求身上。"},
+    {phase:"s3", t:7,    focus:["p1","p4"], cap:"候选 C：LL 开始算末层（F 将为 11）。候选 A：LL 在 6.5–6.75 提速补完最后 1 GB，马上开始算末层（F 将为 10.75）。"},
+    {phase:"s3", t:8.6,  focus:["p3"], cap:"<b>候选 B（混批）最先全部完成：M=8.72 s</b>——但注意它的两条短请求在 7.77/8.72 才完成，<b>都超过了 6.75 s 的期限</b>（打分表 S 列=2）。"},
+    {phase:"s3", t:11,   focus:["p1","p3","p4"], cap:"<b>推演结束，三个结局摆在一起：</b>A：F=5,5,10.75,10.75；B：F=7.77,7.77,8.72,8.72；C：F=4.5,4.5,11,11。各面板顶部已浮现<b>打分徽章</b>。<b>下一步：过门槛并落子</b>（选中的候选亮绿框）。"},
+    {phase:"s4", t:11, focus:["p1","p3","p4"]},
+    {phase:"loop", t:11, focus:["p1","p3","p4"]}
   ];
   var cur = 0, playing = false, timer = null;
   var caps = document.getElementById("cap");
   var tnow = document.getElementById("t-now");
   var curTheta = "T";
 
-  /* 落子（commit）与下一轮（loop）两步的解说随 θ 变化 */
+  /* 落子（s4）与下一轮（loop）两步的解说随 θ 变化 */
   var COMMIT = {
     M: "<b>最终选择：候选 B（混批）。</b>门槛校验：B 的主目标 8.72 <b>严格小于</b>保底 A 的 10.75 ✓ 允许切换。真实世界现在才动：<b>实例1 领 {S0,L0}、实例2 领 {S1,L1}，t=0 提交首层读取</b>。推演出的后续（7.77/8.72 完成）不会被执行——那只是估值。",
     S: "<b>最终选择：保底 A（不是 C！）。</b>词典序最优本是 C（超时同为 0，总等待 31&lt;31.5），但<b>主目标与保底打平</b>——门槛要求主目标严格改善，平局不切换（保守性）。真实动作 = 保底：实例1←SS、实例2←LL。这正是 §7 第一条『实验里 MPC≡EDF』的同一机制，只是发生在一只脚上。",
@@ -593,13 +767,109 @@
     });
   }
 
+  /* ---- 流程图联动 ---- */
+  var PHASES = {
+    s0:  {done:["T"], act:["0"], ed:[], ea:["e-t0"], label:"第 0 步 · 拿保底"},
+    s1:  {done:["T","0"], act:["1"], ed:["e-t0"], ea:["e-01"], label:"第 1 步 · 重建预测世界"},
+    s2:  {done:["T","0","1"], act:["2"], ed:["e-t0","e-01"], ea:["e-12"], label:"第 2 步 · 生成候选动作"},
+    s3:  {done:["T","0","1","2"], act:["3"], ed:["e-t0","e-01","e-12"], ea:["e-23"], label:"第 3 步 · 逐候选推演"},
+    s4:  {done:["T","0","1","2","3"], act:["4"], ed:["e-t0","e-01","e-12","e-23"], ea:["e-34"], label:"第 4 步 · 门槛校验"},
+    loop:{done:[], act:["B","T"], ed:[], ea:["e-loop"], label:"循环 · 等待下一个事件"}
+  };
+  function fmtT(t){ return String(parseFloat(t.toFixed(2))); }
+  function setPhase(ph, t){
+    var cfg = PHASES[ph] || PHASES.s3;
+    var done = cfg.done.slice(), act = cfg.act.slice();
+    var ed = cfg.ed.slice(), ea = cfg.ea.slice();
+    var label = cfg.label;
+    if(ph === "s4"){
+      if(curTheta === "S"){ act.push("5b"); ea.push("e-4b"); label = "第 4 步 · 门槛：平局 → 回落保底 π"; }
+      else { act.push("5a"); ea.push("e-4a"); label = "第 4 步 · 门槛：严格更好 → 落子候选首步"; }
+    }
+    if(ph === "loop"){
+      var br = curTheta === "S" ? "b" : "a";
+      done.push("5" + br); ed.push("e-4" + br, "e-" + br + "B");
+      label = "循环 · 只落了一步，回到触发等下一个事件";
+    }
+    document.querySelectorAll("#flow .node").forEach(function(n){
+      n.classList.remove("active","done");
+      if(done.indexOf(n.dataset.node) >= 0) n.classList.add("done");
+      if(act.indexOf(n.dataset.node) >= 0) n.classList.add("active");
+    });
+    document.querySelectorAll("#flow .edge").forEach(function(e){
+      e.classList.remove("active","done");
+      if(ed.indexOf(e.id) >= 0) e.classList.add("done");
+      if(ea.indexOf(e.id) >= 0) e.classList.add("active");
+    });
+    var dyn = document.getElementById("fc-dyn");
+    if(ph === "s3"){ dyn.textContent = (t >= 11) ? "三个结局已齐 · 待打分" : "推演中 · 想象时刻 t = " + fmtT(t) + " s"; }
+    else if(ph === "s4"){ dyn.textContent = "打分完毕 → 交门槛"; }
+    else if(ph === "loop"){ dyn.textContent = "（推演结果不执行，已丢弃）"; }
+    else { dyn.textContent = "（等待推演）"; }
+    document.getElementById("fc-now").innerHTML = "<b>当前：</b>" + label;
+    /* 窄屏步骤条 */
+    var order = ["T","0","1","2","3","4","loop"];
+    var curPb = {"s0":"0","s1":"1","s2":"2","s3":"3","s4":"4","loop":"loop"}[ph] || "3";
+    document.querySelectorAll("#phasebar .pb").forEach(function(ch){
+      var k = ch.dataset.pb;
+      ch.classList.remove("active","done");
+      if(k === curPb || (ph === "loop" && k === "T")) ch.classList.add("active");
+      else if(order.indexOf(k) < order.indexOf(curPb)) ch.classList.add("done");
+    });
+  }
+
+  /* ---- 打分徽章（推演结束后浮现于各候选面板） ---- */
+  var SCORES = {
+    p1:{M:"10.75", S:"0",  T:"31.5",  R:"2.19"},
+    p3:{M:"8.72",  S:"2",  T:"32.98", R:"2.66"},
+    p4:{M:"11",    S:"0",  T:"31",    R:"2.10"}
+  };
+  function chipHTML(plan){
+    var parts = ["M","S","T","R"].map(function(k){
+      var v = SCORES[plan][k];
+      return k === curTheta ? "<b>" + k + " " + v + "</b>" : k + " " + v;
+    });
+    return "打分：" + parts.join(" · ");
+  }
+  function updateScoreChips(){
+    var s = STEPS[cur];
+    var reveal = s.t >= 11 - 1e-9;
+    document.querySelectorAll(".scorechip").forEach(function(ch){
+      var plan = ch.dataset.sc;
+      ch.classList.toggle("show", reveal);
+      if(reveal){
+        ch.innerHTML = chipHTML(plan);
+        ch.classList.toggle("win", (s.phase === "s4" || s.phase === "loop") && plan === chosenOf());
+      } else {
+        ch.classList.remove("win");
+      }
+    });
+  }
+
+  /* ---- 步骤标签与时刻显示 ---- */
+  function phaseTag(s){
+    if(s.phase === "s0") return "第 0 步 · 拿保底";
+    if(s.phase === "s1") return "第 1 步 · 建副本";
+    if(s.phase === "s2") return "第 2 步 · 列候选";
+    if(s.phase === "s4") return "第 4 步 · 门槛与落子";
+    if(s.phase === "loop") return "↻ 下一轮";
+    return "第 3 步 · 推演 t=" + fmtT(s.t) + "s";
+  }
+  function tnowText(s){
+    if(s.phase === "s0") return "第 0 步 · 保底";
+    if(s.phase === "s1") return "第 1 步 · 副本";
+    if(s.phase === "s2") return "第 2 步 · 候选";
+    if(s.phase === "s4") return "★ 第 4 步 · 落子";
+    if(s.phase === "loop") return "↻ 下一轮";
+    return "推演 t = " + fmtT(s.t) + " s";
+  }
+
   function render(){
     var s = STEPS[cur];
-    var body = s.cap;
-    if(s.phase === "commit"){ body = COMMIT[curTheta]; }
-    if(s.phase === "loop"){ body = LOOP_CAP; }
-    caps.innerHTML = body + ' <span style="color:#8a8271">（第 ' + (cur+1) + '/' + STEPS.length + ' 步，←/→ 键也可翻页）</span>';
-    tnow.textContent = s.phase === "commit" ? "★ 落子" : (s.phase === "loop" ? "↻ 下一轮" : "t = " + s.t.toFixed(1) + " s");
+    var body = s.cap !== undefined ? s.cap : (s.phase === "s4" ? COMMIT[curTheta] : LOOP_CAP);
+    caps.innerHTML = '<span class="ptag">' + phaseTag(s) + '</span>' + body +
+      ' <span style="color:#8a8271">（第 ' + (cur+1) + '/' + STEPS.length + ' 步，←/→ 键翻页；点左侧流程图节点可跳转）</span>';
+    tnow.textContent = tnowText(s);
     document.querySelectorAll(".tl").forEach(function(tl){
       var track = tl.querySelector(".track");
       var frac = s.t / T_MAX;
@@ -611,12 +881,14 @@
     document.querySelectorAll(".plan").forEach(function(p){
       p.classList.toggle("dimmed", s.focus.indexOf(p.dataset.plan) < 0);
     });
-    setChosen(s.phase ? chosenOf() : null);
+    setChosen((s.phase === "s4" || s.phase === "loop") ? chosenOf() : null);
     document.querySelectorAll(".ledger").forEach(function(lg){
       var plan = lg.dataset.ledger;
       lg.querySelector(".body").innerHTML = ledgerHTML(plan, s.t);
       lg.classList.toggle("dimmed", s.focus.indexOf(plan) < 0);
     });
+    setPhase(s.phase || "s3", s.t);
+    updateScoreChips();
   }
   function go(i){ cur = Math.max(0, Math.min(STEPS.length-1, i)); render(); }
   function stop(){ playing = false; document.getElementById("btn-play").textContent = "▶ 播放"; if(timer){clearInterval(timer); timer=null;} }
@@ -630,9 +902,31 @@
   document.getElementById("btn-play").onclick = play;
   document.getElementById("btn-reset").onclick = function(){ stop(); go(0); };
   document.addEventListener("keydown", function(e){
-    if(e.target.tagName === "BUTTON") return;
+    if(e.target.tagName === "BUTTON" || e.target.closest("#flow") || e.target.closest("#phasebar")) return;
     if(e.key === "ArrowRight"){ stop(); go(cur+1); }
     if(e.key === "ArrowLeft"){ stop(); go(cur-1); }
+  });
+
+  /* ---- 流程图节点 / 步骤条芯片：点击跳转到该环节 ---- */
+  var PHASE_IX = {};
+  STEPS.forEach(function(s, i){ if(s.phase && PHASE_IX[s.phase] === undefined) PHASE_IX[s.phase] = i; });
+  function jumpTo(ph, ev){
+    if(ev.type === "keydown" && ev.key !== "Enter" && ev.key !== " " && ev.key !== "Spacebar") return;
+    ev.preventDefault();
+    if(PHASE_IX[ph] === undefined) return;
+    stop(); go(PHASE_IX[ph]);
+  }
+  document.querySelectorAll("#flow .node").forEach(function(n){
+    var ph = n.dataset.phase;
+    if(!ph) return;
+    n.addEventListener("click", function(ev){ jumpTo(ph, ev); });
+    n.addEventListener("keydown", function(ev){ jumpTo(ph, ev); });
+  });
+  var PB2PH = {"T":"s0","0":"s0","1":"s1","2":"s2","3":"s3","4":"s4","loop":"loop"};
+  document.querySelectorAll("#phasebar .pb").forEach(function(ch){
+    var ph = PB2PH[ch.dataset.pb];
+    ch.addEventListener("click", function(ev){ jumpTo(ph, ev); });
+    ch.addEventListener("keydown", function(ev){ jumpTo(ph, ev); });
   });
 
   /* ---- θ 选择 ---- */
@@ -657,7 +951,7 @@
     var landed = th === "S" ? "A（保底）" : (th === "M" ? "B（混批）" : "C（等待错峰）");
     verdict.innerHTML = "<b>θ=" + th + " 的落子结果：候选 " + landed + "。</b>" + cfg.txt +
       " 推演出的后续计划不执行，下一个事件到来全部重算。";
-    if(STEPS[cur].phase){ render(); }   // 动画停在落子/下一轮步时，切换 θ 即时刷新选择
+    render();   // 门槛分支、打分徽章、流程图当前环节都可能随 θ 变化
   }
   document.querySelectorAll(".thetas button").forEach(function(b){
     b.onclick = function(){ setTheta(b.dataset.th); };
@@ -665,6 +959,15 @@
 
   layout(); render(); setTheta("T");
   window.addEventListener("resize", function(){ layout(); render(); });
+  /* 视口模拟/某些场景不派发 resize 事件，用 ResizeObserver 兜底重排时间线 */
+  if (window.ResizeObserver){
+    var roQ = null;
+    var ro = new ResizeObserver(function(){
+      if(roQ) cancelAnimationFrame(roQ);
+      roQ = requestAnimationFrame(function(){ layout(); render(); });
+    });
+    document.querySelectorAll(".tl .track").forEach(function(t){ ro.observe(t); });
+  }
 })();
 </script>
 </body>
