@@ -99,8 +99,11 @@ def draw_gantt(ax, ts):
         ax.broken_barh([(t0, t1 - t0)], y, facecolors=C_IDLE,
                        edgecolor="none", zorder=1)
         blue_xr, orange_xr = [], []
+        comp_j = stall_j = 0.0
         for r in rows:
             c, s, _i = r["workers"][j]
+            comp_j += c
+            stall_j += s
             if c > 0:
                 blue_xr.append((r["t_start_s"], c))
             if s > 0:
@@ -111,6 +114,12 @@ def draw_gantt(ax, ts):
         if orange_xr:
             ax.broken_barh(orange_xr, y, facecolors=C_STALL,
                            edgecolor="none", zorder=3)
+        # 泳道右端标注该 NPU 的利用率（计算占比；等待 ≥1% 时附注）
+        label = f"{comp_j / (t1 - t0):.0%}"
+        if stall_j / (t1 - t0) >= 0.01:
+            label += f"/等{stall_j / (t1 - t0):.0%}"
+        ax.text(t0 + (t1 - t0) * 0.988, j + 0.5, label, ha="right",
+                va="center", fontsize=8.5, color="#1a1a1a", zorder=4)
     ax.set_ylim(-0.06, n + 0.06)
     ax.set_yticks([j + 0.5 for j in range(n)])
     ax.set_yticklabels([f"NPU{j}" for j in range(n)], fontsize=10)
