@@ -115,10 +115,13 @@ def save_progress(prog):
                          encoding="utf-8"), ensure_ascii=False, indent=1)
 
 
-def run_all(cells=None, windows=None):
+def run_all(cells=None, windows=None, policies=None, tag=""):
+    """policies/tag 供消融补跑（如 local）复用同一执行器：
+    progress 键加 tag 后缀避免与主跑互相覆盖。"""
     from sim.cq.search import MPCPolicy
     cells = NEW_CELLS if cells is None else cells
     windows = W5 if windows is None else windows
+    policies = policies or POLICY_THETAS
     prog = load_progress()
     recs_path = os.path.join(ROOT, "e25_regime_records.json")
     recs = (json.load(open(recs_path, encoding="utf-8"))
@@ -130,7 +133,7 @@ def run_all(cells=None, windows=None):
             srcs[f] = MooncakeSource(f, TRACE_DIR_DEFAULT)
         src = srcs[f]
         for w in windows:
-            cid = cid_new(c, w)
+            cid = cid_new(c, w) + tag
             if cid in prog:
                 continue
             lam = lam0_m(src, c["m"]) * F(str(c["rho"]))
@@ -143,10 +146,11 @@ def run_all(cells=None, windows=None):
             scn = default_scenario(B_gbps=c["B"], m=c["m"], alpha=F(4),
                                    limits=TRACE_WIDE_LIMITS)
             c_ref = c_ref_of(specs, scn)
-            for pid, th in POLICY_THETAS:
-                if pid == "cq_mpc":
-                    pol = MPCPolicy(pid="cq_mpc", H=1, theta=th,
-                                    c_ref=c_ref, budget_s=MPC_BUDGET_S)
+            for pid, th in policies:
+                if pid in ("cq_mpc", "cq_local"):
+                    pol = MPCPolicy(pid=pid, local=(pid == "cq_local"), H=1,
+                                    theta=th, c_ref=c_ref,
+                                    budget_s=MPC_BUDGET_S)
                 else:
                     pol = build_policy(pid, th, c_ref, H=1)
                 eng = run_case(scn, specs, pol, numeric=float, seed=w,
@@ -167,7 +171,7 @@ def run_all(cells=None, windows=None):
                                            theta=(th or None), mode="OL")
                         ts_p = os.path.join(
                             ROOT, "ts", cid,
-                            f"{pid}{('_' + th) if pid == 'cq_mpc' else ''}.json.gz")
+                            f"{pid}{('_' + th) if pid in ('cq_mpc', 'cq_local') else ''}.json.gz")
                         os.makedirs(os.path.dirname(ts_p), exist_ok=True)
                         save_ts(ts_p, ts)
                     except Exception as e:      # TsConservationError 等
@@ -221,33 +225,38 @@ def classify(mt):
 
 
 def gains_from_records(recs, file, B, rho, m):
-    """逐窗配对：mpc(θ=T) vs edf 的 TTFT%、mpc(θ=S) vs edf 的 SLO pp。
+    """逐窗配对：mpc(θ=T)/local(θ=T) vs edf 的 TTFT%、mpc(θ=S) vs edf 的 SLO pp。
 
     旧记录（主矩阵）里简单策略也带 theta 字段（同值重复），统一把
-    非 MPC 策略的 theta 归一化为空串后再做键。
+    非 MPC 类策略的 theta 归一化为空串后再做键。
     """
     sub = [r for r in recs if r["file"] == file and r.get("B") == B
            and r.get("rho") == rho and r.get("m", 4) == m]
 
     def _key(r):
-        if r["policy"] == "cq_mpc":
+        if r["policy"] in ("cq_mpc", "cq_local"):
             return (r["policy"], r.get("theta", ""), r["window"])
         return (r["policy"], "", r["window"])
 
     by = {_key(r): r for r in sub}
-    t_gains, s_gain = [], []
+    t_gains, s_gain, loc_gains = [], [], []
     for w in W5:
         edf = by.get(("cq_edf", "", w))
         mT = by.get(("cq_mpc", "T", w))
         mS = by.get(("cq_mpc", "S", w))
+        lT = by.get(("cq_local", "T", w))
         if edf and mT and edf["ttft_mean_lower"]:
             t_gains.append((edf["ttft_mean_lower"] - mT["ttft_mean_lower"])
                            / edf["ttft_mean_lower"] * 100.0)
         if edf and mS:
             s_gain.append((mS["slo_success"] / mS["n_cohort"]
                            - edf["slo_success"] / edf["n_cohort"]) * 100.0)
+        if edf and lT and edf["ttft_mean_lower"]:
+            loc_gains.append((edf["ttft_mean_lower"] - lT["ttft_mean_lower"])
+                             / edf["ttft_mean_lower"] * 100.0)
     return (float(np.median(t_gains)) if t_gains else None,
-            float(np.median(s_gain)) if s_gain else None)
+            float(np.median(s_gain)) if s_gain else None,
+            float(np.median(loc_gains)) if loc_gains else None)
 
 
 def analyze():
@@ -255,7 +264,7 @@ def analyze():
                          encoding="utf-8"))
     old = [r for r in old if r["mode"] == "OL" and r["alpha"] == 4
            and r["cap"] == "C" and r["profile"] == "default"
-           and r["policy"] in ("cq_fcfs", "cq_edf", "cq_mpc")
+           and r["policy"] in ("cq_fcfs", "cq_edf", "cq_mpc", "cq_local")
            and r["theta"] in ("S", "T") and r["window"] in W5]
     new_p = os.path.join(ROOT, "e25_regime_records.json")
     new = (json.load(open(new_p, encoding="utf-8"))
@@ -284,15 +293,15 @@ def analyze():
                          "cq_fcfs")
         if ts is not None:
             mt = regime_metrics(ts)
-        tg, sg = gains_from_records(recs, f, B, rho, m)
+        tg, sg, lg = gains_from_records(recs, f, B, rho, m)
         rows.append(dict(file=f, B=B, rho=rho, m=m, metrics=mt,
-                         ttft_gain=tg, slo_gain=sg,
+                         ttft_gain=tg, slo_gain=sg, local_gain=lg,
                          regime=(classify(mt) if mt else "?")))
     json.dump(rows, open(os.path.join(ROOT, "map.json"), "w",
                          encoding="utf-8"), ensure_ascii=False, indent=1)
     print(f"{'trace':12s} {'B':>4s} {'ρ':>4s} {'m':>2s} | {'算':>4s} {'sat':>4s} "
           f"{'排空':>4s} {'深积':>4s} {'q中':>5s} {'q峰':>4s} | {'状态':6s} "
-          f"{'TTFT增益':>8s} {'SLO增益':>8s}")
+          f"{'TTFT增益':>8s} {'SLO增益':>8s} {'loc增益':>8s}")
     for r in rows:
         mt = r["metrics"] or {}
         print(f"{r['file'].split('_')[0]:12s} {r['B']:>4.0f} {r['rho']:>4g} "
@@ -303,7 +312,8 @@ def analyze():
               f"{mt.get('q_med', float('nan')):>5.1f} "
               f"{mt.get('q_peak', float('nan')):>4.0f} | {r['regime']:6s} "
               f"{('%+.1f%%' % r['ttft_gain']) if r['ttft_gain'] is not None else '—':>8s} "
-              f"{('%+.1fpp' % r['slo_gain']) if r['slo_gain'] is not None else '—':>8s}")
+              f"{('%+.1fpp' % r['slo_gain']) if r['slo_gain'] is not None else '—':>8s} "
+              f"{('%+.1f%%' % r['local_gain']) if r.get('local_gain') is not None else '—':>8s}")
     print("地图已保存 -> results/cq/eval/e25_regime/map.json")
 
 
@@ -464,6 +474,8 @@ def main():
     mode = sys.argv[1] if len(sys.argv) > 1 else "all"
     if mode in ("run", "all"):
         run_all()
+    if mode in ("local", "all"):      # 消融补跑：E25.2 格点的 local(θ=S,T)
+        run_all(policies=[("cq_local", "S"), ("cq_local", "T")], tag="|loc")
     if mode == "full":
         run_all(FULL_CELLS, W20)
     if mode == "validate":
