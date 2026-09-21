@@ -164,7 +164,7 @@ def stack(ax, x, w, ytop, items, fc, parent, gap=0.012, fs=8.0):
 # ---------------------------------------------------------------- 图 A 总览
 def fig_a():
     fig, ax = new_ax(14.5, 9.8)
-    ax.text(0.5, 0.985, "status_aware_network 仿真架构总览：四族仿真 + 共享支撑层（基线 commit db0b1c6）",
+    ax.text(0.5, 0.985, "仿真架构总览：一个研究问题、三台仿真器、一套共用底座",
             ha="center", va="top", fontsize=13, fontweight="bold")
 
     box(ax, 0.04, 0.905, 0.92, 0.052,
@@ -173,8 +173,8 @@ def fig_a():
 
     lx = [0.025, 0.245, 0.475, 0.745]
     lw_ = [0.205, 0.215, 0.255, 0.235]
-    titles = ["M0 / M1 支线（G 系列）", "v1 族：请求级流体仿真（E1–E4）",
-              "v2 族：共享分布式 KV 拓扑（E5–E18）", "cq 族：统一队列批+错峰（E19–E25）"]
+    titles = ["解析与迭代级支线工具", "仿真器① 取回决策（请求级）",
+              "仿真器② 分布式拓扑（请求级+放置）", "仿真器③ 组批错峰（批级·精确内核）"]
     lanes = [lane(ax, lx[i], 0.175, lw_[i], 0.705, titles[i], c)
              for i, c in enumerate([C_M1, C_V1, C_V2, C_CQ])]
 
@@ -202,7 +202,7 @@ def fig_a():
         ("engine2.py — local / fetch(三级链路)\npartial(F 比例+overlap) / recompute", 0.075),
         ("policies2.py — 17 策略\n主流映射 + joint2/coord2 + oracle/先知", 0.06),
         ("prefetch.py + _ctrl_loop\n预取/回写/保护 + 复制/迁移/淘汰", 0.07),
-        ("实验 E5–E9, E9b–E18（v2/v3/v4）", 0.045),
+        ("实验 E5–E18（含三批改进系列）", 0.045),
     ], "#f2f9ef", lanes[2])
 
     stack(ax, lx[3] + 0.008, lw_[3] - 0.016, 0.845, [
@@ -224,7 +224,7 @@ def fig_a():
 
     for x, w in zip(lx, lw_):
         arrow(ax, (x + w / 2, 0.905), (x + w / 2, 0.884))
-    ax.text(0.5, 0.155, "四族均落在同一支撑层上；v1/v2 共享 SimPy + 流体资源内核，cq 为独立自研内核（Fraction/事件循环）",
+    ax.text(0.5, 0.155, "仿真器①②共用同一 SimPy+流体内核与运行装配；③为独立精确内核（Fraction）。历史代号（v1/v2/cq）见文档代码地图一节",
             ha="center", fontsize=8, color="#666666")
     verify(fig, ax, "A")
     save(fig, "fig_arch_overview.png")
@@ -241,11 +241,11 @@ def fig_b():
     rp = lane(ax, 0.755, 0.32, 0.225, 0.60, "策略", C_POL, fs=10.5)
 
     box(ax, 0.04, 0.755, 0.27, 0.115,
-        "v1/v2 资源真值：\nSharedKVStorage 内部队列/背景负载\nGpuPool.queue\nhypothetical_* 精确推演接口", "white", parent=rt, fs=8.2)
+        "资源真值（仿真器①②共用）：\nSharedKVStorage 内部队列/背景负载\nGpuPool.queue\nhypothetical_* 精确推演接口", "white", parent=rt, fs=8.2)
     box(ax, 0.04, 0.615, 0.27, 0.115,
-        "v2 拓扑真值：World.resources\n(mem/ssd/fabric 流体)\nMetadataDirectory 副本集\nLocalKVCache 实际内容", "white", parent=rt, fs=8.2)
+        "拓扑真值（仿真器②）：World.resources\n(mem/ssd/fabric 流体)\nMetadataDirectory 副本集\nLocalKVCache 实际内容", "white", parent=rt, fs=8.2)
     box(ax, 0.04, 0.475, 0.27, 0.115,
-        "cq 物理内核真值：\nWorldState/BatchRuntime\nFlowState(剩余字节/速率)\nB(t) 真带宽、c_layers 计算真值", "white", parent=rt, fs=8.2)
+        "组批内核真值（仿真器③）：\nWorldState/BatchRuntime\nFlowState(剩余字节/速率)\nB(t) 真带宽、c_layers 计算真值", "white", parent=rt, fs=8.2)
     box(ax, 0.04, 0.335, 0.27, 0.105,
         "Oracle/先知专属数据：\nhypothetical_*、future(cls,t,H)", "white", parent=rt, fs=8.2, ec="#b55a5a")
 
@@ -254,9 +254,9 @@ def fig_b():
     box(ax, 0.415, 0.615, 0.27, 0.115,
         "quote.AccessCostQuery\nest = path_lat + tier + fabric\n压力档位 NORMAL/WARM/\nHOT/CRITICAL（滞回防抖）", "white", parent=ro, fs=8.2)
     box(ax, 0.415, 0.475, 0.27, 0.115,
-        "GpuObservable（问题⑤）\nGPU 排队 drain_est 的\n陈旧/EMA/带噪视图\n默认 0/0=真值（v1 简化）", "white", parent=ro, fs=8.2)
+        "GpuObservable（GPU 侧对称仪表盘）\nGPU 排队 drain_est 的\n陈旧/EMA/带噪视图\n默认 0/0=真值（请求级既定简化）", "white", parent=ro, fs=8.2)
     box(ax, 0.415, 0.335, 0.27, 0.105,
-        "cq ObservableSnapshot\n报价 Quote + 流账本 + est_bw", "white", parent=ro, fs=8.2)
+        "组批可观测快照 ObservableSnapshot\n报价 Quote + 流账本 + est_bw", "white", parent=ro, fs=8.2)
 
     box(ax, 0.77, 0.655, 0.195, 0.21,
         "普通策略（只读中栏）\nP2/P3、static2dyn、\njoint2/coord2、cascade2、\ncq_fcfs…cq_mpc", "white", parent=rp, fs=8.2)
@@ -290,9 +290,9 @@ def fig_b():
 
     box(ax, 0.025, 0.02, 0.955, 0.165,
         "信息边界铁律（AGENTS.md §3）：边界必须匹配研究问题，且对所有被比较的策略一致。\n"
-        "· v1/v2：以对象引用边界实现 —— 普通策略只拿 WorkerView.obs / V2Ctx.quote，Oracle 直接拿资源对象；\n"
-        "· cq：以类型系统实现 —— ObservableSnapshot 不携带 world/engine 引用，物理真值只在 include_oracle=True 的诊断快照出现；\n"
-        "· GPU 侧默认真值可见（v1 既定简化：计算侧与 GPU 同信任域）；涉及 GPU 预测误差的实验（E12）用 GpuObservable 对称开洞。",
+        "· 仿真器①②：以对象引用实现边界 —— 普通策略只拿 WorkerView.obs / V2Ctx.quote，Oracle 直接拿资源对象；\n"
+        "· 仿真器③：以类型系统实现 —— ObservableSnapshot 不携带 world/engine 引用，真值只在 include_oracle=True 诊断快照出现；\n"
+        "· GPU 侧默认真值可见（请求级既定简化）；研究 GPU 侧误差的实验用 GpuObservable 对称开洞。",
         "#fdf6e3", fs=8.4)
     verify(fig, ax, "B")
     save(fig, "fig_arch_dual_world.png")
@@ -301,7 +301,7 @@ def fig_b():
 # ------------------------------------------------------- 图 C v2 拓扑
 def fig_c():
     fig, ax = new_ax(14.0, 9.5)
-    ax.text(0.5, 0.985, "v2 共享分布式 KV 拓扑与一次 fetch 决策的完整链路（sim/topology.py + engine2.py + policies2.py）",
+    ax.text(0.5, 0.985, "分布式拓扑仿真器：存储拓扑与一次取回决策的完整链路（sim/topology.py + engine2.py + policies2.py）",
             ha="center", va="top", fontsize=12.5, fontweight="bold")
 
     # workers（左列宽度内 4 个）
@@ -323,7 +323,7 @@ def fig_c():
 
     for i, (mm, ss) in enumerate([(60, 25), (60, 25), (40, 15)]):
         box(ax, 0.035 + i * 0.235, 0.27, 0.215, 0.175,
-            f"存储节点 n{i}（E5–E9 典型）\nmem SharedKVStorage\n{mm} GB/s\nssd SharedKVStorage {ss} GB/s\ncap 512 GB",
+            f"存储节点 n{i}（默认实验配置）\nmem SharedKVStorage\n{mm} GB/s\nssd SharedKVStorage {ss} GB/s\ncap 512 GB",
             "#eef7ec", fs=7.9)
 
     box(ax, 0.775, 0.27, 0.185, 0.19,
@@ -361,7 +361,7 @@ def fig_c():
 # ------------------------------------------------------- 图 D cq 引擎
 def fig_d():
     fig, ax = new_ax(14.0, 9.5)
-    ax.text(0.5, 0.985, "cq 引擎：批层状态机 + 同刻五步闭包 + FCFS 聚合存储（sim/cq/engine.py、storage.py）",
+    ax.text(0.5, 0.985, "组批错峰仿真器：批的层状态机、同刻处理顺序、共享带宽分配（sim/cq/engine.py、storage.py）",
             ha="center", va="top", fontsize=12.5, fontweight="bold")
 
     # 左上：批生命周期面板
@@ -409,7 +409,7 @@ def fig_d():
         "过期 WAIT 剔除；动作验证失败 → GuardedEDF 回退（n_fallback 审计）", "white", fs=7.6, parent=p3)
 
     # 右上：五步闭包
-    p4 = lane(ax, 0.50, 0.45, 0.47, 0.485, "同刻闭包（§4.4，显式循环，不依赖回调顺序）", C_CQ, fs=9.8)
+    p4 = lane(ax, 0.50, 0.45, 0.47, 0.485, "同一时刻的处理顺序（显式循环，不依赖回调注册顺序）", C_CQ, fs=9.8)
     steps = [
         ("① 积分结算：读取/计算完成、请求到达、带宽变更", 0.055),
         ("② 旧批闭包：按 worker 升序推进依赖已满足的层、提交下层读取", 0.065),
@@ -452,7 +452,7 @@ def fig_e():
         (0.025, 0.155, "CLI\nsim.run --exp X\n--seeds N --procs P", C_CLI),
         (0.215, 0.19, "实验装配 experiments/e*.py\nRunSpec / CqScenario 网格\n× 策略集合 × 种子", C_SHARE),
         (0.44, 0.185, "simrun.run_once / run_case\nCRN trace 缓存（同种子同 trace）\nrun_pool 多进程 spawn", C_SHARE),
-        (0.66, 0.155, "事件内核\nSimPy（v1/v2）｜\nCqEngine（cq）", C_SHARE),
+        (0.66, 0.155, "事件内核\nSimPy（仿真器①②）｜\n自研精确内核（③）", C_SHARE),
         (0.86, 0.115, "Collector /\nsummarize", C_SHARE),
     ]
     y1 = 0.76
