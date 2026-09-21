@@ -203,6 +203,55 @@ def fig2():
     return fig, out
 
 
+def fig3():
+    """Q2 白话版主图：需求 vs 实际 两条线 + B 上限，B=80/B=20 并排。"""
+    import matplotlib
+    matplotlib.use("Agg")
+    import matplotlib.pyplot as plt
+    plt.rcParams["font.sans-serif"] = ["PingFang SC", "Heiti SC", "DejaVu Sans"]
+    plt.rcParams["axes.unicode_minus"] = False
+
+    fig, axes = plt.subplots(1, 2, figsize=(15.5, 6.0), dpi=DPI, sharey=False)
+    t_lo, t_hi = 10.0, 70.0
+    for ax, B, ylim in ((axes[0], 80.0, 120.0), (axes[1], 20.0, 45.0)):
+        log = run_instant("toolagent", "toolagent_trace.jsonl", B, 0.6)
+        seg = [(t0, t1, r, q) for t0, t1, r, q in log
+               if t1 > t_lo and t0 < t_hi]
+        for which, col in (("q", "#DD8452"), ("r", "#4C72B0")):
+            xs, ys = [], []
+            for t0, t1, r, q in seg:
+                v = q if which == "q" else r
+                xs += [t0, t1]
+                ys += [v, v]
+            lab = "想要多快（需求 Σ申请率）" if which == "q" else "实际在传（分配后 Σ速率）"
+            ax.plot(xs, ys, color=col, lw=0.9, label=lab)
+        ax.axhline(B, color="k", ls="--", lw=1.4)
+        ax.text(t_hi - 1.0, B * 1.05, f"带宽上限 B={B:g}", fontsize=10,
+                ha="right")
+        ax.set_ylim(0, ylim)
+        ax.set_xlim(t_lo, t_hi)
+        ax.set_xlabel("仿真时间 (s)——截取 10–70s")
+        ax.grid(alpha=.25)
+    axes[0].set_ylabel("速率 (GB/s)")
+    axes[0].set_title("B=80（管子粗）：实际=想要，峰值 40 多是需求自己的高度；\n"
+                      "想要偶发冲到 200–800 但只持续几毫秒，线性轴上画成细刺",
+                      fontsize=10.5)
+    axes[0].annotate("想要冲高被压回上限\n（毫秒级，图上仅见细刺）",
+                     xy=(31.5, 105), xytext=(38, 105), fontsize=9,
+                     arrowprops=dict(arrowstyle="->", lw=.8))
+    axes[1].set_title("B=20（管子细）：想要>20 的时段，实际被压平在 20——\n"
+                      "蓝色贴着虚线走的段=间歇性过载；平均想要只有 ~8",
+                      fontsize=10.5)
+    axes[1].annotate("蓝色贴住虚线=过载段\n（持续几百毫秒，看得见）",
+                     xy=(20.5, 20.5), xytext=(27, 32), fontsize=9,
+                     arrowprops=dict(arrowstyle="->", lw=.8))
+    axes[0].legend(loc="upper right", fontsize=9)
+    fig.suptitle("同一个负载（ToolAgent OL ρ=0.6，w9，FCFS）：橙色=请求们想读多快，"
+                  "蓝色=存储实际在传多快——蓝色永远不超过黑虚线", fontsize=11.5)
+    out = os.path.join(FIG, "cq_fig_e25q_demand_vs_actual.png")
+    return fig, out
+
+
 if __name__ == "__main__":
     from e25_ts_compare import audit_text_overlap
     import matplotlib
@@ -217,3 +266,4 @@ if __name__ == "__main__":
 
     _save(*fig1())
     _save(*fig2())
+    _save(*fig3())
