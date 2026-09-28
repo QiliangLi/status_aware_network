@@ -199,8 +199,45 @@ def build_forecast_engine(snap: ObservableSnapshot, scn: CqScenario,
         else:
             rr.state = "ACTIVE"
             w.arrival_idx += 1
-    # ACTIVE 批重建
-    flow_map = {f.flow_id: f for f in snap.flows}
+    # ACTIVE 批重建（20260928 修复批/流 id 错配）：
+    # 修复前 est 批用 worker_id+1 作 batch_id，与重注入流携带的真实 batch_id
+    # 错配——流完成后 w.batches.get(f.batch_id) 落空、read_ready 永不回写，
+    # 含在飞读取的推演世界必然 stalled_no_event（首层流同理），E26 全读工况
+    # 下 n_fallback≈100%。修复（仅用公共信息，不破坏信息边界）：
+    # 1) est 批改用真实 batch_id：层 0 流的 submit_s 即批派发时刻，与 worker
+    #    公开 dispatch 事件的 (t, members) 匹配（V 同验）；无流记录的批
+    #    （如 V=0 无读取）用 -(wid+1) 占位；
+    # 2) 已完成流对应的层直接置 read_ready（公共事实：流完成=该层读取完成，
+    #    真实引擎在流完成时已设 read_ready，快照此前丢失这一信息）；
+    # 3) next_batch_id 越过账本中全部真实 id，避免新派发批与重建批撞 id
+    #    （修复前 next_batch_id=0，新批 id 会覆盖重建批）。
+    flows_by_batch: Dict[int, list] = {}
+    for f in snap.flows:
+        flows_by_batch.setdefault(f.batch_id, []).append(f)
+    used_bids: set = set()
+
+    def _real_bid(pw, Vl: float) -> Optional[int]:
+        """从公共账本反查该 worker 当前批的真实 batch_id；查不到返回 None。"""
+        mem = tuple(pw.members)
+        disp_t = None
+        for ev in reversed(pw.events):
+            if len(ev) == 3 and ev[1] == "dispatch" and tuple(ev[2]) == mem:
+                disp_t = float(ev[0])
+                break
+        cands = []
+        for bid, fl in flows_by_batch.items():
+            if bid in used_bids or not fl:
+                continue
+            if abs(float(fl[0].V_gb) - Vl) > 1e-12 * max(1.0, Vl):
+                continue
+            l0 = [f for f in fl if f.layer == 0]
+            if disp_t is not None and l0:
+                if any(abs(float(f.submit_s) - disp_t) <= 1e-9 for f in l0):
+                    cands.append(bid)
+            elif disp_t is None:
+                cands.append(bid)   # 无公开派发事件：仅按 V 匹配（确定性取最小）
+        return min(cands) if cands else None
+
     for pw in snap.workers:
         if not pw.members:
             continue
@@ -208,13 +245,20 @@ def build_forecast_engine(snap: ObservableSnapshot, scn: CqScenario,
                              next(r for r in snap.requests if r.rid == x).u_tokens)
                             for x in pw.members])
         Vl = sum(float(layer_read_gb(w.specs[x], scn.profile)) for x in pw.members)
-        b = BatchRuntime(batch_id=pw.worker_id + 1, members=tuple(pw.members),
+        real_bid = _real_bid(pw, Vl)
+        if real_bid is not None:
+            used_bids.add(real_bid)
+        bid = real_bid if real_bid is not None else -(pw.worker_id + 1)
+        b = BatchRuntime(batch_id=bid, members=tuple(pw.members),
                          worker_id=pw.worker_id, dispatch_s=now, L=w.L)
         b.c_layers = [c_hat for _ in range(w.L)]
         b.V_layers = [Vl for _ in range(w.L)]
         ld = pw.layers_done
         for l in range(ld):
             b.read_ready[l] = 0.0
+        for f in flows_by_batch.get(bid, ()):
+            if f.completed:
+                b.read_ready[f.layer] = 0.0   # 公共事实：该层读取已完成
         if ld > 0:
             rem = max(0.0, c_hat - max(0.0, now - float(pw.cur_layer_start_s or now)))
             prev_z = now + rem if ld - 1 == max(0, ld - 1) else now
@@ -239,6 +283,8 @@ def build_forecast_engine(snap: ObservableSnapshot, scn: CqScenario,
         fl = st.submit(f.flow_id, f.batch_id, f.layer, float(f.submit_s),
                        float(f.V_gb), st.q_max, None)
         fl.remaining_gb = remaining
+    w.next_batch_id = max(
+        [bid for bid in flows_by_batch if bid >= 0], default=-1) + 1
     w.t = now
     w.storage.allocate(now)
     return eng
