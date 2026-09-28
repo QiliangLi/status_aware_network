@@ -211,19 +211,41 @@ def build_forecast_engine(snap: ObservableSnapshot, scn: CqScenario,
     #    真实引擎在流完成时已设 read_ready，快照此前丢失这一信息）；
     # 3) next_batch_id 越过账本中全部真实 id，避免新派发批与重建批撞 id
     #    （修复前 next_batch_id=0，新批 id 会覆盖重建批）。
+    # 性能（同日）：全账本线性扫描改为一次遍历建索引（层0流 (t,V)→bid 与
+    # V→bid），查询 O(命中数)；索引未命中回退原线性扫描，输出严格等价
+    # （E26 规模 3840 请求×8 层账本下线性版每决策 ~0.5s，占 MPC 类 run 的
+    # 四分之一墙钟）。
     flows_by_batch: Dict[int, list] = {}
+    l0_index: Dict[tuple, list] = {}
+    v_index: Dict[float, list] = {}
+    max_bid = -1
     for f in snap.flows:
         flows_by_batch.setdefault(f.batch_id, []).append(f)
+        if f.batch_id > max_bid:
+            max_bid = f.batch_id
+        vf = float(f.V_gb)
+        if f.layer == 0:
+            l0_index.setdefault((float(f.submit_s), vf), []).append(f.batch_id)
+        v_index.setdefault(vf, []).append(f.batch_id)
     used_bids: set = set()
 
-    def _real_bid(pw, Vl: float) -> Optional[int]:
-        """从公共账本反查该 worker 当前批的真实 batch_id；查不到返回 None。"""
+    def _real_bid(pw, Vl: float):
+        """从公共账本反查该 worker 当前批的真实 batch_id；查不到返回 None。
+
+        先走索引（等价快路径），未命中回退逐批线性扫描（与首版语义一致：
+        层 0 流 submit_s 与公开 dispatch 时刻差 ≤1e-9 且 V 匹配，取最小 id）。
+        """
         mem = tuple(pw.members)
         disp_t = None
         for ev in reversed(pw.events):
             if len(ev) == 3 and ev[1] == "dispatch" and tuple(ev[2]) == mem:
                 disp_t = float(ev[0])
                 break
+        if disp_t is not None:
+            cands = [b for b in l0_index.get((disp_t, Vl), ())
+                     if b not in used_bids]
+            if cands:
+                return min(cands)
         cands = []
         for bid, fl in flows_by_batch.items():
             if bid in used_bids or not fl:
@@ -283,8 +305,7 @@ def build_forecast_engine(snap: ObservableSnapshot, scn: CqScenario,
         fl = st.submit(f.flow_id, f.batch_id, f.layer, float(f.submit_s),
                        float(f.V_gb), st.q_max, None)
         fl.remaining_gb = remaining
-    w.next_batch_id = max(
-        [bid for bid in flows_by_batch if bid >= 0], default=-1) + 1
+    w.next_batch_id = max(max_bid, -1) + 1
     w.t = now
     w.storage.allocate(now)
     return eng
