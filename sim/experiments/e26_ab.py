@@ -73,6 +73,15 @@ MPC_LIKE = ("cq_local", "cq_mpc")
 POLICY_RUNS = (("cq_fcfs", None), ("cq_edf", None),
                ("cq_local", "S"), ("cq_local", "T"),
                ("cq_mpc", "S"), ("cq_mpc", "T"))
+# 策略集开关（E26_POLICIES）：full=大纲 6 run；s4=θ=S 四策略（fcfs/edf/
+# local_S/mpc_S，验收判据全为 θ=S 口径）；simple=仅基线。20260928 全量
+# 因 8 核机器墙钟约束按 s4 执行（结果文档局限披露），默认保持 full。
+_POLICY_SETS = {
+    "full": POLICY_RUNS,
+    "s4": (("cq_fcfs", None), ("cq_edf", None),
+           ("cq_local", "S"), ("cq_mpc", "S")),
+    "simple": (("cq_fcfs", None), ("cq_edf", None)),
+}
 SMOKE_CELL = ("D1_r0.9", 8)          # 大纲 §8：D1/λ160/α8 ×6 策略
 K_BUCKETS = 200
 
@@ -283,16 +292,18 @@ def _save_intervals(path: str, interval_log):
 
 
 def run_one_cell(level_tag: str, alpha: int, rep: int, d: str,
-                 specs: List[RequestSpec], mpc_events: int) -> List[dict]:
-    """跑一个（格点×α×seed）的全部 6 策略；返回记录列表。"""
+                 specs: List[RequestSpec], mpc_events: int,
+                 policy_set=None) -> List[dict]:
+    """跑一个（格点×α×seed）的策略集；返回记录列表。"""
     tag = cell_tag(level_tag, alpha)
+    policy_set = policy_set if policy_set is not None else POLICY_RUNS
     scn = e26_scenario(alpha)
     c_ref = float(np.median([float(s.T0_s) for s in specs]))
     cid = f"{tag}|s{rep}"
     os.makedirs(os.path.join(d, cid), exist_ok=True)
     anchor = None
     records = []
-    for pid, theta in POLICY_RUNS:
+    for pid, theta in policy_set:
         if pid in MPC_LIKE:
             pol = MPCPolicy(pid=pid, local=(pid == "cq_local"), H=1,
                             theta=theta, c_ref=c_ref, budget_s=MPC_BUDGET_S,
@@ -413,17 +424,20 @@ def main(seeds, procs=None, duration=None, stage="smoke",
                     picked += [c for c in cells if cell_tag(c[0], c[3]) == ent]
             cells = picked
     part_path = os.path.join(d, f"records_part_{shard}.json")
+    policy_set = _POLICY_SETS[os.environ.get("E26_POLICIES", "full")]
     records = json.load(open(part_path, encoding="utf-8")) if os.path.exists(part_path) else []
     done = {(r["cell"], r["policy"], r.get("theta"), r["rep"]) for r in records}
     print_progress(f"E26 {stage}: {len(cells)} cells, mpc_events={mpc_events}, "
-                   f"shard={shard}, 已完成 run={len(records)}")
+                   f"shard={shard}, policies={os.environ.get('E26_POLICIES', 'full')}, "
+                   f"已完成 run={len(records)}")
     for cell in cells:
         tag, mode, param, alpha, rep, seed = cell
         if any((cell_tag(tag, alpha), pid, th, rep) in done
-               for pid, th in POLICY_RUNS):
+               for pid, th in policy_set):
             continue    # 续跑
         specs = build_specs(cell)
-        recs = run_one_cell(tag, alpha, rep, d, specs, mpc_events)
+        recs = run_one_cell(tag, alpha, rep, d, specs, mpc_events,
+                            policy_set=policy_set)
         records.extend(recs)
         save_json(part_path, records)
     print_progress(f"E26 {stage} done -> {part_path} ({len(records)} 记录)")
