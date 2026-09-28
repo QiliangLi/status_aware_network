@@ -52,6 +52,7 @@ _CQ_MODULES = {
     "e23": ("e23_trace", "main"),
     "e24": ("e24_robustness", "main"),
     "e25": ("e25_factor", "main"),
+    "e26": ("e26_ab", "main"),
 }
 
 
