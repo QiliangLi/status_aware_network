@@ -432,14 +432,18 @@ def main(seeds, procs=None, duration=None, stage="smoke",
                    f"已完成 run={len(records)}")
     for cell in cells:
         tag, mode, param, alpha, rep, seed = cell
-        if any((cell_tag(tag, alpha), pid, th, rep) in done
-               for pid, th in policy_set):
-            continue    # 续跑
-        specs = build_specs(cell)
-        recs = run_one_cell(tag, alpha, rep, d, specs, mpc_events,
-                            policy_set=policy_set)
-        records.extend(recs)
-        save_json(part_path, records)
+        specs = None
+        for pid, theta in policy_set:
+            if (cell_tag(tag, alpha), pid, theta, rep) in done:
+                continue    # 逐 run 续跑（增量落盘，中断最多丢当前 run）
+            if specs is None:
+                specs = build_specs(cell)
+            recs = run_one_cell(tag, alpha, rep, d, specs, mpc_events,
+                                policy_set=[(pid, theta)])
+            records.extend(recs)
+            save_json(part_path, records)     # 每个 run 完成立即落盘
+            done.update((r["cell"], r["policy"], r.get("theta"), r["rep"])
+                        for r in recs)
     print_progress(f"E26 {stage} done -> {part_path} ({len(records)} 记录)")
     return {"n_records": len(records)}
 
