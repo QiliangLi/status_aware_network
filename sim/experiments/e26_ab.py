@@ -56,11 +56,17 @@ Q_MAX_GBPS = 200.0
 B_REF_GBPS = 120.0        # T0 参考带宽 = 本场景带宽（单带宽实验）
 N_A, N_B = 1280, 2560
 N_TOTAL = N_A + N_B
+# 规模缩放（20260929 用户决策：总请求降到 ~240 缩短端到端）：E26_TOTAL=240
+# → 80A+160B（配比与每层 c/V/T0 不变；D1 λ 档不变=到达强度语义不变；
+# D2 每轮仍 96 条，轮数=total//96）。默认 3840=大纲原规模。
+SCALE_TOTAL = int(os.environ.get("E26_TOTAL", str(N_TOTAL)))
 A_CLASS = (42883, 256)    # (h_tokens, u_tokens)
 B_CLASS = (9399, 4096)
 C_A_S = F("0.00602")      # 用户给定每层计算（秒）
 C_B_S = F("0.02859")
 LAMBDA_SAT = 178.0        # E[读取]/条 = 0.6737 GB → 120/0.6737
+
+D2_ROUNDS = max(1, SCALE_TOTAL // 96)
 
 D1_LEVELS = (("D1_r0.5", 89.0), ("D1_r0.7", 125.0), ("D1_r0.9", 160.0),
              ("D1_r1.0", 178.0), ("D1_r1.1", 196.0))
@@ -142,25 +148,28 @@ def _specs_from(classes: Sequence[str], arrivals, alpha: int) -> List[RequestSpe
 
 
 def d1_specs(lam: float, seed: int, alpha: int) -> List[RequestSpec]:
-    """分批持续到达：全局泊松 + 固定配比多重集的随机置换（总量精确 1280A+2560B）。
+    """分批持续到达：全局泊松 + 固定配比多重集的随机置换（总量精确 1:2）。
 
     seed=格点基号×4+rep（模块常量），同格点内全策略共享（CRN）。
+    总量=SCALE_TOTAL（默认 3840；E26_TOTAL 可缩放）。
     """
+    n_total = SCALE_TOTAL
+    n_a = n_total // 3
     rng = np.random.Generator(np.random.PCG64(int(seed)))
-    gaps = rng.exponential(scale=1.0 / lam, size=N_TOTAL)
+    gaps = rng.exponential(scale=1.0 / lam, size=n_total)
     arrivals = np.cumsum(gaps)
-    classes = np.empty(N_TOTAL, dtype="<U1")
-    perm = rng.permutation(N_TOTAL)
-    classes[perm[:N_A]] = "A"
-    classes[perm[N_A:]] = "B"
+    classes = np.empty(n_total, dtype="<U1")
+    perm = rng.permutation(n_total)
+    classes[perm[:n_a]] = "A"
+    classes[perm[n_a:]] = "B"
     return _specs_from(list(classes), arrivals, alpha)
 
 
 def d2_specs(t_burst: float, alpha: int) -> List[RequestSpec]:
-    """突发轮次：40 轮 × 96 条（32A+64B，轮内 (A,B,B)×32 交错），确定性。"""
+    """突发轮次：D2_ROUNDS 轮 × 96 条（32A+64B，轮内 (A,B,B)×32 交错），确定性。"""
     order = ["A", "B", "B"] * 32
     classes, arrivals = [], []
-    for r in range(40):
+    for r in range(D2_ROUNDS):
         arrivals.extend([r * t_burst] * len(order))
         classes.extend(order)
     return _specs_from(classes, arrivals, alpha)
@@ -330,7 +339,8 @@ def run_one_cell(level_tag: str, alpha: int, rep: int, d: str,
         s["wall_s"] = wall
         s.update({"policy": pid, "theta": theta, "cell": tag, "level": level_tag,
                   "mode": level_tag[:2], "alpha": alpha, "rep": rep,
-                  "n_req": len(specs), "makespan_s": float(eng.w.t),
+                  "n_req": len(specs), "n_total": SCALE_TOTAL,
+                  "makespan_s": float(eng.w.t),
                   "scenario": scn.scenario_name,
                   "mpc_events": mpc_events if pid in MPC_LIKE else None})
         # ts 聚合（守恒校验；失败记 invalid_ts 不静默）
@@ -401,8 +411,13 @@ def load_records(d: str) -> List[dict]:
 
 def main(seeds, procs=None, duration=None, stage="smoke",
          mpc_events=None, **kw):
-    """入口。stage=smoke：大纲 §8 冒烟格点；stage=eval：全矩阵（分片见模块 docstring）。"""
-    d = out_dir(stage, "e26")
+    """入口。stage=smoke：大纲 §8 冒烟格点；stage=eval：全矩阵（分片见模块 docstring）。
+
+    规模：E26_TOTAL 环境变量（默认 3840=大纲原规模；20260929 用户决策缩放
+    240）。非默认规模的结果目录为 e26n<total>，与原规模数据隔离。
+    """
+    exp_dir = "e26" if SCALE_TOTAL == N_TOTAL else f"e26n{SCALE_TOTAL}"
+    d = out_dir(stage, exp_dir)
     if mpc_events is None:
         mpc_events = int(os.environ.get("E26_MPC_EVENTS", 20000))
     only = [x for x in os.environ.get("E26_ONLY", "").split(",") if x]

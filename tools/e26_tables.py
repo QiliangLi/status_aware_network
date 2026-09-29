@@ -36,6 +36,12 @@ def load_records():
     for r in recs:
         if r.get("slo_rate") is None and r.get("n_cohort"):
             r["slo_rate"] = r["slo_success"] / r["n_cohort"]
+        # 分类指标嵌套 dict → 扁平键（A_ttft_mean 等）
+        for cls in ("A", "B"):
+            d = r.get(cls)
+            if isinstance(d, dict):
+                for k in ("ttft_mean", "ttft_p95", "slo_rate", "n"):
+                    r[f"{cls}_{k}"] = d.get(k)
     return recs
 
 
@@ -51,7 +57,9 @@ def median_table(recs):
     out = {}
     for k, rs in by.items():
         m = {"n_reps": len(rs), "alpha": rs[0]["alpha"], "mode": rs[0]["mode"],
-             "level": rs[0]["level"], "mpc_events": rs[0].get("mpc_events")}
+             "level": rs[0]["level"],
+             "mpc_events": next((r.get("mpc_events") for r in rs
+                                 if r.get("mpc_events")), None)}
         for key in KEYS_MED:
             vals = [r[key] for r in rs
                     if r.get(key) is not None and r.get("invalid_ts") is None]
