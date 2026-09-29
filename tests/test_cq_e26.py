@@ -158,3 +158,33 @@ def test_u6_forecast_id_fix_mpc_scores():
     assert eng.status == "done"
     assert all(rr.F_s is not None for rr in eng.w.requests.values())
     assert pol.n_scored > 0, "修复前此断言失败（推演世界卡死、零评分）"
+
+
+# ---------------------------------------------------------------------------
+# U7 搜索健康监测（20260929）：计数器存在性/一致性/健康口径
+# ---------------------------------------------------------------------------
+
+def test_u7_mpc_health_counters():
+    """mpc/local 必须暴露可审计计数：n_decides≥n_searched≥1、零回退、
+    偏离≤搜索、health() 比率落在 [0,1]。这是防止 20260928 型静默退化
+    再发生的常设监测（tools/cq_mpc_health.py 消费同一组字段）。"""
+    order = (["A", "B", "B"] * 8)
+    from sim.cq.types import RequestSpec
+    from sim.cq.profile import make_T0
+    specs = [RequestSpec(i, 0.0, *(A_CLASS if cls == "A" else B_CLASS), cls,
+                         F(1), F(1)) for i, cls in enumerate(order)]
+    T0 = make_T0(specs, E26_PROFILE, F(120), F(200))
+    specs = [RequestSpec(s.rid, 0.0, s.h_tokens, s.u_tokens, s.class_id,
+                         T0[s.rid], float(T0[s.rid]) * 8.0) for s in specs]
+    for pid, local in (("cq_mpc", False), ("cq_local", True)):
+        pol = MPCPolicy(pid=pid, local=local, H=1, theta="S", c_ref=0.2,
+                        budget_s=3600.0, max_events=20000)
+        eng = run_case(e26_scenario(8), specs, pol)
+        assert eng.status == "done"
+        h = pol.health()
+        assert h["n_decides"] >= h["n_searched"] >= 1, pid
+        assert h["n_fallback"] == 0, (pid, "修复后全读工况不允许推演失败")
+        assert 0 <= h["n_deviate"] <= h["n_searched"], pid
+        for k in ("search_ratio", "fallback_ratio", "deviate_ratio"):
+            v = h[k]
+            assert v is None or 0.0 <= v <= 1.0, (pid, k, v)

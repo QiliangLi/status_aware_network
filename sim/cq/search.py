@@ -435,13 +435,34 @@ class MPCPolicy:
         self.n_depth_clamped = 0   # H>1 被按 H=1 执行的决策数（审计用）
         self.n_deviate = 0         # 最终选择非基础动作的决策数（20260929
                                     # E26 审计：区分"搜索跑了"与"改变了动作"）
+        self.n_decides = 0         # decide() 调用总数（健康监测分母）
+        self.n_searched = 0        # 实际发起基础推演的决策数（早期退出不计）
+
+    def health(self) -> dict:
+        """搜索健康监测（20260929）：推演退化/零偏离/零搜索一眼可见。
+
+        fallback_ratio 高 → 推演引擎有问题（如 20260928 批/流 id 错配，
+        修复前该值≈1 且静默退化为 π）；deviate_ratio=0 → 搜索正常但从未
+        改变动作（可能是目标/结构锚定，也可能工况无空间）；search_ratio
+        低 → 多数决策点早退（无空闲 worker 或队列空）。
+        """
+        sr = self.n_searched / self.n_decides if self.n_decides else None
+        fr = self.n_fallback / self.n_searched if self.n_searched else None
+        dr = self.n_deviate / self.n_searched if self.n_searched else None
+        return {"n_decides": self.n_decides, "n_searched": self.n_searched,
+                "n_scored": self.n_scored, "n_fallback": self.n_fallback,
+                "n_deviate": self.n_deviate,
+                "search_ratio": sr, "fallback_ratio": fr,
+                "deviate_ratio": dr}
 
     def decide(self, snap, scn) -> JointAction:
         t0 = _time.perf_counter()
+        self.n_decides += 1
         budget = [self.max_events]
         base = self.pi.decide(snap, scn)
         if not snap.idle_workers or not snap.queued:
             return base
+        self.n_searched += 1
         # 决策点原始副本：基础排空与每个候选都从"当前状态"出发。
         # 20260917 审计修复：此前候选从已排空的 base 副本克隆，DISPATCH 验证
         # 必然失败、全体候选得分==基础动作，搜索从未真正分支。

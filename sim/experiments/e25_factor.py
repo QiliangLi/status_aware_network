@@ -213,6 +213,12 @@ def run_cell_specs(cell: dict, specs, d: str, records: list, progress: dict,
         s["ctrl_p50_ms"] = 1000.0 * ctrl[len(ctrl) // 2]
         s["ctrl_p95_ms"] = 1000.0 * ctrl[max(0, int(0.95 * len(ctrl)) - 1)]
         s["n_scored"] = getattr(pol, "n_scored", None)
+        # 20260929 修正：n_fallback 此前从未用策略计数器覆盖，存档里一直是
+        # summarize() 的引擎同名计数（恒 0），掩盖了推演退化（E26 §2.4）。
+        s["n_fallback"] = getattr(pol, "n_fallback", None)
+        s["n_deviate"] = getattr(pol, "n_deviate", None)
+        s["n_decides"] = getattr(pol, "n_decides", None)
+        s["n_searched"] = getattr(pol, "n_searched", None)
         s["n_overrun"] = getattr(pol, "n_overrun", None)
         s["mpc_budget_s"] = (MPC_BUDGET_S if pid in MPC_LIKE else None)
         s["code_rev"] = "mpc-fixed-20260917"

@@ -336,6 +336,9 @@ def run_one_cell(level_tag: str, alpha: int, rep: int, d: str,
         s["n_scored"] = getattr(pol, "n_scored", None)
         s["n_fallback"] = getattr(pol, "n_fallback", None)
         s["n_overrun"] = getattr(pol, "n_overrun", None)
+        s["n_deviate"] = getattr(pol, "n_deviate", None)
+        s["n_decides"] = getattr(pol, "n_decides", None)
+        s["n_searched"] = getattr(pol, "n_searched", None)
         s["wall_s"] = wall
         s.update({"policy": pid, "theta": theta, "cell": tag, "level": level_tag,
                   "mode": level_tag[:2], "alpha": alpha, "rep": rep,
