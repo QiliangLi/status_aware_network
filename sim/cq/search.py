@@ -19,7 +19,7 @@ from .config import CqScenario
 from .engine import CqEngine
 from .storage import StorageSim
 from .observable import Observable, ObservableSnapshot
-from .policies import GuardedEDF, _specs_of, aged_anchor
+from .policies import GuardedEDF, GuardedEDFBW, bw_demand, _specs_of, aged_anchor
 from .profile import is_feasible, layer_read_gb
 from .types import Action, BatchRuntime, JointAction, RequestSpec
 
@@ -415,7 +415,8 @@ class MPCPolicy:
                  H: int = 2, beam_width: int = 8, J_width: int = 16,
                  K_req: int = 32, K_batch: int = 24,
                  budget_s: float = 0.002, max_events: int = 20000,
-                 theta: str = "S", gate: float = 0.0, c_ref: float = 0.0):
+                 theta: str = "S", gate: float = 0.0, c_ref: float = 0.0,
+                 base: str = "edf", composer: bool = False):
         self.pid = pid
         self.local = local
         self.H = H
@@ -428,7 +429,15 @@ class MPCPolicy:
         self.theta = theta
         self.gate = gate
         self.c_ref = c_ref or 0.01
-        self.pi = GuardedEDF()
+        # mpc-v2（修正方案 20260929 §4.3）：base="bw_edf" 换 GuardedEDF-BW
+        # 延续/兜底（治信用分配，兜底即错峰）；composer=True 在联合点注入
+        # 资源组合候选（治枚举截断）。默认 (edf, False)=旧口径逐位不变，
+        # 保证既有金标与实验口径可回归（设计文档 §5）。
+        self.base = base
+        self.composer = composer
+        self._d_hist = {}          # 累计 d 分布（rid 去重，阈值稳定口径）
+        self.pi = (GuardedEDFBW(hist=self._d_hist) if base == "bw_edf"
+                   else GuardedEDF())
         self.n_fallback = 0
         self.n_overrun = 0
         self.n_scored = 0          # 成功评分的候选动作数（审计用）
@@ -437,6 +446,7 @@ class MPCPolicy:
                                     # E26 审计：区分"搜索跑了"与"改变了动作"）
         self.n_decides = 0         # decide() 调用总数（健康监测分母）
         self.n_searched = 0        # 实际发起基础推演的决策数（早期退出不计）
+        self.n_tie = 0             # 候选与基础动作主目标打平次数（M3 观测）
 
     def health(self) -> dict:
         """搜索健康监测（20260929）：推演退化/零偏离/零搜索一眼可见。
@@ -451,7 +461,7 @@ class MPCPolicy:
         dr = self.n_deviate / self.n_searched if self.n_searched else None
         return {"n_decides": self.n_decides, "n_searched": self.n_searched,
                 "n_scored": self.n_scored, "n_fallback": self.n_fallback,
-                "n_deviate": self.n_deviate,
+                "n_deviate": self.n_deviate, "n_tie": self.n_tie,
                 "search_ratio": sr, "fallback_ratio": fr,
                 "deviate_ratio": dr}
 
@@ -497,6 +507,8 @@ class MPCPolicy:
             if sc is None:
                 continue
             self.n_scored += 1
+            if sc == base_score:
+                self.n_tie += 1
             if sc < best[0]:
                 best = (sc, act)
         # gate：主目标须严格改善（默认 gate=0）
@@ -514,9 +526,15 @@ class MPCPolicy:
         return e
 
     def _joint_actions(self, node, node_snap, scn, batches, idle):
-        """逐 worker 扩展：DISPATCH 候选 + WAIT；保留 J_width 个部分动作。"""
+        """逐 worker 扩展：DISPATCH 候选 + WAIT；保留 J_width 个部分动作。
+
+        mpc-v2（composer=True）：入口先注入资源组合形联合候选（_compose_bw，
+        排评分队列最前——深积压时基础推演吃预算，组合候选须优先被评），
+        再接标准前缀枚举，按键去重。
+        """
         if not idle:
             return []
+        composed = self._compose_bw(node_snap, idle) if self.composer else []
         wait_opts = self._wait_options(node_snap, scn)
         partial = [([], 0)]
         used_rids: set = set()
@@ -546,7 +564,51 @@ class MPCPolicy:
         if wait_opts:
             out.append(JointAction(tuple(Action("WAIT", wid, (), min(wait_opts))
                                          for wid in idle)))
-        return out[: max(self.J_width, 8)]
+        out = composed + out
+        seen, dedup = set(), []
+        for a in out:
+            k = a.key()
+            if k in seen:
+                continue
+            seen.add(k)
+            dedup.append(a)
+        return dedup[:max(self.J_width, 8) + len(composed)]
+
+    def _compose_bw(self, node_snap, idle):
+        """资源组合候选（修正方案 §4.2）：期限序贪心装包，重需求边际计费。
+
+        只用公开量（bw_demand：d=V/c、d_heavy=P75、C=⌊b_ref/d_heavy⌋）；
+        配额网格 {C-1, C, 2C}；未获派发的 worker WAIT 对齐下一流完成。
+        类无关——mooncake 连续 d 分布同样适用。
+        """
+        d, d_heavy, C, heavy_run, wake = bw_demand(node_snap, self._d_hist)
+        if d_heavy <= 0:
+            return []
+        grid = sorted({max(1, C - 1), C, 2 * C})
+        order = sorted((r for r in node_snap.requests
+                        if r.rid in node_snap.queued),
+                       key=lambda r: (r.deadline_s, r.arrival_s, r.rid))
+        out = []
+        for cap in grid:
+            acts, used, acc = [], set(), heavy_run
+            for wid in sorted(idle):
+                pick = None
+                for r in order:
+                    if r.rid in used:
+                        continue
+                    if d[r.rid] >= d_heavy and acc >= cap:
+                        continue
+                    pick = r.rid
+                    break
+                if pick is None:
+                    acts.append(Action("WAIT", wid, (), wake))
+                else:
+                    acts.append(Action("DISPATCH", wid, (pick,)))
+                    used.add(pick)
+                    if d[pick] >= d_heavy:
+                        acc += 1
+            out.append(JointAction(tuple(acts)))
+        return out
 
     def _wait_options(self, snap, scn):
         now = float(snap.now)

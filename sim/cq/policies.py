@@ -216,6 +216,101 @@ class GuardedEDF(SimplePolicy):
         super().__init__("cq_edf#pi", lambda r, s: (r.deadline_s, r.arrival_s, r.rid))
 
 
+def bw_demand(snap, hist: dict = None):
+    """带宽需求口径（MPC 修正方案 §4.1，只用公开信息）。
+
+    d_i = V_i/c_i（V=κh、c 按预测画像公式浮点重算——与 c_hat 同式同参，
+    避开 Fraction 热路径）；d_heavy = d 分布的 P75（最近秩）。**阈值口径
+    （20260930 T1 修正）**：若给出 hist（按 rid 去重的累计 d 表——请求
+    完成后退出"已到达"集合会让 P75 漂移、C 在 4↔89 震荡），则用 hist 的
+    分布；hist 由策略实例持有，est 世界复用同一实例，确定性保持。
+    C = ⌊b_ref/d_heavy⌋ 为重流并发上限。返回 (d, d_heavy, C, 在跑重批数,
+    WAIT 唤醒时刻)。轻流恒不计入配额——20260929 朴素 ΣV/c 试点证伪的
+    修正：聚合只对重流计费。
+    """
+    prof = snap._profile_cfg
+    t_l = float(prof.t_launch_s)
+    a_s, b_s = float(prof.a_s_per_token), float(prof.b_s_per_pair)
+    n_sat = prof.N_sat
+    d = {}
+    for r in snap.requests:
+        u = r.u_tokens
+        h = r.h_tokens
+        eta = 1.0 if u >= n_sat else max(float(prof.eta_floor), u / n_sat)
+        c = t_l + a_s * u / eta + b_s * (u * h + u * (u + 1) / 2)
+        v = float(prof.kappa_gb_per_token_layer) * h
+        d[r.rid] = (v / c) if c > 0 else 0.0
+    if hist is not None:
+        hist.update(d)
+        vals = sorted(hist.values())
+    else:
+        vals = sorted(d.values())
+    d_heavy = vals[int(0.75 * (len(vals) - 1))] if vals else 0.0
+    C = max(1, int(float(snap.b_ref) / d_heavy)) if d_heavy > 0 else 1 << 30
+    heavy_run = sum(1 for pw in snap.workers
+                    if pw.members and any(d.get(x, 0.0) >= d_heavy
+                                          for x in pw.members))
+    # WAIT 唤醒：对齐最早在跑流的预计完成（试点教训：固定短间隔会空转）
+    now = float(snap.now)
+    bw = max(1e-6, float(snap.est_bw()))
+    wake = None
+    for f in snap.flows:
+        if f.completed:
+            continue
+        served = f.served_reported_gb if f.served_reported_gb is not None else 0.0
+        rem = max(0.0, float(f.V_gb) - float(served))
+        if rem <= 0:
+            continue
+        t = now + rem / bw
+        wake = t if wake is None else min(wake, t)
+    if wake is None:
+        wake = now + 0.02
+    wake = now + min(0.2, max(0.005, wake - now))
+    return d, d_heavy, C, heavy_run, wake
+
+
+class GuardedEDFBW(SimplePolicy):
+    """GuardedEDF-BW（MPC 修正方案 M2，设计文档 20260929 §4.1）。
+
+    期限序派发 + 重需求并发上限（经 bw_demand 口径）：在跑重批 < C 才再派
+    重请求，轻请求恒可派；老化锚点豁免配额；配额满时空闲 worker WAIT 至
+    最早在跑流完成。作为 MPC 的新基础/延续策略：兜底即错峰。"""
+
+    def __init__(self, hist: dict = None):
+        super().__init__("cq_edf#bw", lambda r, s: (r.deadline_s, r.arrival_s, r.rid))
+        self._hist = hist if hist is not None else {}
+
+    def decide(self, snap, scn) -> JointAction:
+        d, d_heavy, C, heavy_run, wake = bw_demand(snap, self._hist)
+        anchors = self._aged_anchors(snap, scn)
+        order = sorted((r for r in snap.requests if r.rid in snap.queued),
+                       key=lambda r: (r.deadline_s, r.arrival_s, r.rid))
+        acts, used = [], set()
+        acc = heavy_run
+        for wid in sorted(snap.idle_workers):
+            pick = None
+            for a in anchors:                      # 老化豁免：锚点无视配额
+                if a in snap.queued and a not in used:
+                    pick = a
+                    break
+            if pick is None:
+                for r in order:
+                    if r.rid in used:
+                        continue
+                    if d[r.rid] >= d_heavy and acc >= C:
+                        continue
+                    pick = r.rid
+                    break
+            if pick is None:
+                acts.append(Action("WAIT", wid, (), wake))
+                continue
+            acts.append(Action("DISPATCH", wid, (pick,)))
+            used.add(pick)
+            if d[pick] >= d_heavy:
+                acc += 1
+        return JointAction(tuple(acts))
+
+
 SIMPLE_POLICIES = {
     "cq_fcfs": make_fcfs,
     "cq_lpm": make_lpm,

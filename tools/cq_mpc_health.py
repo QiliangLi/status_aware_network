@@ -75,7 +75,8 @@ def main():
         if not os.path.isdir(root):
             continue
         recs = [r for r in load_records(root)
-                if r.get("policy") in ("cq_mpc", "cq_local")]
+                if r.get("policy") in ("cq_mpc", "cq_local")
+                or r.get("pid") in ("cq_mpc", "cq_local")]
         if not recs:
             print(f"== {root}: 无 mpc/local 记录")
             continue
