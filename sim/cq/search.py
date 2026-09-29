@@ -433,6 +433,8 @@ class MPCPolicy:
         self.n_overrun = 0
         self.n_scored = 0          # 成功评分的候选动作数（审计用）
         self.n_depth_clamped = 0   # H>1 被按 H=1 执行的决策数（审计用）
+        self.n_deviate = 0         # 最终选择非基础动作的决策数（20260929
+                                    # E26 审计：区分"搜索跑了"与"改变了动作"）
 
     def decide(self, snap, scn) -> JointAction:
         t0 = _time.perf_counter()
@@ -478,6 +480,7 @@ class MPCPolicy:
                 best = (sc, act)
         # gate：主目标须严格改善（默认 gate=0）
         if best[1] is not base and best[0][0] < base_score[0] - self.gate:
+            self.n_deviate += 1
             return best[1]
         return base
 
