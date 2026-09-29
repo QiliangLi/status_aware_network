@@ -18,7 +18,9 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
 REPO = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 STAGE = os.environ.get("E26_STAGE", "eval")
-ROOT = os.path.join(REPO, "results", "cq", STAGE, "e26")
+ROOT = os.environ.get(
+    "E26_ROOT") or os.path.join(REPO, "results", "cq", STAGE, "e26")
+# 默认=3840 原规模；E26_ROOT=results/cq/eval/e26n240 指向 240 缩放规模
 FIG_DIR = os.path.join(REPO, "docs", "figures")
 DPI = 125
 B_GBPS = 120.0
@@ -93,9 +95,10 @@ def build_figure(plt, cell: str, rep: int, zoom_frac: float = 0.25,
                  title_extra: str = ""):
     arrs = [(label, load_intervals(cell, rep, pid, suf))
             for pid, suf, label in ROWS]
-    if any(a is None for _l, a in arrs):
-        print(f"skip {cell} s{rep}: 缺 intervals "
-              f"{[l for l, a in arrs if a is None]}")
+    missing = [l for l, a in arrs if a is None]
+    arrs = [(l, a) for l, a in arrs if a is not None]
+    if not arrs:
+        print(f"skip {cell} s{rep}: 无 intervals 数据")
         return None, None
     t_hi = max(float(a[-1, 1]) for _l, a in arrs)
     zoom_t0 = t_hi * zoom_frac

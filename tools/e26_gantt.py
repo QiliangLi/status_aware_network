@@ -20,7 +20,9 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
 REPO = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 STAGE = os.environ.get("E26_STAGE", "eval")
-ROOT = os.path.join(REPO, "results", "cq", STAGE, "e26")
+ROOT = os.environ.get(
+    "E26_ROOT") or os.path.join(REPO, "results", "cq", STAGE, "e26")
+# 默认=3840 原规模；E26_ROOT=results/cq/eval/e26n240 指向 240 缩放规模
 FIG_DIR = os.path.join(REPO, "docs", "figures")
 DPI = 125
 
@@ -86,9 +88,10 @@ def draw_row(ax, g, t_max: float):
 
 def build_figure(plt, cell: str, rep: int, title_extra: str = ""):
     gs_ = [(label, load_gantt(cell, rep, pid, suf)) for pid, suf, label in ROWS]
-    if any(g is None for _l, g in gs_):
-        missing = [l for l, g in gs_ if g is None]
-        print(f"skip {cell} s{rep}: 缺 {missing}")
+    missing = [l for l, g in gs_ if g is None]
+    gs_ = [(l, g) for l, g in gs_ if g is not None]
+    if not gs_:
+        print(f"skip {cell} s{rep}: 无任何甘特数据")
         return None, None
     t_max = max(max(
         (len(g["buckets"]) - 1) * g["meta"]["T_anchor_s"] / g["meta"]["K"]
