@@ -146,7 +146,8 @@ def main():
         fig, stats = build_figure(plt, cell, rep)
         if fig is None:
             continue
-        out = os.path.join(FIG_DIR, f"cq_fig_e26_bw_{cell}_s{rep}.png")
+        ftag = os.environ.get("E26_FIGTAG", "")
+        out = os.path.join(FIG_DIR, f"cq_fig_e26_bw_{cell}_s{rep}{ftag}.png")
         if audit_only:
             ov = audit_text_overlap(fig)
             print(f"[audit] {cell}_s{rep}: " +

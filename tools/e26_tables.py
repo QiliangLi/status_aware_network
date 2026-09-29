@@ -18,7 +18,8 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
 REPO = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 STAGE = os.environ.get("E26_STAGE", "eval")
-ROOT = os.path.join(REPO, "results", "cq", STAGE, "e26")
+ROOT = os.environ.get(
+    "E26_ROOT") or os.path.join(REPO, "results", "cq", STAGE, "e26")
 
 POL_ORDER = [("cq_fcfs", None), ("cq_edf", None), ("cq_local", "S"),
              ("cq_local", "T"), ("cq_mpc", "S"), ("cq_mpc", "T")]
