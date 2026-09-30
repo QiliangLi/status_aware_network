@@ -250,19 +250,39 @@ def bw_demand(snap, hist: dict = None):
     heavy_run = sum(1 for pw in snap.workers
                     if pw.members and any(d.get(x, 0.0) >= d_heavy
                                           for x in pw.members))
-    # WAIT 唤醒：对齐最早在跑流的预计完成（试点教训：固定短间隔会空转）
+    # WAIT 唤醒：对齐"决策相关事件"——若存在在跑重批，配额空位释放时刻 =
+    # 各重批剩余层数×每层时长（公开：layers_done 与 d 可算 c=V/d）；
+    # 否则对齐最早在跑流完成。20260930 修正：此前对齐任意流完成（常为
+    # B 层读取、毫秒级），配额满时每 5ms 醒一次、推演在 est 世界里同样
+    # 爬行并把 2 万事件预算烧光——仿真时间近乎停滞（三个 run 卡死根因）。
     now = float(snap.now)
     bw = max(1e-6, float(snap.est_bw()))
     wake = None
-    for f in snap.flows:
-        if f.completed:
+    prof_L = prof.L
+    for pw in snap.workers:
+        if not pw.members:
             continue
-        served = f.served_reported_gb if f.served_reported_gb is not None else 0.0
-        rem = max(0.0, float(f.V_gb) - float(served))
-        if rem <= 0:
-            continue
-        t = now + rem / bw
-        wake = t if wake is None else min(wake, t)
+        if any(d.get(x, 0.0) >= d_heavy for x in pw.members):
+            rem_layers = prof_L - pw.layers_done
+            if rem_layers <= 0:
+                continue
+            v = sum(float(prof.kappa_gb_per_token_layer)
+                    * next(r.h_tokens for r in snap.requests if r.rid == x)
+                    for x in pw.members)
+            d_first = d.get(pw.members[0], 0.0)
+            c_each = v / d_first if d_first > 0 else 0.05   # batch=1 精确
+            t = now + rem_layers * c_each
+            wake = t if wake is None else min(wake, t)
+    if wake is None:
+        for f in snap.flows:
+            if f.completed:
+                continue
+            served = f.served_reported_gb if f.served_reported_gb is not None else 0.0
+            rem = max(0.0, float(f.V_gb) - float(served))
+            if rem <= 0:
+                continue
+            t = now + rem / bw
+            wake = t if wake is None else min(wake, t)
     if wake is None:
         wake = now + 0.02
     wake = now + min(0.2, max(0.005, wake - now))

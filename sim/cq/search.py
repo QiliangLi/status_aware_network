@@ -575,39 +575,55 @@ class MPCPolicy:
         return dedup[:max(self.J_width, 8) + len(composed)]
 
     def _compose_bw(self, node_snap, idle):
-        """资源组合候选（修正方案 §4.2）：期限序贪心装包，重需求边际计费。
+        """资源组合候选（修正方案 §4.2；v2.1 扩排序族）：期限序贪心装包，
+        重需求边际计费。
 
-        只用公开量（bw_demand：d=V/c、d_heavy=P75、C=⌊b_ref/d_heavy⌋）；
-        配额网格 {C-1, C, 2C}；未获派发的 worker WAIT 对齐下一流完成。
-        类无关——mooncake 连续 d 分布同样适用。
+        v2.1（20260930 读者质询驱动）：排序族 {期限序, 到达序} × 配额网格
+        {C-1, C, 2C, ∞}——"到达序+无上限"即 FCFS 形状联合动作，补上
+        v2 候选集缺到达序族导致"调度半天不如 FCFS"的缺口（评分器对动作
+        的裁决不变，只是把该形状递到它面前）。只用公开量（bw_demand）；
+        未获派发的 worker WAIT 对齐下一流完成。类无关。
         """
         d, d_heavy, C, heavy_run, wake = bw_demand(node_snap, self._d_hist)
         if d_heavy <= 0:
             return []
-        grid = sorted({max(1, C - 1), C, 2 * C})
-        order = sorted((r for r in node_snap.requests
-                        if r.rid in node_snap.queued),
-                       key=lambda r: (r.deadline_s, r.arrival_s, r.rid))
-        out = []
-        for cap in grid:
-            acts, used, acc = [], set(), heavy_run
-            for wid in sorted(idle):
-                pick = None
-                for r in order:
-                    if r.rid in used:
-                        continue
-                    if d[r.rid] >= d_heavy and acc >= cap:
-                        continue
-                    pick = r.rid
-                    break
-                if pick is None:
-                    acts.append(Action("WAIT", wid, (), wake))
-                else:
-                    acts.append(Action("DISPATCH", wid, (pick,)))
-                    used.add(pick)
-                    if d[pick] >= d_heavy:
-                        acc += 1
-            out.append(JointAction(tuple(acts)))
+        grid = [max(1, C - 1), C, 2 * C, 1 << 30]
+        queued = list(node_snap.queued)
+        orders = {
+            "deadline": sorted(
+                (r for r in node_snap.requests if r.rid in queued),
+                key=lambda r: (r.deadline_s, r.arrival_s, r.rid)),
+            "arrival": sorted(
+                (r for r in node_snap.requests if r.rid in queued),
+                key=lambda r: (r.arrival_s, r.rid)),
+        }
+        out, seen = [], set()
+        for kind in ("deadline", "arrival"):
+            ordered = orders[kind]
+            for cap in grid:
+                acts, used, acc = [], set(), heavy_run
+                for wid in sorted(idle):
+                    pick = None
+                    for r in ordered:
+                        if r.rid in used:
+                            continue
+                        if d[r.rid] >= d_heavy and acc >= cap:
+                            continue
+                        pick = r.rid
+                        break
+                    if pick is None:
+                        acts.append(Action("WAIT", wid, (), wake))
+                    else:
+                        acts.append(Action("DISPATCH", wid, (pick,)))
+                        used.add(pick)
+                        if d[pick] >= d_heavy:
+                            acc += 1
+                ja = JointAction(tuple(acts))
+                k = ja.key()
+                if k in seen:
+                    continue
+                seen.add(k)
+                out.append(ja)
         return out
 
     def _wait_options(self, snap, scn):

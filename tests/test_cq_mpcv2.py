@@ -133,7 +133,7 @@ def test_t2_composer_invariants():
     queued = set(node_snap.queued)
     idle = set(sorted(snap.idle_workers))
     composed = pol._compose_bw(node_snap, sorted(snap.idle_workers))
-    assert 1 <= len(composed) <= 3
+    assert 1 <= len(composed) <= 8        # v2.1：2 排序族 × 4 配额去重后
     for a in composed:
         for x in a.actions:
             if x.kind == "DISPATCH":
@@ -141,14 +141,13 @@ def test_t2_composer_invariants():
                 assert x.worker_id in idle
             else:
                 assert x.wake_at > float(node_snap.now)
-        # 联合动作内重数 ≤ 网格上界 2C
+        # 有 cap 的变体重数受限；∞ 变体（FCFS/EDF 形状）重数可为满额
         n_heavy = sum(1 for x in a.actions if x.kind == "DISPATCH"
                       and d[x.members[0]] >= d_heavy)
-        assert n_heavy <= 2 * C
-    # 组合候选排在评分队列最前
+        assert n_heavy <= max(2 * C, len(queued))
+    # 组合候选排在评分队列最前（逐位对齐 key）
     keys = [a.key() for a in composed]
-    assert acts[:len(keys)] == keys or all(
-        any(a.key() == k for a in acts[:3]) for k in keys)
+    assert [a.key() for a in acts[:len(keys)]] == keys
     # 确定性
     composed2 = pol._compose_bw(node_snap, sorted(snap.idle_workers))
     assert [a.key() for a in composed] == [a.key() for a in composed2]
