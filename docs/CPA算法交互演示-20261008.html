@@ -1,0 +1,442 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>CPA 闭式管道接纳 · 交互演示（E27）</title>
+<style>
+:root {
+  --ink: #1c2333; --ink-soft: #4b5566; --paper: #f7f6f2; --card: #ffffff;
+  --line: #e3e0d8; --blue: #2563eb; --cyan: #0891b2; --orange: #d97706;
+  --red: #dc2626; --green: #15803d; --gray: #9ca3af;
+  --mono: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+}
+* { box-sizing: border-box; margin: 0; padding: 0; }
+html { scroll-behavior: smooth; }
+body {
+  font-family: "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei", sans-serif;
+  color: var(--ink); background: var(--paper); line-height: 1.65;
+}
+nav {
+  position: sticky; top: 0; z-index: 50; display: flex; gap: 4px; align-items: center;
+  background: rgba(247,246,242,.94); backdrop-filter: blur(6px);
+  border-bottom: 1px solid var(--line); padding: 8px 20px; flex-wrap: wrap;
+}
+nav a {
+  text-decoration: none; color: var(--ink-soft); font-size: 13px;
+  padding: 4px 10px; border-radius: 6px;
+}
+nav a:hover, nav a:focus-visible { background: #eceae2; color: var(--ink); }
+nav .brand { font-weight: 700; color: var(--ink); margin-right: 8px; font-size: 14px; }
+nav .brand b { color: var(--blue); }
+main { max-width: 1060px; margin: 0 auto; padding: 24px 20px 80px; }
+section { margin-top: 44px; }
+h2 { font-size: 21px; margin-bottom: 6px; }
+h2 .no { color: var(--blue); font-family: var(--mono); margin-right: 6px; }
+.sub { color: var(--ink-soft); font-size: 13.5px; margin-bottom: 16px; }
+.card {
+  background: var(--card); border: 1px solid var(--line); border-radius: 12px;
+  padding: 18px 20px; margin-top: 14px;
+}
+.kpis { display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 12px; }
+.kpi { background: var(--card); border: 1px solid var(--line); border-radius: 12px; padding: 14px 16px; }
+.kpi .v { font-size: 24px; font-weight: 700; font-family: var(--mono); }
+.kpi .l { font-size: 12.5px; color: var(--ink-soft); }
+.kpi .d { font-size: 12px; color: var(--ink-soft); border-top: 1px dashed var(--line); margin-top: 6px; padding-top: 6px; }
+table { border-collapse: collapse; width: 100%; font-size: 13px; }
+th, td { padding: 6px 8px; border-bottom: 1px solid var(--line); text-align: right; }
+th:first-child, td:first-child { text-align: left; }
+th { color: var(--ink-soft); font-weight: 600; background: #faf9f5; }
+tr.hl td { background: #eef4ff; }
+.controls { display: grid; grid-template-columns: repeat(auto-fit, minmax(210px, 1fr)); gap: 12px 18px; }
+.ctl label { display: flex; justify-content: space-between; font-size: 13px; margin-bottom: 2px; }
+.ctl label output { font-family: var(--mono); color: var(--blue); font-weight: 600; }
+input[type=range] { width: 100%; accent-color: var(--blue); }
+button {
+  font: inherit; background: var(--blue); color: #fff; border: 0; border-radius: 8px;
+  padding: 8px 16px; cursor: pointer;
+}
+button:hover { filter: brightness(1.08); }
+button.ghost { background: #fff; color: var(--blue); border: 1px solid var(--blue); }
+.verdict { display: grid; grid-template-columns: repeat(auto-fit, minmax(230px, 1fr)); gap: 12px; margin-top: 14px; }
+.method { border: 1px solid var(--line); border-radius: 10px; padding: 12px 14px; background: #fff; }
+.method h4 { font-size: 13.5px; margin-bottom: 6px; display: flex; align-items: center; gap: 8px; }
+.method .act { font-family: var(--mono); font-size: 15px; margin: 4px 0; }
+.method .m { font-size: 12px; color: var(--ink-soft); }
+.badge { font-size: 11px; padding: 1px 8px; border-radius: 999px; font-weight: 600; }
+.b-ok { background: #dcfce7; color: var(--green); }
+.b-bad { background: #fee2e2; color: var(--red); }
+.b-mid { background: #fef3c7; color: #92400e; }
+.math { font-family: var(--mono); font-size: 12.5px; background: #faf9f5; border: 1px dashed var(--line);
+  border-radius: 8px; padding: 10px 12px; margin-top: 10px; overflow-x: auto; white-space: pre; }
+.note { font-size: 12.5px; color: var(--ink-soft); margin-top: 10px; }
+.legend { display: flex; gap: 14px; font-size: 12.5px; flex-wrap: wrap; margin: 8px 0; }
+.legend i { display: inline-block; width: 12px; height: 12px; border-radius: 3px; margin-right: 4px; vertical-align: -1px; }
+svg text { font-family: var(--mono); }
+footer { border-top: 1px solid var(--line); margin-top: 60px; padding-top: 14px; color: var(--ink-soft); font-size: 12.5px; }
+@media (max-width: 720px) { .card { padding: 14px; } table { font-size: 12px; } }
+</style>
+</head>
+<body>
+<nav>
+  <span class="brand">CPA · <b>闭式管道接纳</b></span>
+  <a href="#problem">问题</a>
+  <a href="#physics">波物理沙盘</a>
+  <a href="#decision">决策剧场</a>
+  <a href="#gap">与最优差距</a>
+  <a href="#limits">局限</a>
+</nav>
+<main>
+
+<!-- ================= 1 问题 ================= -->
+<section id="problem">
+  <h2><span class="no">01</span>问题：把"暴力枚举 + 全事件推演"换成多项式闭式</h2>
+  <div class="sub">E26c 的 mpc_v2.1 在每个决策点：枚举 ~10–30 个联合动作 → 每个克隆估计世界 → 逐事件排空推演（事件预算 2 万/决策点）→ 词典序打分取优。三因子相乘，无多项式界，且候选集是手工网格。</div>
+  <div class="kpis">
+    <div class="kpi"><div class="v" id="k-speed">0.18<span style="font-size:14px">ms</span></div><div class="l">CPA form 单决策（Ex1 实测）</div><div class="d">MPC v2.1 同决策 164ms —— <b>≈900×</b></div></div>
+    <div class="kpi"><div class="v">k*=16</div><div class="l">闭式存活阈值（引擎逐点验证）</div><div class="d">MPC 候选网格 {4,8,∞} 可达上限 11</div></div>
+    <div class="kpi"><div class="v">O(m²·n·L)</div><div class="l">CPA 整 run 复杂度（多项式）</div><div class="d">rollout 版仅 top-4 真推演复核</div></div>
+    <div class="kpi"><div class="v" id="k-slo">+8.3pp</div><div class="l">mini-D2 240 规模 SLO vs FCFS</div><div class="d">rollout 191/240 vs FCFS 182/240</div></div>
+  </div>
+  <div class="card">
+    <b>算法一句话</b>：把"哪个动作分数高"从<b>试出来</b>（推演）变成<b>算出来</b>（闭式）——
+    对称 cohort 的完成时间有解析式 <span class="mono" style="font-family:var(--mono)">F<sub>p</sub> = p·s + (L−1)·max(c, k·s) + c</span>（s=V/B，引擎对拍 k=1..32 误差 ≤0.1ms），
+    存活阈值 <span style="font-family:var(--mono)">k* = ⌊(dl − t₀ − c)/(L·s)⌋</span>，派遣规则只是这三条已验证物理事实的直接执行。
+  </div>
+</section>
+
+<!-- ================= 2 波物理沙盘 ================= -->
+<section id="physics">
+  <h2><span class="no">02</span>波物理沙盘：一条公式看清"洪水为什么死、错峰为什么活</h2>"
+  <div class="sub">拖动滑杆：k 条 A（重读流，每层 175.65MB / 算 6.02ms）同刻派出，B=120GB/s 共享管道、L=8 层、期限 = 到达 + α·T0。图中每行一条 A：层读（蓝）与层算（深色）交替，红虚线=期限。</div>
+  <div class="card">
+    <div class="controls">
+      <div class="ctl"><label>重流并发 k <output id="o-k">16</output></label><input id="in-k" type="range" min="1" max="32" value="16"></div>
+      <div class="ctl"><label>同刻混入轻流 j（B 类） <output id="o-j">0</output></label><input id="in-j" type="range" min="0" max="32" value="0"></div>
+      <div class="ctl"><label>期限倍数 α（dl = α·T0） <output id="o-a">4.0</output></label><input id="in-a" type="range" min="2" max="8" step="0.5" value="4"></div>
+      <div class="ctl" style="align-self:end"><button class="ghost" id="btn-16">设为 k*=16</button> <button class="ghost" id="btn-32">洪水 k=32</button></div>
+    </div>
+    <div class="legend">
+      <span><i style="background:#3b82f6"></i>层读（管道串行）</span>
+      <span><i style="background:#1e3a8a"></i>层算 c=6.02ms</span>
+      <span><i style="background:#ef4444"></i>超期（死）</span>
+      <span style="color:var(--red)">┄ 期限 dl</span>
+    </div>
+    <svg id="svg-wave" width="100%" height="360" viewBox="0 0 980 360" role="img" aria-label="波物理甘特图"></svg>
+    <div class="math" id="math-wave"></div>
+    <div class="note" id="note-wave"></div>
+  </div>
+</section>
+
+<!-- ================= 3 决策剧场 ================= -->
+<section id="decision">
+  <h2><span class="no">03</span>决策剧场：同一突发，三种算法的裁决</h2>
+  <div class="sub">构造一个决策点（队列里的 A/B 数、空闲 worker、在飞 A 波规模），下方实时计算三方裁决：CPA 规则（闭式）、MPC v2.1（网格 {3,4,8,∞}×{期限,到达序}，同一闭式评分）、穷举最优（全部 (k_A,k_B) 网格）。</div>
+  <div class="card">
+    <div class="controls">
+      <div class="ctl"><label>队列 A 数 <output id="d-oa">32</output></label><input id="d-a" type="range" min="0" max="48" value="32"></div>
+      <div class="ctl"><label>队列 B 数 <output id="d-ob">64</output></label><input id="d-b" type="range" min="0" max="96" value="64"></div>
+      <div class="ctl"><label>空闲 worker <output id="d-om">32</output></label><input id="d-m" type="range" min="1" max="32" value="32"></div>
+      <div class="ctl"><label>在飞 A 波规模 <output id="d-ok">0</output></label><input id="d-k" type="range" min="0" max="16" value="0"></div>
+    </div>
+    <div class="verdict">
+      <div class="method" id="m-cpa"><h4>CPA（闭式规则）<span class="badge" id="b-cpa">…</span></h4><div class="act" id="a-cpa">…</div><div class="m" id="mm-cpa">…</div></div>
+      <div class="method" id="m-mpc"><h4>MPC v2.1（网格枚举+推演）<span class="badge" id="b-mpc">…</span></h4><div class="act" id="a-mpc">…</div><div class="m" id="mm-mpc">…</div></div>
+      <div class="method" id="m-dpo"><h4>穷举最优（全网格）<span class="badge" id="b-dpo">…</span></h4><div class="act" id="a-dpo">…</div><div class="m" id="mm-dpo">…</div></div>
+    </div>
+    <div class="math" id="math-rule"></div>
+    <div class="note">评分：闭式 (预计 miss 数, ΣTTFT)；MPC 的候选=其组合器网格经同一评分的最优（真实 MPC 用推演打分，此处闭式等价复算——Ex2 中两者逐点一致）。穷举最优=DPO 的对称去重全集。</div>
+  </div>
+</section>
+
+<!-- ================= 4 与最优的差距 ================= -->
+<section id="gap">
+  <h2><span class="no">04</span>与理论最优的差距：Ex1–Ex4 实测（引擎真值）</h2>
+  <div class="sub">三层参照：DPO=决策点穷举×真推演；OPT=小规模离线穷举（决策点限批完成/到达）；端到端=同 CRN 整 run。</div>
+  <div class="card">
+    <b>Ex1 裁决对齐（4A+4B，m=8）——五方同判</b>
+    <table>
+      <tr><th>方法</th><th>首波动作</th><th>miss</th><th>单决策墙钟</th></tr>
+      <tr><td>CPA form（纯公式）</td><td>(4A, 4B)</td><td>0</td><td><b>0.18 ms</b></td></tr>
+      <tr><td>CPA rollout（top-4 复核）</td><td>(4A, 4B)</td><td>0</td><td>45.8 ms</td></tr>
+      <tr><td>MPC v2.1（枚举 18 候选×推演）</td><td>(4A, 4B)</td><td>0</td><td>163.9 ms</td></tr>
+      <tr><td>DPO（25 动作全推演）</td><td>(4A, 4B)</td><td>0</td><td>236.8 ms</td></tr>
+      <tr><td>OPT（离线穷举，最优）</td><td>—</td><td><b>0</b>（ΣTTFT=1.1647 与 DPO 同）</td><td>13.3 ms</td></tr>
+    </table>
+    <div class="note">结论：无压力点上五方一致，CPA form 比 MPC 快 ~900×，且与离线最优同分——<b>差距=0</b>。</div>
+  </div>
+  <div class="card">
+    <b>Ex2 生存阈值（k 条 A 突发，α=4）——CPA 与引擎逐点吻合，MPC 网格锯齿</b>
+    <table>
+      <tr><th>k</th><th>4</th><th>8</th><th>11</th><th>12</th><th>14</th><th>16</th><th>17</th><th>18</th><th>20</th><th>24</th><th>32</th></tr>
+      <tr><td>引擎存活</td><td>4</td><td>8</td><td>11</td><td>12</td><td>14</td><td><b>16</b></td><td>12</td><td>5</td><td>0</td><td>0</td><td>0</td></tr>
+      <tr class="hl"><td>CPA 派遣 = min(k, k*)</td><td>4</td><td>8</td><td>11</td><td>12</td><td>14</td><td>16</td><td>16</td><td>16</td><td>16</td><td>16</td><td>16</td></tr>
+      <tr><td>MPC 派遣（网格）</td><td>4</td><td>4</td><td>4</td><td>4</td><td>8</td><td>16</td><td>8</td><td>8</td><td>8</td><td>8</td><td>8</td></tr>
+      <tr><td>DPO（n≤16）</td><td>4</td><td>4</td><td>5</td><td>5</td><td>6</td><td>16</td><td colspan="5" style="text-align:center;color:var(--ink-soft)">（超算力）</td></tr>
+    </table>
+    <div class="note">k≤14 时 miss=0 处处可得，DPO 选 TTFT 更优的小波；k≥16 miss 主导，DPO 与 CPA 同选 16。<b>k=17 起 MPC 网格回落到 8</b>（cap=∞ 全派会死、8 是其网格内最优）——每个突发少活 4~8 条。</div>
+  </div>
+  <div class="card">
+    <b>Ex3 让路（16A+16B 突发）——MPC 的网格错过 12 条 A</b>
+    <table>
+      <tr><th>方法</th><th>首波动作</th><th>预计 A 存活</th><th>单决策墙钟</th></tr>
+      <tr class="hl"><td>CPA rollout</td><td>16A + 0B + 16 WAIT（扣住 B）</td><td>16</td><td>0.68 s</td></tr>
+      <tr><td>MPC v2.1</td><td>4A + 16B + 12 WAIT</td><td><b style="color:var(--red)">4</b></td><td>2.03 s</td></tr>
+      <tr><td>DPO（289 动作穷举）</td><td>16A + 2B + 14 WAIT</td><td>16</td><td>50.5 s</td></tr>
+    </table>
+    <div class="note">引擎物理事实：16A+16B 同刻 → A 全灭（F<sub>first</sub>=202.3ms &gt; dl=198.5ms）；16A 先行、B 延后 → A 16/16 全活。<b>"16A+WAIT"不在 MPC 的候选网格里</b>（cap=∞ 会带 16B 一起进）；DPO 证明最优可容 2B，CPA 保守全扣——同为 0 miss，差在 TTFT 二级项。</div>
+  </div>
+  <div class="card">
+    <b>Ex4 规模阶梯 + 迭代轨迹（mini-D2，两轮 (A,B,B)×n/6）</b>
+    <table>
+      <tr><th>n</th><th>CPA form</th><th>CPA rollout</th><th>FCFS</th><th>form 墙钟</th><th>rollout 墙钟</th></tr>
+      <tr><td>96</td><td>94/96</td><td><b>96/96</b></td><td>86/96</td><td>0.7 s</td><td>14.9 s</td></tr>
+      <tr><td>240</td><td>188/240</td><td><b>191/240</b></td><td>182/240</td><td>3.5 s</td><td>173 s</td></tr>
+    </table>
+    <svg id="svg-iter" width="100%" height="220" viewBox="0 0 980 220" role="img" aria-label="公式层迭代轨迹"></svg>
+    <div class="note">迭代轨迹（240 规模 form 版 SLO）：v1 97 → v2 对称轮次 136 → v2.2 去活锁 171 → v3 规则化 177 → v3.2 修 R2 前缀 <b>188</b>。rollout 版自 v2.2 起稳定 186→191。每一步都是引擎实测暴露的结构缺口（详见设计文档 §9 修订记录）。</div>
+  </div>
+  <div class="card" id="card-e26c">
+    <b>E26c 四格点（240 规模，同 CRN）</b>
+    <table>
+      <tr><th>格点（240 规模）</th><th>FCFS</th><th>EDF</th><th>local v2.1</th><th>MPC v2.1</th><th>CPA form</th><th>CPA rollout</th></tr>
+      <tr><td>D2_b1.0_a4</td><td>78.1</td><td>66.7</td><td>66.7</td><td>78.1</td><td class="hl">82.3</td><td class="hl"><b>83.3</b></td></tr>
+      <tr><td>D2_b0.75_a4</td><td>78.1</td><td>52.6</td><td>64.6</td><td>78.1</td><td>78.6</td><td><b>79.2</b></td></tr>
+      <tr><td>D1_r1.1_a4（连续）</td><td>78.3</td><td>81.7</td><td>80.0</td><td><b style="color:var(--red)">90.4</b></td><td>80.8</td><td>79.6</td></tr>
+      <tr><td>D2c（饱和）</td><td>72.9</td><td>13.3</td><td>15.0</td><td>74.2</td><td>72.9</td><td><b>75.4</b></td></tr>
+      <tr><td>整 run 墙钟（D2_b1.0）</td><td>1 s</td><td>1 s</td><td>124 s</td><td>604 s</td><td class="hl"><b>3 s</b></td><td>106 s</td></tr>
+    </table>
+    <div class="note">读法：突发格点上 CPA 两臂全面超过 MPC（D2_b1.0 +5.2pp，且 form 快 200×、rollout 快 5.7×；B 类四格点全部 100%）；连续到达的 D1 上 MPC 的宽候选推演搜索反超 ~10pp——多项式结构族在连续工况小于 MPC 的枚举广度，<b>如实呈现，不作全局最优声明</b>。</div>
+  </div>
+</section>
+
+<!-- ================= 5 局限 ================= -->
+<section id="limits">
+  <h2><span class="no">05</span>局限（不回避）</h2>
+  <div class="card">
+    <ol style="padding-left:18px; font-size:13.5px; display:grid; gap:6px">
+      <li><b>过渡区误差</b>：k∈[2,7] 层0阻塞+到期提升级联使闭式低估 ≤1.6ms（k≥8 全饱和段与 k=1 精确）——存活判定用 3ms 安全边际补偿；</li>
+      <li><b>form 的在线近视</b>：未见未来到达，多轮耦合下 96 规模 94/96 vs rollout 96/96——零推演的代价被量化而非隐藏；</li>
+      <li><b>对称类保证</b>：候选族完备性只在同类对称（E26c 两类）工况成立；任意 (h,u) 混合需按 (V,c) 分桶，保证退化为经验性；</li>
+      <li><b>OPT 的受限决策点</b>：离线穷举只在批完成/到达时刻决策（好计划本就如此，但严格最优性声明仅在该受限集上成立）；n≤10~16 可穷举，更大规模以 DPO+结构论证替代。</li>
+    </ol>
+  </div>
+</section>
+
+<footer>
+  数据源：results/cq/eval/e27/（examples 电池 + E26c 四格点，引擎真值）｜设计文档 docs/CPA闭式管道接纳算法设计-20261008.md｜结果文档 实验结果-E27-CPA多项式算法-20261008.md｜单位：秒 / GB(十进制) / GB/s
+</footer>
+</main>
+
+<script>
+"use strict";
+// ===== 物理常数（与 sim/experiments/e26_ab.py 同参）=====
+const VA = 4096e-9 * 42883;        // A 每层读取 GB = 0.17565
+const VB = 4096e-9 * 9399;         // B 每层读取 GB = 0.03850
+const B = 120.0, L = 8;
+const CA = 0.00602, CB = 0.02859;  // 每层计算 s
+const sA = VA / B, sB = VB / B;    // 串行层读时长
+const T0A = sA + L * CA;
+const T0B = VB / B + L * CB;
+const MARGIN = 0.003;              // 存活安全边际（v3.2）
+
+// ===== 公式层（镜像 sim/cq/poly.py）=====
+function waveF(p, k, s, c) { const w = Math.max(c, k * s); return p * s + (L - 1) * w + c; }
+function survivalCap(t0, dl, s, c) { return Math.max(0, Math.floor((dl - t0 - c) / (L * s))); }
+// 混合波 F_p（轻流字节全额计入轮次，保守 β=1）
+function mixedF(p, ka, sExtra) { const w = Math.max(CA, ka * sA + sExtra); return p * sA + (L - 1) * w + CA; }
+
+// ===== §2 波物理沙盘 =====
+function drawWave() {
+  const k = +document.getElementById("in-k").value;
+  const j = +document.getElementById("in-j").value;
+  const alpha = +document.getElementById("in-a").value;
+  document.getElementById("o-k").textContent = k;
+  document.getElementById("o-j").textContent = j;
+  document.getElementById("o-a").textContent = alpha.toFixed(1);
+  const dl = alpha * T0A;
+  const sExtra = j * sB;
+  const svg = document.getElementById("svg-wave");
+  const W = 980, H = 360, x0 = 150, pw = W - x0 - 30;
+  const kstar = survivalCap(0, dl, sA, CA);
+  const Fmax = Math.max(waveF(k, k, sA, CA) + (sExtra ? mixedF(k, k, sExtra) : 0), dl) * 1.08;
+  const rowH = Math.min(11, (H - 60) / k), y0 = 18;
+  let g = "";
+  // 期限线
+  const xdl = x0 + pw * dl / Fmax;
+  g += `<line x1="${xdl}" y1="8" x2="${xdl}" y2="${H - 34}" stroke="#dc2626" stroke-dasharray="5 4" stroke-width="1.5"/>`;
+  g += `<text x="${xdl + 4}" y="${H - 22}" fill="#dc2626" font-size="11">dl=${(dl * 1000).toFixed(1)}ms (α=${alpha})</text>`;
+  // 每条 A：L 层 [读|算]，近似渲染——层 ℓ 开始 ≈ ℓ·R + p·s（R=轮次）
+  const R = Math.max(CA, k * sA + sExtra);
+  for (let p = 1; p <= k; p++) {
+    const y = y0 + (p - 1) * rowH;
+    const Fp = sExtra ? mixedF(p, k, sExtra) : waveF(p, k, sA, CA);
+    const dead = Fp > dl;
+    for (let l = 0; l < L; l++) {
+      const rs = l * R + p * sA;             // 层读完成
+      const rs0 = Math.max(l * R + (p - 1) * sA, l === 0 ? 0 : rs - sA);
+      const c0 = rs, c1 = rs + CA;
+      const x1 = x0 + pw * rs0 / Fmax, x2 = x0 + pw * rs / Fmax;
+      g += `<rect x="${x1.toFixed(1)}" y="${y}" width="${Math.max(0.5, x2 - x1).toFixed(1)}" height="${rowH - 2}" fill="#3b82f6" opacity="0.85" rx="1"/>`;
+      const x3 = x0 + pw * c1 / Fmax;
+      g += `<rect x="${x2.toFixed(1)}" y="${y}" width="${Math.max(0.5, x3 - x2).toFixed(1)}" height="${rowH - 2}" fill="${dead ? '#ef4444' : '#1e3a8a'}" opacity="${dead ? 0.55 : 0.9}" rx="1"/>`;
+    }
+    g += `<text x="${x0 - 6}" y="${y + rowH - 2.5}" text-anchor="end" font-size="9" fill="${dead ? '#dc2626' : '#4b5566'}">A${p}${dead ? " ✕" : ""}</text>`;
+  }
+  // 时间轴
+  g += `<line x1="${x0}" y1="${H - 34}" x2="${W - 20}" y2="${H - 34}" stroke="#9ca3af"/>`;
+  for (let t = 0; t <= Fmax; t += 0.05) {
+    const x = x0 + pw * t / Fmax;
+    if (x > W - 20) break;
+    g += `<line x1="${x}" y1="${H - 34}" x2="${x}" y2="${H - 30}" stroke="#9ca3af"/><text x="${x}" y="${H - 18}" font-size="9" fill="#6b7280" text-anchor="middle">${(t * 1000).toFixed(0)}</text>`;
+  }
+  g += `<text x="${W - 20}" y="${H - 6}" font-size="10" fill="#6b7280" text-anchor="end">ms</text>`;
+  svg.innerHTML = g;
+  const alive = Array.from({ length: k }, (_, i) => (sExtra ? mixedF(i + 1, k, sExtra) : waveF(i + 1, k, sA, CA)) <= dl).filter(Boolean).length;
+  const Flast = sExtra ? mixedF(k, k, sExtra) : waveF(k, k, sA, CA);
+  document.getElementById("math-wave").textContent =
+    `轮次 R = max(c_A, k·s_A + j·s_B) = max(6.02, ${k}×1.464 + ${j}×0.321) = ${(R * 1000).toFixed(1)} ms\n` +
+    `F_p = p·s_A + (L−1)·R + c_A   →   F_last = ${(Flast * 1000).toFixed(1)} ms   vs  dl = ${(dl * 1000).toFixed(1)} ms\n` +
+    `存活 = ${alive}/${k}    存活阈值 k* = ⌊(dl − c_A)/(L·s_A)⌋ = ${kstar}`;
+  const el = document.getElementById("note-wave");
+  if (j > 0 && k > 4) el.innerHTML = "⚠ 同刻混入轻流：B 的层读按 FCFS 位次切进 A 的后续层之前（引擎事实 4——16A+16B 同刻 A 全灭），闭式以 β=1 全额计入轮次。";
+  else if (k > kstar) el.innerHTML = `⚠ k=${k} &gt; k*=${kstar}：末位超期（引擎实测 k=17 死 5、k=20 全灭）。`;
+  else el.innerHTML = `✓ k=${k} ≤ k*=${kstar}：全部按期完成（该点公式与引擎误差 ≤0.1ms）。`;
+}
+["in-k", "in-j", "in-a"].forEach(id => document.getElementById(id).addEventListener("input", drawWave));
+document.getElementById("btn-16").onclick = () => { document.getElementById("in-k").value = 16; document.getElementById("in-j").value = 0; document.getElementById("in-a").value = 4; drawWave(); };
+document.getElementById("btn-32").onclick = () => { document.getElementById("in-k").value = 32; document.getElementById("in-j").value = 0; drawWave(); };
+
+// ===== §3 决策剧场 =====
+function scoreCand(ka, kb, qa, qb, kAct, t0) {
+  // 闭式评分：首波 A 逐位判活（含轻流轮次）+ 尾部阈值（轻流未清则尾波延后）
+  const dlA = 4 * T0A, dlB = 4 * T0B;
+  const sExtra = kb * sB;
+  let miss = 0, ttft = 0;
+  for (let p = 1; p <= ka; p++) {
+    const F = t0 + mixedF(kAct + p, kAct + ka, sExtra);
+    ttft += F; if (F > dlA - MARGIN) miss++;
+  }
+  const aRest = qa - ka;
+  if (aRest > 0) {
+    const waveBytes = (ka * VA + kb * VB) * L;
+    const lightRest = qb - kb;
+    let tailStart = t0 + waveBytes / B;
+    if (lightRest > 0) {
+      tailStart = Math.max(tailStart, lightRest * VB * L / B, Math.ceil(lightRest / 32) * CB);
+    }
+    const kstar = survivalCap(tailStart, dlA, sA, CA);
+    miss += aRest - Math.min(aRest, kstar);
+  }
+  for (let p = 1; p <= kb; p++) ttft += t0 + p * sB + L * CB;
+  return [miss, ttft];
+}
+function ruleCPA(qa, qb, m, kAct) {
+  // 镜像 _rule_candidate v3.2（R1/R2/R3 + 对称轮次约束）
+  const dlA = 4 * T0A;
+  const sAll = kAct * sA;
+  let Rmax = kAct > 0 ? (dlA - MARGIN) / L : Infinity; // 在飞 A 剩余 L 层保守
+  let ka = 0;
+  for (let p = 1; p <= Math.min(m, qa); p++) {
+    const R = sAll + p * sA;
+    if (R > Rmax) break;
+    if (waveF(kAct + p, kAct + p, sA, CA) <= dlA - MARGIN) ka = p; else break;
+  }
+  let kb = 0;
+  if (ka > 0) {
+    const Rcap = Math.min(Rmax, (dlA - MARGIN - CA - (kAct + ka) * sA) / (L - 1));
+    const budget = Rcap - sAll - ka * sA;
+    if (budget >= sB) kb = Math.min(m - ka, qb, Math.floor(budget / sB));
+  } else {
+    const budget = Rmax === Infinity ? Infinity : Rmax - sAll;
+    kb = Math.min(m, qb, budget === Infinity ? qb : Math.floor(budget / sB));
+  }
+  return [ka, kb];
+}
+function mpcGrid(qa, qb, m, kAct) {
+  // MPC v2.1 组合器网格：{期限,到达}×cap{C−1,C,2C,∞}，C=⌊B/d_heavy⌋=4；同一闭式评分取最优
+  const grid = [3, 4, 8, 1 << 30];
+  let best = null;
+  for (const cap of grid) {
+    let ka = Math.min(m, qa, cap), kb = Math.min(m - ka, qb); // 期限序=A 优先
+    const sc = scoreCand(ka, kb, qa, qb, kAct, 0);
+    if (!best || sc[0] < best[0][0] || (sc[0] === best[0][0] && sc[1] < best[0][1]))
+      best = [sc, [ka, kb], `cap=${cap === 1 << 30 ? "∞" : cap}`];
+    const ka2 = 0, kb2 = Math.min(m, qb); // 到达序极端：全轻
+    const sc2 = scoreCand(ka2, kb2, qa, qb, kAct, 0);
+    if (sc2[0] < best[0][0]) best = [sc2, [ka2, kb2], "arrival"];
+  }
+  return best;
+}
+function dpoAll(qa, qb, m, kAct) {
+  let best = null, n = 0;
+  for (let ka = 0; ka <= Math.min(m, qa); ka++)
+    for (let kb = 0; kb <= Math.min(m - ka, qb); kb++) {
+      const sc = scoreCand(ka, kb, qa, qb, kAct, 0); n++;
+      if (!best || sc[0] < best[0][0] || (sc[0] === best[0][0] && sc[1] < best[0][1]))
+        best = [sc, [ka, kb]];
+    }
+  best.push(n);
+  return best;
+}
+function drawDecision() {
+  const qa = +document.getElementById("d-a").value;
+  const qb = +document.getElementById("d-b").value;
+  const m = +document.getElementById("d-m").value;
+  const kAct = +document.getElementById("d-k").value;
+  document.getElementById("d-oa").textContent = qa;
+  document.getElementById("d-ob").textContent = qb;
+  document.getElementById("d-om").textContent = m;
+  document.getElementById("d-ok").textContent = kAct;
+  const [ka, kb] = ruleCPA(qa, qb, m, kAct);
+  const sc = scoreCand(ka, kb, qa, qb, kAct, 0);
+  const mpc = mpcGrid(qa, qb, m, kAct);
+  const dpo = dpoAll(qa, qb, m, kAct);
+  const setM = (id, ok, txt, act, mm) => {
+    document.getElementById("b-" + id).className = "badge " + (ok ? "b-ok" : "b-bad");
+    document.getElementById("b-" + id).textContent = ok ? "达最优" : "差 " + txt;
+    document.getElementById("a-" + id).textContent = act;
+    document.getElementById("mm-" + id).textContent = mm;
+  };
+  setM("cpa", sc[0] === dpo[0][0], `${dpo[0][0] - sc[0]} miss`,
+       `派 ${ka}A + ${kb}B，WAIT ${m - ka - kb}`,
+       `闭式分 ${sc[0]} miss / ΣTTFT ${sc[1].toFixed(2)}（穷举 ${dpo[2]} 候选取优同式）`);
+  setM("mpc", mpc[0][0] === dpo[0][0], `${dpo[0][0] - mpc[0][0]} miss`,
+       `派 ${mpc[1][0]}A + ${mpc[1][1]}B（${mpc[2]}）`,
+       `闭式分 ${mpc[0][0]} miss——网格 {3,4,8,∞} 内最优`);
+  document.getElementById("b-dpo").className = "badge b-mid";
+  document.getElementById("b-dpo").textContent = "参照";
+  document.getElementById("a-dpo").textContent = `派 ${dpo[1][0]}A + ${dpo[1][1]}B`;
+  document.getElementById("mm-dpo").textContent = `${dpo[2]} 个 (kA,kB) 全枚举：${dpo[0][0]} miss`;
+  document.getElementById("math-rule").textContent =
+    `R1 存活前缀：k_a=${ka}（waveF(k_act+p, ·) ≤ dl−3ms 的最大 p；k*=${survivalCap(0, 4 * T0A, sA, CA)}）\n` +
+    `R2 轮次预算：R = ${kAct + ka}×1.464 + ${kb}×0.321 = ${((kAct + ka) * sA + kb * sB) * 1000 > 6.02 ? ((kAct + ka) * sA + kb * sB).toFixed(4) + " s" : "≤c（未饱和）"}，` +
+    `上限 R_max=${kAct > 0 ? ((4 * T0A - MARGIN) / L).toFixed(4) + " s（在飞波）" : "∞"}`;
+}
+["d-a", "d-b", "d-m", "d-k"].forEach(id => document.getElementById(id).addEventListener("input", drawDecision));
+
+// ===== §4 迭代轨迹图 =====
+function drawIter() {
+  const svg = document.getElementById("svg-iter");
+  const data = [["v1", 97], ["v2", 136], ["v2.2", 171], ["v3", 177], ["v3.2", 188]];
+  const W = 980, H = 220, x0 = 70, pw = W - x0 - 30, y0 = 20, ph = H - 70;
+  const yv = v => y0 + ph * (1 - (v - 90) / 105);
+  let g = "";
+  for (let v = 90; v <= 195; v += 20) {
+    g += `<line x1="${x0}" y1="${yv(v)}" x2="${W - 20}" y2="${yv(v)}" stroke="#eee"/><text x="${x0 - 6}" y="${yv(v) + 3}" font-size="10" fill="#6b7280" text-anchor="end">${v}</text>`;
+  }
+  // FCFS 参照线
+  g += `<line x1="${x0}" y1="${yv(182)}" x2="${W - 20}" y2="${yv(182)}" stroke="#9ca3af" stroke-dasharray="4 4"/><text x="${W - 24}" y="${yv(182) - 4}" font-size="10" fill="#6b7280" text-anchor="end">FCFS 182</text>`;
+  const pts = data.map((d, i) => [x0 + pw * i / (data.length - 1), yv(d[1]), d[0], d[1]]);
+  g += `<polyline points="${pts.map(p => p[0] + "," + p[1]).join(" ")}" fill="none" stroke="#2563eb" stroke-width="2"/>`;
+  pts.forEach(p => {
+    g += `<circle cx="${p[0]}" cy="${p[1]}" r="4" fill="#2563eb"/><text x="${p[0]}" y="${p[1] - 9}" font-size="10.5" text-anchor="middle" fill="#1c2333">${p[2]}：${p[3]}</text>`;
+  });
+  g += `<text x="${x0}" y="${H - 8}" font-size="10" fill="#6b7280">公式层版本迭代（mini-D2 240 规模 SLO，引擎实测）</text>`;
+  svg.innerHTML = g;
+}
+
+drawWave(); drawDecision(); drawIter();
+</script>
+</body>
+</html>

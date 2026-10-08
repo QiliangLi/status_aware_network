@@ -33,6 +33,13 @@ from .types import Action, JointAction, RequestSpec
 from .search import build_forecast_engine, forecast_drain, score_of
 
 
+# 存活判定安全边际（秒）：过渡区（k∈[2,7]）层0阻塞+到期提升级联使
+# 闭式低估 ≤1.6ms、混合波边界效应 ~2%（Ex4 v2.4：15A+8B 引擎实测末位
+# 死 2.4ms 而公式判活）。主目标（misses）不容噪声级 TTFT 赛跑赌博，
+# 边界候选按死处理；轻流期限宽裕不受影响。
+ALIVE_MARGIN_S = 0.003
+
+
 # ---------------------------------------------------------------------------
 # 公式层：对称 cohort 闭式（设计文档 §3 事实 2/4/5）
 # ---------------------------------------------------------------------------
@@ -177,19 +184,21 @@ class CPAPolicy:
             return JointAction(tuple(
                 Action("WAIT", w, (), self._hold[1]) for w in snap.idle_workers))
         self.n_searched += 1
-        cands, buckets = self._formula_candidates(snap, scn)
-        self.n_formula_scored += len(cands)
-        if not cands:
+        rule, buckets = self._rule_candidate(snap, scn)
+        self.n_formula_scored += 1
+        if rule is None:
             return base
         if self.mode == "form":
-            act = self._action_of(cands[0][1], buckets, snap, scn)
+            act = self._action_of(rule, buckets, snap, scn)
             self._after(t0, act, sig)
             return act
-        # rollout 复核（与 mpc_v2.1 同口径：est 世界 + GuardedEDF-BW 延续）
+        # rollout 复核（与 mpc_v2.1 同口径：est 世界 + GuardedEDF-BW 延续）。
+        # 短单=规则候选邻域（k_h±1 与轻流 0/满）+ 基础动作，真推演裁决。
+        fam = self._shortlist(rule, buckets)
         budget = [self.max_events]
         est0 = build_forecast_engine(snap, scn, self.pi)
         scored: List[Tuple[Tuple, Optional[Tuple[int, ...]]]] = []
-        for _sc, cand in cands[: self.top_k]:
+        for cand in fam[: self.top_k]:
             if _time.perf_counter() - t0 > self.budget_s or budget[0] <= 0:
                 break
             act = self._action_of(cand, buckets, snap, scn)
@@ -220,6 +229,124 @@ class CPAPolicy:
         act = self._action_of(scored[0][1], buckets, snap, scn)
         self._after(t0, act, sig)
         return act
+
+    def _rule_candidate(self, snap: ObservableSnapshot, scn: CqScenario):
+        """v3 规则式候选（替代 v2 的 ttft-argmin——其在存活边界噪声驱动
+        振荡，Ex4 六轮迭代后重构）。规则=已验证物理结构的直接执行：
+
+        R1 重波按存活前缀开波（k_a：使 pipe_free+wave_F(k_act+p,·)≤dl−margin
+           的最大前缀 p，引擎级验证的阈值结构，Ex2 吻合）；
+        R2 轻流填充受合并轮次约束：k_act·s_H+Σk_j·s_j 不得超过"存活重
+           成员（新派末位与在飞）的期限/剩余层数"允许的轮次上界（事实 4）；
+        R3 无存活重容量时：轻流优先；doomed 重批延后到轻流清空（防其
+           挤占管道拖垮轻流/未来轮次；轻流清空后填满收割，防死锁）。
+        """
+        bw = max(1e-6, float(snap.est_bw()))
+        L = snap._profile_cfg.L
+        now = float(snap.now)
+        buckets = buckets_of(snap)
+        if not buckets:
+            return None, None
+        heavy = buckets[0]
+        light = buckets[1:]
+        pipe_free = now + pipe_backlog_s(snap)
+        active = _active_profile(snap)
+        idle = len(snap.idle_workers)
+        k_act = 0
+        if active:
+            hV, hC = heavy.key
+            k_act = sum(1 for V, c, _r, _d in active["actives"]
+                        if abs(V - hV) < 1e-9 and abs(c - hC) < 1e-9)
+        # 全类对称轮次约束（v3.1：单桶状态下队列重桶换类——如 A 波在飞、
+        # 队列只剩 B——此前在飞 A 对新派 B 的损伤不可见，16B 同刻切入
+        # A 波致其全灭）。R = Σ在飞 s_cls + Σ新派 k_j·s_j 为合并波每层
+        # 字节轮次；任何新派遣须满足：R ≤ R_max（在飞批存活允许的轮次
+        # 上界）且新派重桶末位 wave_F 判活。
+        act = ([(V / bw, c, rem, dl)
+                for V, c, rem, dl in active["actives"]] if active else [])
+        s_all = sum(sa for sa, _c, _r, _d in act)
+        R_max = float("inf")
+        for _sa, _c, rem, dl in act:
+            if rem > 0:
+                R_max = min(R_max, (dl - ALIVE_MARGIN_S - now) / rem)
+        s_h, c_h = heavy.V / bw, heavy.c
+        cand = [0] * len(buckets)
+        k_a = 0
+        for p in range(1, min(idle, len(heavy.rids)) + 1):
+            R = s_all + p * s_h
+            if R > R_max:
+                break
+            dl_p = heavy.deadlines[heavy.rids[p - 1]]
+            if pipe_free + wave_F(k_act + p, k_act + p, s_h, c_h, L) \
+                    <= dl_p - ALIVE_MARGIN_S:
+                k_a = p
+            else:
+                break
+        if k_a > 0:
+            cand[0] = k_a
+            rem_idle = idle - k_a
+            dl_last = heavy.deadlines[heavy.rids[k_a - 1]]
+            # 末位存活判据：F_last = pipe+(k_act+k_a)·s_h+(L−1)·R+c_h
+            # ≤ dl−margin（v3.2 修正：此前漏减首层串行前缀 (k_act+k_a)·s_h，
+            # Ex4 n=96 首波 16A+11B 同刻、A 死 11 的根因）
+            R_cap = min(R_max, (dl_last - ALIVE_MARGIN_S - pipe_free - c_h
+                                - (k_act + k_a) * s_h) / (L - 1))
+            budget = R_cap - s_all - k_a * s_h
+            for j, b in enumerate(light, start=1):
+                s_j = b.V / bw
+                kj = 0
+                if s_j > 0 and budget > 0:
+                    kj = max(0, min(rem_idle, len(b.rids), int(budget / s_j)))
+                cand[j] = kj
+                rem_idle -= kj
+                budget -= kj * s_j
+        else:
+            rem_idle = idle
+            budget = (R_max - s_all) if R_max < float("inf") else float("inf")
+            for j, b in enumerate(light, start=1):
+                kj = min(rem_idle, len(b.rids))
+                s_j = b.V / bw
+                if s_j > 0 and budget < float("inf"):
+                    kj = min(kj, max(0, int(budget / s_j)))
+                cand[j] = kj
+                rem_idle -= kj
+                budget -= cand[j] * s_j
+            if rem_idle > 0 and sum(cand[1:]) == 0:
+                kj = min(rem_idle, len(heavy.rids))
+                if s_h > 0 and budget < float("inf"):
+                    kj = min(kj, max(0, int(budget / s_h)))
+                cand[0] = kj
+        return tuple(cand), buckets
+
+    def _shortlist(self, rule: Tuple[int, ...],
+                   buckets: List[ClassBucket]) -> List[Tuple[int, ...]]:
+        """规则候选邻域：k_0 −1/0/+1 × 轻流 0/规则值/满。"""
+        fam = []
+        caps = tuple(len(b.rids) for b in buckets)
+
+        def clamp(c):
+            return tuple(max(0, min(caps[j], c[j])) for j in range(len(caps)))
+
+        k0 = rule[0]
+        for dk in (-1, 0, 1):
+            for light_mode in ("zero", "rule", "full"):
+                c = list(rule)
+                c[0] = k0 + dk
+                if light_mode == "zero":
+                    for j in range(1, len(c)):
+                        c[j] = 0
+                elif light_mode == "full":
+                    rest = 32
+                    for j in range(1, len(c)):
+                        c[j] = min(caps[j], rest)
+                        rest -= c[j]
+                fam.append(clamp(tuple(c)))
+        seen, out = set(), []
+        for c in fam:
+            if c not in seen:
+                seen.add(c)
+                out.append(c)
+        return out
 
     def _tick(self, t0: float):
         el = _time.perf_counter() - t0
@@ -294,53 +421,174 @@ class CPAPolicy:
             return [], buckets
         pipe_free = now + pipe_backlog_s(snap)
         idle = len(snap.idle_workers)
+        active = _active_profile(snap)      # 在飞波损伤模型（v1.1）
         out = []
         heavy = buckets[0]
         light_caps = [len(b.rids) for b in buckets[1:]]
-        for k_h in range(0, min(idle, len(heavy.rids)) + 1):
+        # doomed 重请求延后规则（v2.3）：重桶内"以自身最小波（p 条同派）
+        # 也无法按期"的位置不参与本波派遣（k_h 上限=存活前缀），除非
+        # 已无健康轻请求可派（防死锁；轻流派遣从不受限）。在线近视的
+        # 补偿：doomed 早派省下的 TTFT 抵不过其对管道的占用在未来轮次
+        # 造成的主项损失（Ex4 实测：无此规则 n=240 form 76→171，
+        # 加规则后 B 类不再被拖入下一轮碰撞）。
+        n_light = sum(light_caps)
+        k_max = min(idle, len(heavy.rids))
+        if n_light > 0:
+            s_h, c_h = heavy.V / bw, heavy.c
+            k_alive = 0
+            for p in range(1, k_max + 1):
+                dl = heavy.deadlines[heavy.rids[p - 1]]
+                if pipe_free + wave_F(p, p, s_h, c_h, L) <= dl - ALIVE_MARGIN_S:
+                    k_alive = p
+                else:
+                    break
+            k_max = k_alive if k_alive > 0 else 0
+        for k_h in range(0, k_max + 1):
             best = None
             for lc in (_light_counts(light_caps, idle - k_h)
                        if light_caps else [()]):
                 cand = (k_h,) + tuple(lc)
-                sc = self._formula_score(cand, buckets, pipe_free, bw, L, now)
+                sc = self._formula_score(cand, buckets, pipe_free, bw, L,
+                                         now, active, snap.workers)
                 if best is None or sc < best[0]:
                     best = (sc, cand)
             if best is not None:
                 out.append(best)
-        # 平局裁决：misses 同分时偏好多派遣（排空终须完成，闲置无收益；
-        # 且避免"全 WAIT 高分"的活锁）。ttft 仅作第三键。
-        out.sort(key=lambda x: (x[0][0], -sum(x[1]), x[0][1]))
+        # 排序：(misses, ttft, −派遣数)。ttft 已含未派项的下一波延迟
+        # （deferral 严格为正），扣住与派遣的 TTFT 比较公平；−sum 仅在
+        # ttft 打平时防"全 WAIT"活锁。
+        out.sort(key=lambda x: (x[0][0], x[0][1], -sum(x[1])))
         return out, buckets
 
     def _formula_score(self, cand: Tuple[int, ...],
                        buckets: List[ClassBucket], pipe_free: float,
-                       bw: float, L: int, now: float):
-        """(misses_est, ttft_est)：首波逐位置闭式存活 + 尾部字节平移阈值。"""
-        heavy = buckets[0]
-        k_h = cand[0]
-        s_h, c_h = heavy.V / bw, heavy.c
-        s_extra = sum(buckets[j].V / bw * cand[j] for j in range(1, len(cand)))
+                       bw: float, L: int, now: float, active=None,
+                       snap_workers_cache=()):
+        """(misses_est, ttft_est)：对称轮次模型（v2，Ex4 两轮迭代后重写）。
+
+        合并波内各类共享同一字节轮次 R=Σ类(在飞+新派)·s_class，每类
+        每层时长 w_class=max(c_class, R)——与引擎事实 4/5 一致（16A+16B
+        同刻：R=28.5ms，A 按 28.5 层进（等:算≈8:1），B 按 c_B=28.59 自
+        流水不受扰）。在飞批剩余完成 = now+rem×w_class（新派字节按轮次
+        切队=事实 4 的损伤）；新派成员 F=pipe_free+(同类在飞+p)·s+
+        (L−1)·w_class+c。尾部：管道先清在飞+本波字节再谈下一波。"""
+        kx: Dict[Tuple[float, float], List[float]] = {}
+        for j, b in enumerate(buckets):
+            kx[b.key] = [0.0, float(cand[j]), b.V, b.c, b.V / bw]
+        if active:
+            keys = set(kx)
+            for V, c, _rem, _dl in active["actives"]:
+                key = (round(V, 12), round(c, 12))
+                if key in kx:
+                    kx[key][0] += 1.0
+                else:
+                    kx[key] = [1.0, 0.0, V, c, V / bw]
+        round_total = sum((a + n) * s for a, n, _V, _c, s in kx.values())
         misses = 0
         ttft = 0.0
-        for p in range(1, k_h + 1):
-            dl = heavy.deadlines[heavy.rids[p - 1]]
-            F = pipe_free + mixed_wave_F(p, k_h, s_h, c_h, s_extra, L)
-            ttft += F - now
-            if F > dl:
-                misses += 1
-                ttft += F - dl
-        a_rest = len(heavy.rids) - k_h
+        # 1) 在飞批：剩余完成按本类合并轮次
+        if active:
+            for V, c, rem, dl in active["actives"]:
+                key = (round(V, 12), round(c, 12))
+                w = max(c, round_total)
+                F = now + rem * w
+                ttft += F - now
+                # 在飞损伤（放 B 时机）不加边际：过度扣 B 会把整轮排空
+                # 拖后、加剧下一轮碰撞（Ex4 v2.5：240 规模 margin 使
+                # B 多扣 3ms×N → 153/240 回退）
+                if F > dl:
+                    misses += 1
+        # 2) 新派各桶：合并波内同类位置
+        for j, b in enumerate(buckets):
+            k = cand[j]
+            if k <= 0:
+                continue
+            a = kx[b.key][0]
+            s = b.V / bw
+            w = max(b.c, round_total)
+            for p in range(1, k + 1):
+                dl = b.deadlines[b.rids[p - 1]]
+                F = pipe_free + (a + p) * s + (L - 1) * w + b.c
+                ttft += F - now
+                if F > dl - ALIVE_MARGIN_S:
+                    misses += 1
+                    # 注：不再加 F−dl 惩罚——对注定超期请求它随滞留时间
+                    # 线性增长（Ex4 v2.2 活锁根因：582s 时惩罚≈582s，
+                    # "永远扣住"恒优于派遣），misses 已是主项，不重复计费
+        # 3) 尾部（桶 0=重桶的未派出部分）：下一波起点 = max(管道清空,
+        #    未派轻流排空)。轻流在场时 doomed 重批被本策略延后到轻流
+        #    清空（v2.6 修正：此前假设"管道一空立即开尾波"，与策略自身
+        #    的 doomed 延后矛盾——(3,1) 借虚构的尾波救活 13 条反超
+        #    (16,0)，Ex4 n=240 首波塌缩为 3A 的根因）
+        heavy = buckets[0]
+        a_rest = len(heavy.rids) - cand[0]
         if a_rest > 0:
-            wave_bytes = sum(buckets[j].V * cand[j] for j in range(len(cand)))
-            tail_start = pipe_free + wave_bytes * L / bw
-            dl_min = min(heavy.deadlines[r] for r in heavy.rids[k_h:])
-            k_star = survival_cap(tail_start, dl_min, s_h, c_h, L)
+            wave_bytes = sum(buckets[j].V * cand[j]
+                             for j in range(len(cand))) * L
+            rem_bytes = active["rem_bytes"] if active else 0.0
+            tail_start = pipe_free + (rem_bytes + wave_bytes) / bw
+            n_light_rest = sum(len(buckets[j].rids) - cand[j]
+                               for j in range(1, len(cand)))
+            if n_light_rest > 0:
+                light_bytes = sum((len(buckets[j].rids) - cand[j])
+                                  * buckets[j].V * L
+                                  for j in range(1, len(cand)))
+                m_total = max(1, len(snap_workers_cache))
+                c_light_max = max(buckets[j].c for j in range(1, len(cand)))
+                light_drain = max(light_bytes / bw,
+                                  -(-n_light_rest // m_total) * c_light_max)
+                tail_start = max(tail_start, now + light_drain)
+            dl_min = min(heavy.deadlines[r] for r in heavy.rids[cand[0]:])
+            k_star = survival_cap(tail_start, dl_min, heavy.V / bw,
+                                  heavy.c, L)
             misses += a_rest - min(a_rest, max(0, k_star))
-        for j in range(1, len(cand)):
-            b = buckets[j]
-            for p in range(1, cand[j] + 1):
-                ttft += pipe_free + p * b.V / bw + L * b.c - now
+        # 4) 未派成员的 TTFT（含下一波延迟 defer_gap，与已派同式的前缀
+        #    串行 a+p）：deferral 代价严格为正——扣住不派必须在 TTFT 上
+        #    真的更优，否则平局裁决放行派遣（防死锁）；反之 doomed 重批
+        #    早派若推迟轻流，其 TTFT 损失被显式计入（Ex4 v2.1 修正：
+        #    此前未派项无延迟项，−sum 平局键让 doomed A 逐条滴进管道）
+        for j, b in enumerate(buckets):
+            rest = len(b.rids) - cand[j]
+            if rest <= 0:
+                continue
+            a = kx[b.key][0]
+            s = b.V / bw
+            w = max(b.c, round_total)
+            defer_gap = (L - 1) * w + b.c
+            for p in range(1, rest + 1):
+                F = pipe_free + (a + cand[j] + p) * s + (L - 1) * w + b.c \
+                    + defer_gap
+                ttft += F - now
+                if j > 0 and F > b.deadlines[b.rids[cand[j] + p - 1]] \
+                        - ALIVE_MARGIN_S:
+                    misses += 1
         return (misses, round(ttft, 9))
+
+
+def _active_profile(snap: ObservableSnapshot) -> Optional[dict]:
+    """在飞波画像（公共信息）：全部在飞批 (V,c,rem,dl) 与管道剩余字节。
+
+    类键匹配由调用方做（k_act 只计与队列重桶同类 (V,c) 的在飞批——
+    v1.1 修正：此前按 V 最大跨类计数，B 批被当 A 类重批使轮次虚增
+    90 倍、第二轮 A 被错误扣住）。
+    """
+    reqs = {r.rid: r for r in snap.requests}
+    actives = []
+    for pw in snap.workers:
+        if not pw.members:
+            continue
+        for rid in pw.members:
+            r = reqs.get(rid)
+            if r is None:
+                continue
+            V = float(layer_read_gb(r, snap._profile_cfg))
+            c = float(snap.c_hat([(r.h_tokens, r.u_tokens)]))
+            rem = snap._profile_cfg.L - pw.layers_done
+            actives.append((V, c, rem, float(r.deadline_s)))
+    if not actives:
+        return None
+    rem_bytes = sum(rem * V for V, _c, rem, _dl in actives)
+    return {"actives": actives, "rem_bytes": rem_bytes}
 
 
 def _light_counts(caps: Sequence[int], rest: int) -> List[Tuple[int, ...]]:

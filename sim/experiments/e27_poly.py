@@ -243,11 +243,13 @@ def run_eval_cell(cell: str, d: str):
 
 
 def load_e26c_records():
-    """既有 E26c records（fcfs/edf/local/mpc，同 CRN）作对照。"""
-    for p in ("results/cq/eval/e26c/records_part_main.json",):
-        if os.path.exists(p):
-            return json.load(open(p, encoding="utf-8"))
-    return []
+    """既有 E26c records（fcfs/edf/local/mpc，同 CRN）作对照（分片文件）。"""
+    import glob
+    out = []
+    for p in sorted(glob.glob(os.path.join("results/cq/eval/e26c",
+                                           "records_part_*.json"))):
+        out.extend(json.load(open(p, encoding="utf-8")))
+    return out
 
 
 def main(seeds, procs=None, duration=None, stage="examples", **kw):
