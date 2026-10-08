@@ -106,18 +106,25 @@ def build(cell: str, audit_only: bool):
             continue
         arr = np.load(p)["intervals"]
         xs, rate, dem = binned(arr, BIN_S)
-        ax.plot(xs, dem, color="#DD8452", lw=.9, label="需求 Σ申请率")
-        ax.plot(xs, rate, color="#4C72B0", lw=.9, label="实际 Σ速率")
+        # 对数纵轴：需求峰可达数千 GB/s、实际恒≤120——线性轴要么削峰要么压扁
+        # 下沿；log 轴两条线与 120 虚线全部可见（读者勘误 20261008：原线性
+        # 轴 ylim 截 1000 削平需求尖峰，且橙线超限形态易被误读为"利用率超限"）
+        dem_p = np.maximum(dem, 0.5)
+        rate_p = np.maximum(rate, 0.5)
+        ax.plot(xs, dem_p, color="#DD8452", lw=.9,
+                label="需求 Σ申请率（可超上限=超订）")
+        ax.plot(xs, rate_p, color="#4C72B0", lw=.9,
+                label="实际 Σ速率（恒≤上限）")
         ax.axhline(B_GBPS, color="k", ls="--", lw=1.1)
         t_hi = xs[-1]
-        ax.text(t_hi * 0.995, B_GBPS * 1.06, "B=120", ha="right", fontsize=8.5)
-        peak = max(dem.max(), rate.max(), B_GBPS)
-        ax.set_ylim(0, min(peak * 1.15, 1000))
+        ax.text(t_hi * 0.995, B_GBPS * 1.25, "B=120", ha="right", fontsize=8.5)
+        ax.set_yscale("log")
+        ax.set_ylim(0.5, max(dem_p.max(), 10.0) * 1.6)
         ax.set_xlim(0, t_hi)
-        ax.set_ylabel(f"{label}\nGB/s", fontsize=9.5)
-        ax.grid(alpha=.2)
+        ax.set_ylabel(f"{label}\nGB/s（对数轴）", fontsize=9.5)
+        ax.grid(alpha=.2, which="both")
         if ri == 0:
-            ax.legend(loc="upper right", fontsize=8)
+            ax.legend(loc="lower right", fontsize=7.5)
         if ri == 3:
             ax.set_xlabel("仿真时间 (s)", fontsize=10)
         w = arr[:, 1] - arr[:, 0]
@@ -125,8 +132,8 @@ def build(cell: str, audit_only: bool):
         sat = float(w[arr[:, 2] >= 0.9 * B_GBPS].sum() / w.sum())
         ax.set_title(f"需求超订 {over:.0%}｜实际饱和(≥0.9B) {sat:.0%}",
                      fontsize=8.5, loc="right")
-    fig.suptitle(f"图B｜E26c 存储带宽利用率时序：{cell}"
-                 "（橙=全部流申请率之和 蓝=实际分配速率，蓝≤黑虚线）",
+    fig.suptitle(f"图B｜E26c 存储带宽时序：{cell}"
+                 "（橙=Σ申请率·可超订 黑虚线=120 上限 蓝=Σ实际速率·恒≤上限；对数纵轴）",
                  fontsize=12.5, y=0.97)
     ov2 = audit_text_overlap(fig)
     if not audit_only:
