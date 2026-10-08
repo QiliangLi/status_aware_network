@@ -25,8 +25,10 @@ from sim.cq.metrics import summarize
 from sim.experiments import e26_ab as e26
 from sim.experiments.cq_common import out_dir, print_progress, save_json
 
-e26.SCALE_TOTAL = 240
-e26.D2_ROUNDS = max(1, 240 // 96)
+E26C_TOTAL = int(os.environ.get("E26C_TOTAL", "240"))
+e26.SCALE_TOTAL = E26C_TOTAL
+e26.D2_ROUNDS = max(1, E26C_TOTAL // 96)
+D2C_ROUNDS = max(1, E26C_TOTAL // 120)
 
 MPC_BUDGET_S = 3600.0
 MPC_EVENTS = 20000
@@ -37,11 +39,11 @@ ARMS = [("fcfs", "cq_fcfs", None, None, None),
 
 
 def d2c_specs(tb: float, alpha: int, per_round: int = 120):
-    """修正负载 D2c：每轮 40A+80B（1:2）、2 轮、轮距 tb。"""
+    """修正负载 D2c：每轮 40A+80B（1:2）、D2C_ROUNDS 轮、轮距 tb。"""
     na = per_round // 3
     order = ["A", "B", "B"] * na
     classes, arrivals = [], []
-    for r in range(2):
+    for r in range(D2C_ROUNDS):
         arrivals.extend([r * tb] * len(order))
         classes.extend(order)
     specs = [e26.RequestSpec(i, float(arrivals[i]),
@@ -100,7 +102,7 @@ def run_cell(cell: str, d: str):
         h = pol.health() if hasattr(pol, "health") else {}
         s.update({"policy": label, "pid": pid, "theta": theta,
                   "mpc_base": base, "composer": composer, "cell": cell,
-                  "alpha": alpha, "n_total": 240,
+                  "alpha": alpha, "n_total": E26C_TOTAL,
                   "makespan_s": float(eng.w.t), "wall_s": wall,
                   "n_decides": h.get("n_decides"),
                   "n_searched": h.get("n_searched"),
@@ -133,7 +135,7 @@ def run_cell(cell: str, d: str):
 
 
 def main(seeds, procs=None, duration=None, stage="eval", **kw):
-    d = out_dir("eval", "e26c")
+    d = out_dir("eval", "e26c" if E26C_TOTAL == 240 else f"e26c{E26C_TOTAL}")
     only = [x for x in os.environ.get("E26C_ONLY", "").split(",") if x]
     shard = os.environ.get("E26C_SHARD", "main")
     cells = only or ["D2_b1.0_a4", "D2_b0.75_a4", "D1_r1.1_a4", "D2c"]

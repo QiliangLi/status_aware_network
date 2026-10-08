@@ -87,9 +87,10 @@ def build(cell: str, audit_only: bool):
                loc="upper center", ncol=4, frameon=False, fontsize=10.5,
                bbox_to_anchor=(0.5, 0.925))
     ov1 = audit_text_overlap(fig)
+    ftag = os.environ.get("E26C_FIGTAG", "")
     if not audit_only:
-        fig.savefig(os.path.join(FIG_DIR, f"cq_fig_e26c_gantt_{cell}.png"),
-                    dpi=125)
+        fig.savefig(os.path.join(
+            FIG_DIR, f"cq_fig_e26c_gantt_{cell}{ftag}.png"), dpi=125)
     plt.close(fig)
 
     # ---- 图 B：带宽利用率时序 ----
@@ -129,8 +130,8 @@ def build(cell: str, audit_only: bool):
                  fontsize=12.5, y=0.97)
     ov2 = audit_text_overlap(fig)
     if not audit_only:
-        fig.savefig(os.path.join(FIG_DIR, f"cq_fig_e26c_bw_{cell}.png"),
-                    dpi=125)
+        fig.savefig(os.path.join(
+            FIG_DIR, f"cq_fig_e26c_bw_{cell}{ftag}.png"), dpi=125)
     plt.close(fig)
     print(f"{cell}: 甘特重叠 {len(ov1)} 对，带宽重叠 {len(ov2)} 对")
     for label, fr in stats:
