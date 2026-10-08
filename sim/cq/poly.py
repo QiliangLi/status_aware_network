@@ -138,7 +138,8 @@ class CPAPolicy:
     def __init__(self, pid: str = "cq_cpa", mode: str = "rollout",
                  top_k: int = 4, theta: str = "S",
                  max_events: int = 20000, budget_s: float = 1.0,
-                 base: str = "bw_edf"):
+                 base: str = "bw_edf",
+                 sym_max_buckets: int = 4, sym_min_share: float = 0.5):
         assert mode in ("rollout", "form")
         self.pid = pid
         self.mode = mode
@@ -146,6 +147,11 @@ class CPAPolicy:
         self.theta = theta
         self.max_events = max_events
         self.budget_s = budget_s
+        # 对称性适用域守卫（v3.3，20261008 普适性质疑回应）：形状数≈
+        # 请求数或最大桶占比低时类内不可互换，规则层退化为 V 降序贪心
+        # （mooncake 实测 form 40.6% vs BW 底座 61.3%），显式回退底座
+        self.sym_max_buckets = sym_max_buckets
+        self.sym_min_share = sym_min_share
         self._d_hist: Dict[int, float] = {}
         self.pi = GuardedEDFBW(hist=self._d_hist)
         self._cohort_fin: Dict[int, float] = {}   # rid -> 自身波闭式完成估计
@@ -155,6 +161,7 @@ class CPAPolicy:
         self.n_formula_scored = 0
         self.n_rollouts = 0
         self.n_fallback = 0
+        self.n_guard = 0          # 对称性守卫触发回退底座的决策数
         self.decide_s_max = 0.0
         self.decide_s_sum = 0.0
 
@@ -162,6 +169,7 @@ class CPAPolicy:
         return {"n_decides": self.n_decides, "n_searched": self.n_searched,
                 "n_formula_scored": self.n_formula_scored,
                 "n_rollouts": self.n_rollouts, "n_fallback": self.n_fallback,
+                "n_guard": self.n_guard,
                 "decide_s_max": self.decide_s_max,
                 "decide_s_mean": (self.decide_s_sum / self.n_decides
                                   if self.n_decides else None)}
@@ -183,6 +191,20 @@ class CPAPolicy:
             self._tick(t0)
             return JointAction(tuple(
                 Action("WAIT", w, (), self._hold[1]) for w in snap.idle_workers))
+        # 对称性守卫：非对称工况（如 mooncake 逐条异形）显式回退底座，
+        # 不让退化规则假装多项式最优。判据（20261008 二次收紧：首版
+        # 桶数≤4 放过了小队列互异形状，conversation 残留 8.5pp 损失）：
+        # 对称塌缩需要同类重复存在——最大桶 <2 条（无可互换对）、桶数
+        # 超限、或最大桶占比不足，任一即触发
+        buckets_pre = buckets_of(snap)
+        nq = max(1, len(snap.queued))
+        if buckets_pre and (len(buckets_pre) > self.sym_max_buckets
+                            or max(len(b.rids) for b in buckets_pre) < 2
+                            or max(len(b.rids) for b in buckets_pre) / nq
+                            < self.sym_min_share):
+            self.n_guard += 1
+            self._tick(t0)
+            return base
         self.n_searched += 1
         rule, buckets = self._rule_candidate(snap, scn)
         self.n_formula_scored += 1

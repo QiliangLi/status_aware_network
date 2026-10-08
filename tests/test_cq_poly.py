@@ -173,6 +173,29 @@ def test_u6_offline_opt_small():
     assert r["status"] == "optimal" and r["best_score"][0] == 0
 
 
+def test_u4e_symmetry_guard():
+    """普适性质疑回应（v3.3）：形状数≈请求数时守卫触发，回退 BW 底座。
+
+    mooncake 逐条异形（212 请求 233 形状）下规则层退化为 V 降序贪心
+    （实测 40.6% vs 底座 61.3%）——适用域必须显式声明并回退。
+    """
+    shapes = [(h, u) for h in range(1, 24) for u in (128, 256)]
+    specs = []
+    for i, (h, u) in enumerate(shapes):
+        specs.append(e26.RequestSpec(i, 0.0, h, u, "mooncake", F(1), F(1)))
+    T0 = e26.make_T0(specs, e26.E26_PROFILE, F(120), F(200))
+    specs = [e26.RequestSpec(s.rid, 0.0, s.h_tokens, s.u_tokens, s.class_id,
+                             T0[s.rid], 4 * float(T0[s.rid]))
+             for s in specs]
+    scn = e26.e26_scenario(4)
+    _eng, snap = _snapshot_of(scn, specs)
+    pol = CPAPolicy(mode="form")
+    act = pol.decide(snap, scn)
+    base = pol.pi.decide(snap, scn)
+    assert pol.n_guard >= 1
+    assert act.key() == base.key()
+
+
 def test_u6b_decision_point_optimum():
     r = decision_point_optimum(mk_specs(["A"] * 8 + ["B"] * 8),
                                e26.e26_scenario(4))
