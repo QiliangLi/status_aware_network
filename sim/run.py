@@ -56,6 +56,7 @@ _CQ_MODULES = {
     "e26b": ("e26b_mpcv2", "main"),
     "e26c": ("e26c_qa", "main"),
     "e26d": ("e26d_block", "main"),
+    "e27": ("e27_poly", "main"),
 }
 
 
