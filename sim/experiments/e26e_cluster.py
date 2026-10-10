@@ -139,6 +139,13 @@ def run_cell(cell: str, rep: int, d: str, arms=None):
         s["io_wait_share2"] = comp / (comp + stall) if comp + stall > 0 else None
         s["idle_frac"] = s["device_idle_s"] / s["device_total_mh_s"]
         shock = cluster_shock(eng, centers)
+        # 逐请求完成记录（TTFT CDF / makespan 精确口径 / deadline 裕量分析用）
+        rq = []
+        for sp in specs:
+            rr = eng.w.requests[sp.rid]
+            fs = float(rr.F_s) if rr.F_s is not None else float(eng.w.t)
+            rq.append([sp.rid, sp.class_id, float(sp.arrival_s),
+                       float(sp.deadline_s), fs, fs - float(sp.arrival_s)])
         h = pol.health() if hasattr(pol, "health") else {}
         s.update({"policy": label, "pid": pid, "theta": theta,
                   "mpc_base": base_pol, "composer": composer, "cell": cell,
@@ -169,6 +176,11 @@ def run_cell(cell: str, rep: int, d: str, arms=None):
         np.savez_compressed(
             os.path.join(d, f"{cell}@s{rep}/{label}.intervals.npz"),
             intervals=arr)
+        with gzip.open(os.path.join(d, f"{cell}@s{rep}/{label}.requests.json.gz"),
+                       "wt") as f:
+            json.dump({"meta": {"cell": cell, "rep": rep, "policy": label,
+                                "n": len(rq)}, "rows": rq},
+                      f, separators=(",", ":"))
         records.append(s)
         print_progress(
             f"E26e {cell}@s{rep} {label:12s} wall={wall:.0f}s "
@@ -199,10 +211,16 @@ def main(seeds, procs=None, duration=None, stage="eval", **kw):
     part = os.path.join(d, f"records_part_{shard}.json")
     records = json.load(open(part, encoding="utf-8")) if os.path.exists(part) else []
     done = {(r["cell"], r["rep"], r["policy"]) for r in records}
+    # E26E_ARMS：可选臂过滤（单臂粒度分片重跑用；空=全臂）
+    arm_sel = [x for x in os.environ.get("E26E_ARMS", "").split(",") if x]
     print_progress(f"E26e eval: {len(picked)} 格点×rep，shard={shard}，"
-                   f"已完成 run={len(records)}")
+                   f"arms={arm_sel or '全'}，已完成 run={len(records)}")
     for cell, rep in picked:
-        todo = [a[0] for a in ARMS if (cell, rep, a[0]) not in done]
+        todo = [a[0] for a in ARMS
+                if (cell, rep, a[0]) not in done
+                and (not arm_sel or a[0] in arm_sel)]
+        if not todo:
+            continue
         if not todo:
             continue
         os.makedirs(os.path.join(d, f"{cell}@s{rep}"), exist_ok=True)

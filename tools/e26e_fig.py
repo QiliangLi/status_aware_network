@@ -237,6 +237,140 @@ def build_bar(audit_only: bool):
     return len(ov)
 
 
+def build_util(cell: str, rep: int, audit_only: bool):
+    """逐 NPU 利用率：箱线（32 NPU 分布）+ 热图（编号维度）双 panel。
+
+    均衡口径：不用全局聚合（总设备时间比）——它无法区分"均匀忙"与
+    "少数忙多数闲"；改用逐 NPU 占用率 u_i=(A算+B算+IO等)/makespan 的
+    分布（min/p50/p90/max + CV=σ/μ），CV 越小负载越均衡；纯算口径
+    c_i=(A算+B算)/makespan 另列。makespan 由 gantt meta 的
+    T_anchor_s/1.1 精确反推（run_cell 中 anchor=makespan×1.1）。
+    """
+    import matplotlib
+    matplotlib.use("Agg")
+    import matplotlib.pyplot as plt
+    plt.rcParams["font.sans-serif"] = ["PingFang SC", "Heiti TC", "DejaVu Sans"]
+    plt.rcParams["axes.unicode_minus"] = False
+    from e25_ts_compare import audit_text_overlap
+
+    tag = f"{cell}@s{rep}"
+    # makespan 逐臂取自 records（gantt 的 T_anchor 是首臂口径，非首臂不可用）
+    recs = []
+    for pat in (os.path.join(ROOT, "records_part_*.json"),
+                os.path.join(ROOT, "archive", "records_part_*.json")):
+        for p in sorted(glob.glob(pat)):
+            recs.extend(json.load(open(p, encoding="utf-8")))
+    mk = {r["policy"]: r["makespan_s"] for r in recs
+          if r["cell"] == cell and r["rep"] == rep}
+    stats = {}
+    makespans = {}
+    for _label, fn in ROWS:
+        p = os.path.join(ROOT, tag, f"{fn}.gantt.json.gz")
+        g = json.load(gzip.open(p))
+        m = mk.get(fn) or g["meta"]["T_anchor_s"] / 1.1
+        makespans[fn] = m
+        acc = np.zeros(g["meta"]["m_workers"])
+        acc_c = np.zeros(g["meta"]["m_workers"])
+        for bk in g["buckets"]:
+            for wid, (a, b, w, _idle) in enumerate(bk):
+                acc[wid] += a + b + w
+                acc_c[wid] += a + b
+        stats[fn] = (acc / m, acc_c / m)
+    labels = [l for l, _ in ROWS]
+    data = [stats[fn][0] * 100 for _l, fn in ROWS]
+    fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(13.6, 4.6), dpi=125,
+                                   gridspec_kw={"width_ratios": [1, 1.6]})
+    bp = ax1.boxplot(data, tick_labels=[l.replace(" v2.1", "\nv2.1") for l in labels],
+                     showfliers=True, patch_artist=True, widths=.55,
+                     medianprops=dict(color="k"))
+    for patch, (_l, fn) in zip(bp["boxes"], ROWS):
+        patch.set_facecolor("#9DC3E6" if "θ=S" not in _l else "#2C5F9E")
+        patch.set_alpha(.75)
+    means = [np.mean(x) for x in data]
+    ax1.scatter(range(1, 6), means, marker="D", s=26, color="#C44E52",
+                zorder=3, label="均值")
+    ax1.set_ylabel("逐 NPU 占用率（算+等）%", fontsize=10)
+    ax1.set_ylim(0, 100)
+    ax1.grid(axis="y", alpha=.25)
+    ax1.legend(fontsize=8.5)
+    cvs = [f"CV={np.std(x)/np.mean(x):.2f}" for x in data]
+    ax1.set_title("32 NPU 占用率分布（CV 越小越均衡）\n"
+                  + "｜".join(f"{l.split(' ')[0]}{c[2:]}" for l, c in
+                              zip(labels, cvs)), fontsize=8.6)
+    mat = np.array(data)
+    im = ax2.imshow(mat, aspect="auto", cmap="viridis", vmin=0, vmax=100)
+    ax2.set_yticks(range(5))
+    ax2.set_yticklabels(labels, fontsize=9)
+    ax2.set_xticks([0, 7, 15, 23, 31])
+    ax2.set_xlabel("NPU 编号", fontsize=10)
+    ax2.set_title("占用率热图（亮=高）——尾部集中在低编号即此处显形",
+                  fontsize=9)
+    fig.colorbar(im, ax=ax2, label="占用率 %")
+    fig.suptitle(f"E26e 逐 NPU 利用率：{tag}"
+                 f"（占用=算+IO等；makespan "
+                 f"{', '.join(f'{fn.split(chr(95))[0]}={makespans[fn]:.2f}s' for _l, fn in ROWS)}）",
+                 fontsize=10.5)
+    fig.tight_layout(rect=(0, 0, 1, 0.96))
+    ov = audit_text_overlap(fig)
+    if not audit_only:
+        fig.savefig(os.path.join(FIG_DIR, f"cq_fig_e26e_util_{tag}.png"),
+                    dpi=125)
+    plt.close(fig)
+    print(f"{tag}: util 图文字重叠 {len(ov)} 对")
+    for (_l, fn), (u, c) in zip(ROWS, stats.values()):
+        print(f"  {_l:12s} 占用 min/p50/p90/max="
+              f"{u.min():.0%}/{np.median(u):.0%}/{np.quantile(u,.9):.0%}/"
+              f"{u.max():.0%} CV={u.std()/u.mean():.2f} 纯算均值={c.mean():.0%}"
+              f" makespan={makespans[fn]:.3f}s")
+    return len(ov)
+
+
+def build_cdf(cell: str, rep: int, audit_only: bool):
+    """TTFT 经验 CDF（每方案一曲线，全 cohort 240 条；k4 用 rep0 代表）。
+
+    数据源：requests json.gz（rid, cls, arrival, deadline, F_s, ttft）。
+    """
+    import matplotlib
+    matplotlib.use("Agg")
+    import matplotlib.pyplot as plt
+    plt.rcParams["font.sans-serif"] = ["PingFang SC", "Heiti TC", "DejaVu Sans"]
+    plt.rcParams["axes.unicode_minus"] = False
+    from e25_ts_compare import audit_text_overlap
+
+    tag = f"{cell}@s{rep}"
+    fig, ax = plt.subplots(figsize=(8.6, 5.2), dpi=125)
+    colors = ["#888888", "#C44E52", "#DD8452", "#4C72B0", "#2C5F9E"]
+    for (label, fn), col in zip(ROWS, colors):
+        p = os.path.join(ROOT, tag, f"{fn}.requests.json.gz")
+        if not os.path.exists(p):
+            print(f"缺 {p}")
+            continue
+        rows = json.load(gzip.open(p))["rows"]
+        tt = np.sort([r[5] for r in rows])
+        y = (np.arange(1, len(tt) + 1)) / len(tt)
+        ax.plot(tt, y, lw=1.6, color=col,
+                label=f"{label}（p50={np.quantile(tt,.5):.2f}s "
+                      f"p95={np.quantile(tt,.95):.2f}s）")
+        d = [r[3] - r[2] for r in rows]        # deadline−arrival=期限宽度
+        ax.plot(np.sort(d), y, lw=.7, ls=":", color=col, alpha=.55)
+    ax.set_xlabel("TTFT (s)（实线=实际 TTFT；同色点线=期限宽度 deadline−arrival，"
+                  "TTFT 曲线在其左侧的部分=SLO 内）", fontsize=9.5)
+    ax.set_ylabel("累计分布 CDF", fontsize=10.5)
+    ax.set_xlim(0, None)
+    ax.grid(alpha=.25)
+    ax.legend(fontsize=8.5, loc="lower right")
+    ax.set_title(f"E26e TTFT 经验 CDF：{tag}（全 240 条请求；k4 画 rep0 代表）",
+                 fontsize=11)
+    fig.tight_layout()
+    ov = audit_text_overlap(fig)
+    if not audit_only:
+        fig.savefig(os.path.join(FIG_DIR, f"cq_fig_e26e_cdf_{tag}.png"),
+                    dpi=125)
+    plt.close(fig)
+    print(f"{tag}: CDF 图文字重叠 {len(ov)} 对")
+    return len(ov)
+
+
 if __name__ == "__main__":
     kind, cell, rep, audit = "bar", None, 0, False
     for a in sys.argv[1:]:
@@ -252,5 +386,9 @@ if __name__ == "__main__":
         build_gantt(cell or CELLS[-1], rep, audit)
     elif kind == "bw":
         build_bw(cell or CELLS[-1], rep, audit)
+    elif kind == "util":
+        build_util(cell or CELLS[-1], rep, audit)
+    elif kind == "cdf":
+        build_cdf(cell or CELLS[-1], rep, audit)
     else:
         build_bar(audit)
