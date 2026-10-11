@@ -129,10 +129,15 @@ def test_u4_cpa_picks_survival_threshold():
 
 
 def test_u4b_cpa_holds_b_at_mixed_burst():
-    """16A+16B 突发：rollout 模式选 16A+16WAIT（不让 B 切入 A 波）。"""
+    """16A+16B 突发：rollout 模式选 16A+16WAIT（不让 B 切入 A 波）。
+
+    budget_s 显式放宽：默认 1.0s 是部署语义,满载机器上推演可能超时截断
+    （20261011 实测 CPU 抢占下 15A≠16A 的 flaky,与决策逻辑无关）——本测
+    只验证逻辑,不受机器负载影响。
+    """
     scn = e26.e26_scenario(4)
     _eng, snap = _snapshot_of(scn, mk_specs(["A"] * 16 + ["B"] * 16))
-    act = CPAPolicy(mode="rollout").decide(snap, scn)
+    act = CPAPolicy(mode="rollout", budget_s=120.0).decide(snap, scn)
     d = [a for a in act.actions if a.kind == "DISPATCH"]
     assert len(d) == 16
     assert all(next(r for r in snap.requests
