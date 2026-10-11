@@ -41,7 +41,9 @@ def main():
             def show(fn, pct=True):
                 v = [fn(r) for r in rows]
                 s = f"{100*m(fn):.1f}%" if pct else f"{m(fn):.2f}"
-                return f"{s}[{'/'.join(f'{x:.0f}' if pct else f'{x:.2f}' for x in v)}]"
+                br = "/".join((f"{100*x:.0f}" if pct else f"{x:.2f}")
+                              for x in v)
+                return f"{s}[{br}]"
 
             shock = [r["cluster_A_disp_max"] for r in rows]
             print(f"{arm:14s} {show(lambda r: r['slo_rate']):>14s} "
