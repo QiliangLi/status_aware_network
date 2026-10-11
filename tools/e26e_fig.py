@@ -240,11 +240,13 @@ def build_bar(audit_only: bool):
 def build_util(cell: str, rep: int, audit_only: bool):
     """逐 NPU 利用率：箱线（32 NPU 分布）+ 热图（编号维度）双 panel。
 
-    均衡口径：不用全局聚合（总设备时间比）——它无法区分"均匀忙"与
-    "少数忙多数闲"；改用逐 NPU 占用率 u_i=(A算+B算+IO等)/makespan 的
-    分布（min/p50/p90/max + CV=σ/μ），CV 越小负载越均衡；纯算口径
-    c_i=(A算+B算)/makespan 另列。makespan 由 gantt meta 的
-    T_anchor_s/1.1 精确反推（run_cell 中 anchor=makespan×1.1）。
+    口径（20261011 用户裁定）：NPU 利用率 = 计算时间(A算+B算)/makespan
+    ——只有计算算占用；IO 等（STALL，数据未到位计算单元空转）与空闲均
+    不计。含等口径（算+等）仅作 stdout 对照：它度量"worker 槽位被派活"，
+    会把 FCFS 的红海伪装成高占用。均衡度量：逐 NPU 利用率分布的
+    min/p50/p90/max + CV=σ/μ（CV 越小越均衡），不用全局聚合（无法区分
+    "均匀忙"与"少数忙多数闲"）；热图保留编号维度。makespan 取自 records
+    （gantt 的 T_anchor 是首臂口径，非首臂不可用）。
     """
     import matplotlib
     matplotlib.use("Agg")
@@ -269,13 +271,13 @@ def build_util(cell: str, rep: int, audit_only: bool):
         g = json.load(gzip.open(p))
         m = mk.get(fn) or g["meta"]["T_anchor_s"] / 1.1
         makespans[fn] = m
-        acc = np.zeros(g["meta"]["m_workers"])
-        acc_c = np.zeros(g["meta"]["m_workers"])
+        acc_disp = np.zeros(g["meta"]["m_workers"])   # 含等（对照）
+        acc_c = np.zeros(g["meta"]["m_workers"])      # 纯算（主口径）
         for bk in g["buckets"]:
             for wid, (a, b, w, _idle) in enumerate(bk):
-                acc[wid] += a + b + w
+                acc_disp[wid] += a + b + w
                 acc_c[wid] += a + b
-        stats[fn] = (acc / m, acc_c / m)
+        stats[fn] = (acc_c / m, acc_disp / m)
     labels = [l for l, _ in ROWS]
     data = [stats[fn][0] * 100 for _l, fn in ROWS]
     fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(13.6, 4.6), dpi=125,
@@ -289,12 +291,12 @@ def build_util(cell: str, rep: int, audit_only: bool):
     means = [np.mean(x) for x in data]
     ax1.scatter(range(1, 6), means, marker="D", s=26, color="#C44E52",
                 zorder=3, label="均值")
-    ax1.set_ylabel("逐 NPU 占用率（算+等）%", fontsize=10)
+    ax1.set_ylabel("逐 NPU 利用率（计算/makespan）%", fontsize=10)
     ax1.set_ylim(0, 100)
     ax1.grid(axis="y", alpha=.25)
     ax1.legend(fontsize=8.5)
     cvs = [f"CV={np.std(x)/np.mean(x):.2f}" for x in data]
-    ax1.set_title("32 NPU 占用率分布（CV 越小越均衡）\n"
+    ax1.set_title("32 NPU 利用率分布（CV 越小越均衡）\n"
                   + "｜".join(f"{l.split(' ')[0]}{c[2:]}" for l, c in
                               zip(labels, cvs)), fontsize=8.6)
     mat = np.array(data)
@@ -303,11 +305,11 @@ def build_util(cell: str, rep: int, audit_only: bool):
     ax2.set_yticklabels(labels, fontsize=9)
     ax2.set_xticks([0, 7, 15, 23, 31])
     ax2.set_xlabel("NPU 编号", fontsize=10)
-    ax2.set_title("占用率热图（亮=高）——尾部集中在低编号即此处显形",
+    ax2.set_title("利用率热图（亮=高）——尾部集中在低编号即此处显形",
                   fontsize=9)
-    fig.colorbar(im, ax=ax2, label="占用率 %")
+    fig.colorbar(im, ax=ax2, label="利用率 %")
     fig.suptitle(f"E26e 逐 NPU 利用率：{tag}"
-                 f"（占用=算+IO等；makespan "
+                 f"（利用率=计算/makespan，IO 等≠占用；makespan "
                  f"{', '.join(f'{fn.split(chr(95))[0]}={makespans[fn]:.2f}s' for _l, fn in ROWS)}）",
                  fontsize=10.5)
     fig.tight_layout(rect=(0, 0, 1, 0.96))
@@ -317,11 +319,11 @@ def build_util(cell: str, rep: int, audit_only: bool):
                     dpi=125)
     plt.close(fig)
     print(f"{tag}: util 图文字重叠 {len(ov)} 对")
-    for (_l, fn), (u, c) in zip(ROWS, stats.values()):
-        print(f"  {_l:12s} 占用 min/p50/p90/max="
-              f"{u.min():.0%}/{np.median(u):.0%}/{np.quantile(u,.9):.0%}/"
-              f"{u.max():.0%} CV={u.std()/u.mean():.2f} 纯算均值={c.mean():.0%}"
-              f" makespan={makespans[fn]:.3f}s")
+    for (_l, fn), (c, d) in zip(ROWS, stats.values()):
+        print(f"  {_l:12s} 利用率(纯算) min/p50/p90/max="
+              f"{c.min():.0%}/{np.median(c):.0%}/{np.quantile(c,.9):.0%}/"
+              f"{c.max():.0%} CV={c.std()/c.mean():.2f} 均值={c.mean():.0%}"
+              f"｜含等对照均值={d.mean():.0%} makespan={makespans[fn]:.3f}s")
     return len(ov)
 
 
