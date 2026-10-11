@@ -330,7 +330,8 @@ def build_util(cell: str, rep: int, audit_only: bool):
                     dpi=125)
     plt.close(fig)
     print(f"{tag}: util 图文字重叠 {len(ov)} 对")
-    for (_l, fn), (c, d) in zip(ROWS, stats.items()):
+    for (_l, fn) in ROWS:
+        c, d = stats[fn]
         print(f"  {_l:12s} 利用率(纯算) min/p50/p90/max="
               f"{c.min():.0%}/{np.median(c):.0%}/{np.quantile(c,.9):.0%}/"
               f"{c.max():.0%} CV={c.std()/c.mean():.2f} 均值={c.mean():.0%}"
