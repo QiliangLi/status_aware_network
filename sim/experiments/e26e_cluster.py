@@ -158,6 +158,7 @@ def run_cell(cell: str, rep: int, d: str, arms=None):
                   "n_fallback": h.get("n_fallback"),
                   "n_deviate": h.get("n_deviate"),
                   "n_tie": h.get("n_tie"),
+                  "n_overrun": h.get("n_overrun"),
                   "n_clusters": len(centers),
                   "cluster_A_disp": shock,
                   "cluster_A_disp_mean": float(np.mean(shock)) if shock else None,

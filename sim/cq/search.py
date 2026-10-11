@@ -10,6 +10,7 @@
 from __future__ import annotations
 
 import math
+import os
 import time as _time
 from dataclasses import replace
 from fractions import Fraction
@@ -404,6 +405,16 @@ def score_of(Fs: Dict[int, Optional[float]], snap, theta: str):
     return (norm_sum, ttft_sum)
 
 
+def _clone_forecast_eng(eng: CqEngine) -> CqEngine:
+    """推演副本（模块级：fork 并行 worker 与 MPCPolicy._clone_forecast 共用）。"""
+    e = eng.clone_for_search()
+    e.policy = eng.policy
+    obs = Observable(eng.scn, numeric=float)
+    obs.attach(e)
+    e.observable = obs
+    return e
+
+
 # ---------------------------------------------------------------------------
 # MPC / local
 # ---------------------------------------------------------------------------
@@ -416,7 +427,8 @@ class MPCPolicy:
                  K_req: int = 32, K_batch: int = 24,
                  budget_s: float = 0.002, max_events: int = 20000,
                  theta: str = "S", gate: float = 0.0, c_ref: float = 0.0,
-                 base: str = "edf", composer: bool = False):
+                 base: str = "edf", composer: bool = False,
+                 par_workers: Optional[int] = None):
         self.pid = pid
         self.local = local
         self.H = H
@@ -435,6 +447,11 @@ class MPCPolicy:
         # 保证既有金标与实验口径可回归（设计文档 §5）。
         self.base = base
         self.composer = composer
+        # 候选评分进程池（fork-per-decision，docs/MPC推演并行加速-*-20261011.md）：
+        # 0/1=串行原路径（本分支代码零改动）；>=2=并行分支。默认取 MPC_PAR
+        # 环境变量，实验脚本无需改构造代码即可开。
+        self.par_workers = (par_workers if par_workers is not None
+                            else int(os.environ.get("MPC_PAR", "0") or 0))
         self._d_hist = {}          # 累计 d 分布（rid 去重，阈值稳定口径）
         self.pi = (GuardedEDFBW(hist=self._d_hist) if base == "bw_edf"
                    else GuardedEDF())
@@ -462,13 +479,13 @@ class MPCPolicy:
         return {"n_decides": self.n_decides, "n_searched": self.n_searched,
                 "n_scored": self.n_scored, "n_fallback": self.n_fallback,
                 "n_deviate": self.n_deviate, "n_tie": self.n_tie,
+                "n_overrun": self.n_overrun,
                 "search_ratio": sr, "fallback_ratio": fr,
                 "deviate_ratio": dr}
 
     def decide(self, snap, scn) -> JointAction:
         t0 = _time.perf_counter()
         self.n_decides += 1
-        budget = [self.max_events]
         base = self.pi.decide(snap, scn)
         if not snap.idle_workers or not snap.queued:
             return base
@@ -477,6 +494,83 @@ class MPCPolicy:
         # 20260917 审计修复：此前候选从已排空的 base 副本克隆，DISPATCH 验证
         # 必然失败、全体候选得分==基础动作，搜索从未真正分支。
         est0 = build_forecast_engine(snap, scn, self.pi, local=self.local)
+        if self.par_workers >= 2:
+            return self._decide_par(snap, scn, est0, base, t0)
+        return self._decide_serial(snap, scn, est0, base, t0)
+
+    def _decide_par(self, snap, scn, est0, base, t0):
+        """并行分支：满预算 fork 推演 + 原序重放（设计文档 §4.2）。
+
+        与串行路径（上文 for 循环）逐位等价的依据：①候选从同一 est0 出发、
+        独立副本推演；②hist 在 472 行 base 计算后于决策点内恒定（写入幂等）；
+        ③预算池的顺序依赖由重放复现——满预算推演的事件序列与串行"以 R_i
+        进入"的前 R_i 个事件完全相同，c_i>R_i 即串行截断（skip+池清零），
+        接受/截断/终止点与串行逐位一致。基础设施故障时整决策点回退串行。
+        """
+        from .par_eval import par_eval_batch, ParEvalError
+        node_snap = est0.observable.snapshot(est0.w.t)
+        batches = build_batches(node_snap, scn, self.pi, self.K_req,
+                                self.K_batch)
+        idle = sorted(node_snap.idle_workers)
+        actions = self._joint_actions(est0, node_snap, scn, batches, idle)
+        items = [(0, base)] + [(i + 1, a) for i, a in enumerate(actions)]
+        # 按需 worker 数：候选少时少 fork（每 child 至少 2 项才值得起进程，
+        # 固定开销 ≈fork+COW 触碰+collect）；仅影响速度路径选择，重放裁决
+        # 与结果不变（V0 等价性覆盖）
+        nw = min(self.par_workers, max(2, (len(items) + 1) // 2))
+        if nw < 2 or len(items) < 2:
+            return self._decide_serial(snap, scn, est0, base, t0)
+        try:
+            res = par_eval_batch(_clone_forecast_eng, forecast_drain, est0,
+                                 items, nw, self.max_events)
+        except ParEvalError:
+            # 回退串行重算本决策点（慢而行为一致；不吞异常计数）
+            return self._decide_serial(snap, scn, est0, base, t0)
+        # ---- 原序重放：序列第 0 项 = base（R_0 = max_events，与串行同） ----
+        if self.H > 1:
+            self.n_depth_clamped += 1
+        _c0, tr0, Fs0 = res[0]
+        if tr0 or Fs0 is None:
+            self.n_fallback += 1
+            return base
+        base_score = score_of(Fs0, snap, self.theta)
+        if base_score is None:
+            self.n_fallback += 1
+            return base
+        best = (base_score, base)
+        cum = _c0
+        for i, act in enumerate(actions, 1):
+            if (_time.perf_counter() - t0 > self.budget_s
+                    or self.max_events - cum <= 0):
+                self.n_overrun += 1
+                break
+            c, trunc, Fs = res[i]
+            if trunc or c > self.max_events - cum:
+                # 串行下该候选在 R_i 处截断：Fs=None→continue、池清零
+                # （下一存在的迭代顶 break 并计 n_overrun；若为最后一项则
+                # 循环自然结束不计数——与串行逐位一致）
+                cum = self.max_events
+                continue
+            if Fs is None:
+                continue
+            sc = score_of(Fs, snap, self.theta)
+            if sc is None:
+                continue
+            self.n_scored += 1
+            if sc == base_score:
+                self.n_tie += 1
+            if sc < best[0]:
+                best = (sc, act)
+            cum += c
+        # gate：主目标须严格改善（默认 gate=0）
+        if best[1] is not base and best[0][0] < base_score[0] - self.gate:
+            self.n_deviate += 1
+            return best[1]
+        return base
+
+    def _decide_serial(self, snap, scn, est0, base, t0):
+        """串行评分段（并行分支的回退路径；逻辑与 decide 主路径逐字一致）。"""
+        budget = [self.max_events]
         est_base = self._clone_forecast(est0)
         Fs = forecast_drain(est_base, base, budget)
         if Fs is None:
@@ -487,12 +581,11 @@ class MPCPolicy:
             self.n_fallback += 1
             return base
         best = (base_score, base)
-        # H>1 的逐决策点分支未实现（原 beam 从排空态展开，无效）：统一按
-        # H=1 语义执行并记录，避免静默的假深度。
         if self.H > 1:
             self.n_depth_clamped += 1
         node_snap = est0.observable.snapshot(est0.w.t)
-        batches = build_batches(node_snap, scn, self.pi, self.K_req, self.K_batch)
+        batches = build_batches(node_snap, scn, self.pi, self.K_req,
+                                self.K_batch)
         idle = sorted(node_snap.idle_workers)
         actions = self._joint_actions(est0, node_snap, scn, batches, idle)
         for act in actions:
@@ -511,19 +604,13 @@ class MPCPolicy:
                 self.n_tie += 1
             if sc < best[0]:
                 best = (sc, act)
-        # gate：主目标须严格改善（默认 gate=0）
         if best[1] is not base and best[0][0] < base_score[0] - self.gate:
             self.n_deviate += 1
             return best[1]
         return base
 
     def _clone_forecast(self, eng: CqEngine) -> CqEngine:
-        e = eng.clone_for_search()
-        e.policy = eng.policy
-        obs = Observable(eng.scn, numeric=float)
-        obs.attach(e)
-        e.observable = obs
-        return e
+        return _clone_forecast_eng(eng)
 
     def _joint_actions(self, node, node_snap, scn, batches, idle):
         """逐 worker 扩展：DISPATCH 候选 + WAIT；保留 J_width 个部分动作。
