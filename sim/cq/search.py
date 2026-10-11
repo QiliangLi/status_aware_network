@@ -282,6 +282,12 @@ def build_forecast_engine(snap: ObservableSnapshot, scn: CqScenario,
         for f in flows_by_batch.get(bid, ()):
             if f.completed:
                 b.read_ready[f.layer] = 0.0   # 公共事实：该层读取已完成
+        if ld < w.L and b.V_layers[ld] == 0:
+            # V=0 无读流（如零读类）：真实引擎在派发/前层启动时已直接置
+            # read_ready（_dispatch 与 _start_layer 的 else 分支），公共账本
+            # 无流可考——按同一公共事实补齐；漏置则推演批在第 ld 层永久
+            # 卡死（E26f 首个零读类实验暴露：占位 bid 批 fallback≈76%）
+            b.read_ready[ld] = 0.0
         if ld > 0:
             rem = max(0.0, c_hat - max(0.0, now - float(pw.cur_layer_start_s or now)))
             prev_z = now + rem if ld - 1 == max(0, ld - 1) else now
