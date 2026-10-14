@@ -34,8 +34,9 @@ B_GBPS = 120.0
 BIN_S = 0.01
 
 ROWS = [("FCFS", "fcfs"), ("EDF", "edf"), ("local v2.1", "localS_v2.1"),
-        ("mpc v2.1 θ=S", "mpcS_v2.1"), ("mpc v2.1 θ=T", "mpcT_v2.1")]
-POLICY_ORDER = ["fcfs", "edf", "localS_v2.1", "mpcS_v2.1", "mpcT_v2.1"]
+        ("mpc v2.1 θ=S", "mpcS_v2.1"), ("mpc v2.1 θ=T", "mpcT_v2.1"),
+        ("TFS(规则)", "tfs")]
+POLICY_ORDER = ["fcfs", "edf", "localS_v2.1", "mpcS_v2.1", "mpcT_v2.1", "tfs"]
 CELLS = ["D1fA_k16", "D1fB_k16"]
 CELL_LABEL = {"D1fA_k16": "C_A 型（零读轻算 48ms/条，存储瓶颈）",
               "D1fB_k16": "C_B 型（零读重算 229ms/条，计算瓶颈）"}
@@ -116,8 +117,9 @@ def build_gantt(cell: str, rep: int, audit_only: bool):
         last = max((i for i, bk in enumerate(g["buckets"])
                     if any(v > 0 for row in bk for v in row)), default=0)
         t_max = max(t_max, (last + 1) * g["meta"]["T_anchor_s"] / K)
-    fig = plt.figure(figsize=(14.6, 3.0 * 5 + 0.9), dpi=125)
-    gs = GridSpec(5, 1, hspace=0.34, left=0.13, right=0.985, top=0.88,
+    n_row = len(ROWS)
+    fig = plt.figure(figsize=(14.6, 3.0 * n_row + 0.9), dpi=125)
+    gs = GridSpec(n_row, 1, hspace=0.34, left=0.13, right=0.985, top=0.88,
                   bottom=0.04)
     stats = []
     for ri, (label, g) in enumerate(gants):
@@ -127,7 +129,7 @@ def build_gantt(cell: str, rep: int, audit_only: bool):
         ax.set_ylabel(f"{label}\nA算{fr[0]:.0%} B算{fr[1]:.0%} "
                       f"C算{fr[2]:.0%}\nIO等{fr[3]:.0%} 闲{fr[4]:.0%}",
                       fontsize=9.5)
-        if ri == 4:
+        if ri == n_row - 1:
             ax.set_xlabel("仿真时间 (s)", fontsize=10)
     fig.suptitle(f"图A｜E26f 分类甘特：{tag}（{CELL_LABEL[cell]}）"
                  "（蓝=A算 橙=B算 绿=C算 红=IO等 灰=无请求）", fontsize=12.5, y=0.97)
@@ -160,8 +162,9 @@ def build_bw(cell: str, rep: int, audit_only: bool):
     from matplotlib.gridspec import GridSpec
 
     tag = f"{cell}@s{rep}"
-    fig = plt.figure(figsize=(14.6, 2.3 * 5 + 0.9), dpi=125)
-    gs = GridSpec(5, 1, hspace=0.40, left=0.08, right=0.985, top=0.88,
+    n_row = len(ROWS)
+    fig = plt.figure(figsize=(14.6, 2.3 * n_row + 0.9), dpi=125)
+    gs = GridSpec(n_row, 1, hspace=0.40, left=0.08, right=0.985, top=0.88,
                   bottom=0.05)
     for ri, (label, fn) in enumerate(ROWS):
         p = os.path.join(ROOT, tag, f"{fn}.intervals.npz")
@@ -196,7 +199,7 @@ def build_bw(cell: str, rep: int, audit_only: bool):
         ax.grid(alpha=.2, which="both")
         if ri == 0:
             ax.legend(loc="lower right", fontsize=7.5)
-        if ri == 4:
+        if ri == n_row - 1:
             ax.set_xlabel("仿真时间 (s)", fontsize=10)
         over = float(w[arr[:, 3] > B_GBPS].sum() / w.sum())
         sat = float(w[arr[:, 2] >= 0.9 * B_GBPS].sum() / w.sum())
@@ -224,7 +227,8 @@ def build_cdf(cell: str, rep: int, audit_only: bool):
 
     tag = f"{cell}@s{rep}"
     fig, ax = plt.subplots(figsize=(8.6, 5.2), dpi=125)
-    colors = ["#888888", "#C44E52", "#DD8452", "#4C72B0", "#2C5F9E"]
+    colors = ["#888888", "#C44E52", "#DD8452", "#4C72B0", "#2C5F9E",
+              "#55A868"]
     for (label, fn), col in zip(ROWS, colors):
         p = os.path.join(ROOT, tag, f"{fn}.requests.json.gz")
         if not os.path.exists(p):
@@ -301,7 +305,7 @@ def build_util(cell: str, rep: int, audit_only: bool):
         patch.set_facecolor("#9DC3E6" if "θ=S" not in _l else "#2C5F9E")
         patch.set_alpha(.75)
     means = [np.mean(x) for x in data]
-    ax1.scatter(range(1, 6), means, marker="D", s=26, color="#C44E52",
+    ax1.scatter(range(1, len(ROWS) + 1), means, marker="D", s=26, color="#C44E52",
                 zorder=3, label="均值")
     ax1.set_ylabel("逐 NPU 利用率（计算/makespan）%", fontsize=10)
     ax1.set_ylim(0, 100)
@@ -313,7 +317,7 @@ def build_util(cell: str, rep: int, audit_only: bool):
                               zip(labels, cvs)), fontsize=8.6)
     mat = np.array(data)
     im = ax2.imshow(mat, aspect="auto", cmap="viridis", vmin=0, vmax=100)
-    ax2.set_yticks(range(5))
+    ax2.set_yticks(range(len(ROWS)))
     ax2.set_yticklabels(labels, fontsize=9)
     ax2.set_xticks([0, 7, 15, 23, 31])
     ax2.set_xlabel("NPU 编号", fontsize=10)

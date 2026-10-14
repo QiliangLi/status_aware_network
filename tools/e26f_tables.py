@@ -10,7 +10,7 @@ import numpy as np
 
 REPO = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 ROOT = os.path.join(REPO, "results", "cq", "eval", "e26f")
-ARMS = ["fcfs", "edf", "localS_v2.1", "mpcS_v2.1", "mpcT_v2.1"]
+ARMS = ["fcfs", "edf", "localS_v2.1", "mpcS_v2.1", "mpcT_v2.1", "tfs"]
 CELLS = ["D1fA_k16", "D1fB_k16"]
 
 
