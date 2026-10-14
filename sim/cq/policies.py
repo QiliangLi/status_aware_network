@@ -331,6 +331,68 @@ class GuardedEDFBW(SimplePolicy):
         return JointAction(tuple(acts))
 
 
+class TFS(SimplePolicy):
+    """TFS 规则式调度器（Triage-Fill-Stagger，docs/TFS规则式调度器-20261014.md）。
+
+    从 MPC 收益规律蒸馏的零推演策略（E26f 验证）：在 GuardedEDFBW 骨架
+    （bw_demand 配额口径 + WAIT 唤醒对齐）上做三处规则化差异——
+    R1 填空：全局 (slack, deadline) 序派发，重流配额满时跳过继续找轻流
+        （轻/零流永不被带宽配额阻塞——零读类死于排队而非资源）；
+    R2 守门：重流并发 ≤ C（跳过不中断扫描）；
+    R3 锚点让位：老化豁免仅当队列中无未派轻/零流（防饿死不牺牲填空）；
+    R4 错峰：无可派时空闲 worker WAIT 至配额释放时刻（bw_demand wake）。
+    slack_i = deadline_i − now − T0_i（全公开；非稀缺时与 deadline 序等价）。
+    不做任何带宽外推（保守账本律）。batch=1 口径（E26 系 n_max=1）；
+    n_max>1 的批填批不在本策略范围。
+    """
+
+    def __init__(self, hist: dict = None):
+        super().__init__("cq_tfs",
+                         lambda r, s: (float(r.deadline_s), r.arrival_s, r.rid))
+        self._hist = hist if hist is not None else {}
+
+    def decide(self, snap, scn) -> JointAction:
+        d, d_heavy, C, heavy_run, wake = bw_demand(snap, self._hist)
+        anchors = self._aged_anchors(snap, scn)
+        now = float(snap.now)
+        queued = [r for r in snap.requests if r.rid in snap.queued]
+        slack = {r.rid: float(r.deadline_s) - now - float(r.T0_s)
+                 for r in queued}
+        order = sorted(queued, key=lambda r: (slack[r.rid],
+                                              float(r.deadline_s), r.rid))
+        acts, used, acc = [], set(), heavy_run
+        for wid in sorted(snap.idle_workers):
+            pick = None
+            for r in order:
+                if r.rid in used:
+                    continue
+                if d[r.rid] >= d_heavy and acc >= C:
+                    continue          # R2：配额满跳过重流，继续找轻流（R1）
+                pick = r.rid
+                break
+            if pick is None and not any(   # R3：锚点让位于未派轻/零流
+                    d[r.rid] < d_heavy and r.rid not in used for r in order):
+                for a in anchors:
+                    if a in snap.queued and a not in used:
+                        pick = a
+                        break
+            if pick is None:              # R4：错峰 WAIT
+                acts.append(Action("WAIT", wid, (), wake))
+                continue
+            acts.append(Action("DISPATCH", wid, (pick,)))
+            used.add(pick)
+            if d[pick] >= d_heavy:
+                acc += 1
+        return JointAction(tuple(acts))
+
+
+def make_tfs():
+    return TFS()
+
+
+# 注:cq_tfs 不注册进 SIMPLE_POLICIES——该字典是 E25 实验的"简单策略集"
+# 契约(test_fm07 断言 records 集合与之一致),扩集=改 E25 实验定义;
+# e26f 系经 make_tfs() 直接构造。
 SIMPLE_POLICIES = {
     "cq_fcfs": make_fcfs,
     "cq_lpm": make_lpm,

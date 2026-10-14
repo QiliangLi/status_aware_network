@@ -40,7 +40,7 @@ from fractions import Fraction as F
 
 import numpy as np
 
-from sim.cq.policies import make_edf, make_fcfs
+from sim.cq.policies import make_edf, make_fcfs, make_tfs
 from sim.cq.profile import batch_compute_s, layer_read_gb
 from sim.cq.search import MPCPolicy
 from sim.cq.simrun import run_case
@@ -63,7 +63,8 @@ ARMS = [("fcfs", "cq_fcfs", None, None, None),
         ("edf", "cq_edf", None, None, None),
         ("localS_v2.1", "cq_local", "S", "bw_edf", True),
         ("mpcS_v2.1", "cq_mpc", "S", "bw_edf", True),
-        ("mpcT_v2.1", "cq_mpc", "T", "bw_edf", True)]
+        ("mpcT_v2.1", "cq_mpc", "T", "bw_edf", True),
+        ("tfs", "cq_tfs", None, None, None)]   # 20261015 增补臂(TFS 设计 §4)
 
 # (cell, c_variant, seed 基号)：C 变体决定计算强度档（A=轻挤出/B=重挤出）
 C_LEVELS = (("D1fA_k16", "A", 2), ("D1fB_k16", "B", 3))
@@ -296,6 +297,8 @@ def run_cell(cell: str, rep: int, d: str, arms=None):
             pol = make_fcfs()
         elif pid == "cq_edf":
             pol = make_edf()
+        elif pid == "cq_tfs":
+            pol = make_tfs()
         else:
             pol = MPCPolicy(pid=pid, local=(pid == "cq_local"), H=1,
                             theta=theta, c_ref=c_ref, budget_s=MPC_BUDGET_S,
