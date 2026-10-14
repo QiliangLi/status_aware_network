@@ -25,6 +25,7 @@ def main():
     records = []
     for p in sorted(glob.glob(os.path.join(ROOT, "records_part_*.json"))):
         records.extend(json.load(open(p, encoding="utf-8")))
+    records.sort(key=lambda r: (r["cell"], r["rep"]))   # 方括号统一 rep 升序
     print(f"{len(records)} records")
     for cell in CELLS:
         print(f"\n== {cell}")
@@ -81,6 +82,37 @@ def main():
                   f"{100*min(others):.1f}% → "
                   f"{'垫底' if edf_tot[0] < min(others) else '不垫底(该 seed)'}"
                   f"  各rep={[f'{100*x:.0f}' for x in edf_tot[1]]}")
+        # 逐 NPU 利用率表(纯算口径;与 util 图箱线同数据,给精确数字)
+        # 均值列=全机平均=device_compute_s/device_total_mh_s(=32 NPU 纯算
+        # 利用率的算术均值,records 未存逐 NPU 数组,由此恒等式恢复)
+        print(f"\n  逐 NPU 利用率(纯算=计算/makespan,中位数;方括号=各 rep)")
+        print(f"  {'臂':14s} {'min':>12s} {'p50':>12s} {'p90':>12s} "
+              f"{'max':>12s} {'均值':>12s} {'CV':>10s} {'含等均值':>12s} makespan")
+        for arm in ARMS:
+            rows_u = [r for r in records
+                      if r["cell"] == cell and r["policy"] == arm]
+            if not rows_u:
+                continue
+
+            def um(key):
+                return med(records, cell, arm, lambda r: r[key])
+
+            def cell_of(key, pct=True):
+                m, v = um(key)
+                s = f"{100*m:.1f}%" if pct else f"{m:.2f}"
+                return f"{s}[{'/'.join(f'{100*x:.0f}' if pct else f'{x:.2f}' for x in v)}]"
+
+            mk = um("makespan_s")
+            mean_u = med(records, cell, arm,
+                         lambda r: r["device_compute_s"] / r["device_total_mh_s"])
+            print(f"  {arm:14s} {cell_of('util_min'):>12s} "
+                  f"{cell_of('util_p50'):>12s} {cell_of('util_p90'):>12s} "
+                  f"{cell_of('util_max'):>12s} "
+                  f"{100*mean_u[0]:.1f}%"
+                  f"[{'/'.join(f'{100*x:.0f}' for x in mean_u[1])}]"
+                  f" {um('util_cv')[0]:.2f}{'':>4s} "
+                  f"{cell_of('util_wait_mean'):>12s} "
+                  f"{mk[0]:.2f}s")
 
 
 if __name__ == "__main__":
