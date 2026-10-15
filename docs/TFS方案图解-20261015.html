@@ -50,8 +50,8 @@
   svg.flow{width:100%; height:auto; display:block}
   .flow .node{cursor:pointer; transition:opacity .3s}
   .flow .node rect,.flow .node polygon{fill:#fff; stroke:var(--line); stroke-width:1.5; transition:fill .3s, stroke .3s, stroke-width .3s}
-  .flow .node .t{font-size:13px; font-weight:700; fill:var(--ink); text-anchor:middle}
-  .flow .node .s{font-size:10.5px; fill:var(--ink-soft); text-anchor:middle}
+  .flow .node .t{font-size:16px; font-weight:700; fill:var(--ink); text-anchor:middle}
+  .flow .node .s{font-size:12px; fill:var(--ink-soft); text-anchor:middle}
   .flow .node.trig rect{fill:#eef4f0; stroke-dasharray:5 3}
   .flow .node.done rect,.flow .node.done polygon{fill:var(--doneN); stroke:var(--doneB)}
   .flow .node.active rect,.flow .node.active polygon{stroke:var(--accent); stroke-width:3; fill:#fff; filter:drop-shadow(0 0 5px rgba(15,107,107,.35))}
@@ -228,92 +228,92 @@
       <div class="fc-box">
         <h4>TFS · 完整处理流程</h4>
         <p class="fc-hint">随右侧例子逐步高亮；点击节点可跳到该环节</p>
-        <svg class="flow" id="flow" viewBox="0 0 360 846" role="img" aria-label="TFS 处理流程：事件触发后算读取压力、定门槛与配额、按时间预算排序、逐 NPU 扫描派发；轻流直接派、重流受配额、满员跳过；扫尽无可派时老化豁免或 WAIT 至最早重批完成；执行后批完成释放资源回到触发">
+        <svg class="flow" id="flow" viewBox="0 0 450 834" role="img" aria-label="TFS 处理流程：事件触发后算读取压力、定门槛与配额、按时间预算排序、逐 NPU 扫描派发；轻流直接派、重流受配额、满员跳过；扫尽无可派时老化豁免或 WAIT 至最早重批完成；批完成释放资源回到触发">
           <defs>
             <marker id="arw" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="7" markerHeight="7" orient="auto"><path d="M0,0 L10,5 L0,10 z" fill="#c9c2b0"/></marker>
             <marker id="arwA" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="7" markerHeight="7" orient="auto"><path d="M0,0 L10,5 L0,10 z" fill="#0f6b6b"/></marker>
           </defs>
           <!-- 连线（先画，压在节点下） -->
-          <path class="edge" id="e-T1" d="M180,50 L180,66" marker-end="url(#arw)"/>
-          <path class="edge" id="e-12" d="M180,122 L180,138" marker-end="url(#arw)"/>
-          <path class="edge" id="e-23" d="M180,194 L180,210" marker-end="url(#arw)"/>
-          <path class="edge" id="e-34" d="M180,266 L180,282" marker-end="url(#arw)"/>
-          <path class="edge" id="e-4d" d="M180,338 L180,358" marker-end="url(#arw)"/>
-          <path class="edge" id="e-dyes" d="M180,430 L180,466" marker-end="url(#arw)"/>
-          <text class="elabel" x="188" y="452">是</text>
-          <path class="edge" id="e-dno" d="M54,394 L28,394 L28,447 L46,447" marker-end="url(#arw)"/>
-          <text class="elabel" x="30" y="386">否（重流满员）</text>
-          <path class="edge" id="e-skipback" d="M106,492 L106,394 L54,394" marker-end="url(#arw)"/>
-          <text class="elabel" x="112" y="446" style="writing-mode:tb">跳过后继续扫描</text>
-          <path class="edge" id="e-swait" d="M106,522 L106,548" marker-end="url(#arw)"/>
-          <text class="elabel" x="114" y="540">队列扫尽仍无可派</text>
-          <path class="edge" id="e-waity" d="M106,628 L106,650" marker-end="url(#arw)"/>
-          <text class="elabel" x="114" y="644">有</text>
-          <path class="edge" id="e-waitn" d="M106,676 L106,698" marker-end="url(#arw)"/>
-          <text class="elabel" x="114" y="692">无</text>
-          <path class="edge" id="e-dispback" d="M258,522 L258,560 L286,560 L286,776 L262,776" marker-end="url(#arw)"/>
-          <path class="edge" id="e-exback" d="M180,706 L180,750" marker-end="url(#arw)"/>
-          <path class="edge" id="e-loop" d="M96,776 L16,776 Q8,776 8,768 L8,36 Q8,28 16,28 L40,28" marker-end="url(#arw)"/>
-          <text class="elabel" x="16" y="400" style="writing-mode:tb">下一个事件重新来一轮</text>
+          <path class="edge" id="e-T1" d="M290,50 L290,64" marker-end="url(#arw)"/>
+          <path class="edge" id="e-12" d="M290,122 L290,136" marker-end="url(#arw)"/>
+          <path class="edge" id="e-23" d="M290,194 L290,208" marker-end="url(#arw)"/>
+          <path class="edge" id="e-34" d="M290,266 L290,280" marker-end="url(#arw)"/>
+          <path class="edge" id="e-4d" d="M290,338 L290,356" marker-end="url(#arw)"/>
+          <path class="edge" id="e-dyes" d="M290,434 L290,458" marker-end="url(#arw)"/>
+          <text class="elabel" x="298" y="452">是</text>
+          <path class="edge" id="e-dno" d="M190,398 L190,430 L78,430 L78,462" marker-end="url(#arw)"/>
+          <text class="elabel" x="196" y="390">否（满员）</text>
+          <path class="edge" id="e-skipback" d="M130,489 L147,489 L147,311 L160,311" marker-end="url(#arw)"/>
+          <text class="elabel" x="138" y="400" style="writing-mode:tb">跳过后继续扫描</text>
+          <path class="edge" id="e-swait" d="M78,512 L78,542" marker-end="url(#arw)"/>
+          <text class="elabel" x="86" y="532">队列扫尽</text>
+          <path class="edge" id="e-waity" d="M78,622 L78,644" marker-end="url(#arw)"/>
+          <text class="elabel" x="86" y="638">有</text>
+          <path class="edge" id="e-waitn" d="M138,584 L166,584" marker-end="url(#arw)"/>
+          <text class="elabel" x="144" y="576">无</text>
+          <path class="edge" id="e-dispback" d="M410,489 L436,489 L436,780 L384,780" marker-end="url(#arw)"/>
+          <path class="edge" id="e-exback" d="M78,692 L78,780 L116,780" marker-end="url(#arw)"/>
+          <path class="edge" id="e-loop" d="M250,804 L250,818 Q250,826 242,826 L14,826 Q6,826 6,818 L6,36 Q6,28 14,28 L142,28" marker-end="url(#arw)"/>
+          <text class="elabel" x="16" y="240" style="writing-mode:tb">下一个事件重新来一轮</text>
           <!-- 节点 -->
           <g class="node trig" id="n-T" data-node="T" tabindex="0" role="button" aria-label="触发：跳到触发步">
-            <rect x="40" y="8" width="280" height="42" rx="21"/>
-            <text class="t" x="180" y="34">触发：请求到达 / NPU 空出 / 唤醒到点</text>
+            <rect x="146" y="8" width="288" height="42" rx="21"/>
+            <text class="t" x="290" y="34" style="font-size:14.5px">触发：请求到达 / NPU 空出 / 唤醒到点</text>
           </g>
           <g class="node" id="n-1" data-node="1" tabindex="0" role="button" aria-label="第 1 步算读取压力">
-            <rect x="50" y="68" width="260" height="54" rx="9"/>
-            <text class="t" x="180" y="90">第 1 步 · 算读取压力 d</text>
-            <text class="s" x="180" y="108">d = 每层读取字节 ÷ 每层计算时长</text>
+            <rect x="160" y="68" width="260" height="54" rx="9"/>
+            <text class="t" x="290" y="90">第 1 步 · 算读取压力 d</text>
+            <text class="s" x="290" y="108">d = 每层读取字节 ÷ 每层计算时长</text>
           </g>
           <g class="node" id="n-2" data-node="2" tabindex="0" role="button" aria-label="第 2 步定门槛与配额">
-            <rect x="50" y="140" width="260" height="54" rx="9"/>
-            <text class="t" x="180" y="162">第 2 步 · 定门槛与配额</text>
-            <text class="s" x="180" y="180">门槛 = 全体 d 的 P75；配额 C = ⌊B ÷ 门槛⌋</text>
+            <rect x="160" y="140" width="260" height="54" rx="9"/>
+            <text class="t" x="290" y="162">第 2 步 · 定门槛与配额</text>
+            <text class="s" x="290" y="180">门槛 = P75 分位；配额 = 带宽 ÷ 门槛</text>
           </g>
           <g class="node" id="n-3" data-node="3" tabindex="0" role="button" aria-label="第 3 步按时间预算排序">
-            <rect x="50" y="212" width="260" height="54" rx="9"/>
-            <text class="t" x="180" y="234">第 3 步 · 按时间预算排序</text>
-            <text class="s" x="180" y="252">预算 = 期限 − now − T0，小者先</text>
+            <rect x="160" y="212" width="260" height="54" rx="9"/>
+            <text class="t" x="290" y="234">第 3 步 · 按时间预算排序</text>
+            <text class="s" x="290" y="252">预算 = 期限 − now − T0，小者先</text>
           </g>
           <g class="node" id="n-4" data-node="4" tabindex="0" role="button" aria-label="第 4 步逐空闲 NPU 扫描">
-            <rect x="50" y="284" width="260" height="54" rx="9"/>
-            <text class="t" x="180" y="306">第 4 步 · 逐空闲 NPU 扫描</text>
-            <text class="s" x="180" y="324">按排序逐条看；派完一个 NPU 看下一个</text>
+            <rect x="160" y="284" width="260" height="54" rx="9"/>
+            <text class="t" x="290" y="306">第 4 步 · 逐空闲 NPU 扫描</text>
+            <text class="s" x="290" y="324">按排序逐条看；派完一个 NPU 看下一个</text>
           </g>
           <g class="node" id="n-d" data-node="d" tabindex="0" role="button" aria-label="判定：可派吗">
-            <polygon points="180,360 306,394 180,428 54,394"/>
-            <text class="t" x="180" y="390">可派？</text>
-            <text class="s" x="180" y="407">轻流恒可；重流须在跑 &lt; C</text>
+            <polygon points="290,362 390,398 290,434 190,398"/>
+            <text class="t" x="290" y="390">可派？</text>
+            <text class="s" x="290" y="407" style="font-size:10.5px">轻流恒可；重流须在跑 &lt; C</text>
           </g>
           <g class="node" id="n-disp" data-node="disp" tabindex="0" role="button" aria-label="派发给该 NPU">
-            <rect x="60" y="468" width="240" height="54" rx="9"/>
-            <text class="t" x="180" y="490">派发给该 NPU</text>
-            <text class="s" x="180" y="508">重流派发后在跑计数 +1；执行读+逐层算</text>
+            <rect x="170" y="462" width="240" height="54" rx="9"/>
+            <text class="t" x="290" y="484">派发给该 NPU</text>
+            <text class="s" x="290" y="502">重流派发后在跑计数 +1；执行读+逐层算</text>
           </g>
           <g class="node" id="n-skip" data-node="skip" tabindex="0" role="button" aria-label="跳过该条看下一条">
-            <rect x="46" y="470" width="120" height="46" rx="9"/>
-            <text class="t" x="106" y="490" style="font-size:12px">跳过该条</text>
-            <text class="s" x="106" y="506">看下一条</text>
+            <rect x="25" y="466" width="105" height="46" rx="9"/>
+            <text class="t" x="78" y="486" style="font-size:12.5px">跳过该条</text>
+            <text class="s" x="78" y="502">看下一条</text>
           </g>
           <g class="node" id="n-wd" data-node="wd" tabindex="0" role="button" aria-label="判定：有超时老请求吗">
-            <polygon points="106,550 172,588 106,626 40,588"/>
-            <text class="t" x="106" y="584" style="font-size:11.5px">超时老请求？</text>
-            <text class="s" x="106" y="600" style="font-size:9.5px">且无轻流在等</text>
+            <polygon points="78,546 138,584 78,622 18,584"/>
+            <text class="t" x="78" y="580" style="font-size:11px">超时老请求？</text>
+            <text class="s" x="78" y="596" style="font-size:9.5px">且无轻流在等</text>
           </g>
           <g class="node" id="n-ex" data-node="ex" tabindex="0" role="button" aria-label="老化豁免">
-            <rect x="26" y="650" width="160" height="46" rx="9"/>
-            <text class="t" x="106" y="670" style="font-size:12px">老化豁免派发</text>
-            <text class="s" x="106" y="686">防饿死，可超配额</text>
+            <rect x="20" y="648" width="116" height="46" rx="9"/>
+            <text class="t" x="78" y="668" style="font-size:11.5px">老化豁免派发</text>
+            <text class="s" x="78" y="684" style="font-size:10px">防饿死，可超配额</text>
           </g>
           <g class="node" id="n-wait" data-node="wait" tabindex="0" role="button" aria-label="WAIT 等待">
-            <rect x="26" y="698" width="160" height="46" rx="9"/>
-            <text class="t" x="106" y="718" style="font-size:12px">WAIT</text>
-            <text class="s" x="106" y="734">至最早在跑重批完成</text>
+            <rect x="170" y="560" width="150" height="44" rx="9"/>
+            <text class="t" x="245" y="578" style="font-size:12.5px">WAIT</text>
+            <text class="s" x="245" y="594">至最早在跑重批完成</text>
           </g>
           <g class="node" id="n-back" data-node="back" tabindex="0" role="button" aria-label="批完成回到触发">
-            <rect x="96" y="752" width="166" height="48" rx="9"/>
-            <text class="t" x="179" y="772" style="font-size:12px">批完成 → 释放 NPU 与配额</text>
-            <text class="s" x="179" y="789">下一个事件重新来一轮</text>
+            <rect x="120" y="756" width="260" height="48" rx="9"/>
+            <text class="t" x="250" y="776" style="font-size:12.5px">批完成 → 释放 NPU 与配额</text>
+            <text class="s" x="250" y="793">下一个事件重新来一轮</text>
           </g>
         </svg>
         <div class="fc-legend">青色粗框 = 当前环节 · 绿色 = 已完成 · 灰色 = 未到</div>
@@ -504,7 +504,7 @@ TFS 72.2% vs MPC 76.1% vs FCFS 31.4%。EDF 的教训值得一看：它优先救�
      t:"t ≈ 48 ms", cap:"<b>t=48.2 ms：16 条 C 同时完成（纯算 48.2 ms，不占带宽）。</b>16 个 NPU 一起空出 → 新一轮触发：扫描队列——A 满员跳过，B × 4（轻流）派上 4 个 NPU；<b>剩下 12 个 NPU 无可派 → WAIT</b>，唤醒时刻 = 最早在跑重批完成（≈50 ms，第一条 A）。注意 WAIT 用的是确定事实，不是预测。",
      nodes:["T","1","2","3","4","d","wait","back"], edges:["e-T1","e-12","e-23","e-34","e-4d","e-dno","e-swait","e-waitn","e-dispback","e-exback"]},
     {ph:"T", left:{A:11,B:0,C:0}, npu:{a:4,b:16}, bw:138.3, capmax:467,
-     t:"t ≈ 50 ms", cap:"<b>t≈50 ms：第一条 A 完成 → 释放 1 个配额 + 1 个 NPU → 唤醒。</b>WAIT 的 NPU 立刻接下一条 A（配额回到 4/4）——一轮新决策开始（回到流程图顶部）。此后每个"批完成/到达"都是新的触发：A 以配额节奏轮流上机，B 随到随派，这就是"滚动"。",
+     t:"t ≈ 50 ms", cap:"<b>t≈50 ms：第一条 A 完成 → 释放 1 个配额 + 1 个 NPU → 唤醒。</b>WAIT 的 NPU 立刻接下一条 A（配额回到 4/4）——一轮新决策开始（回到流程图顶部）。此后每个「批完成 / 到达」都是新的触发：A 以配额节奏轮流上机，B 随到随派，这就是「滚动」。",
      nodes:["T","back"], edges:["e-loop"]},
     {ph:"back", left:{A:0,B:0,C:0}, npu:{}, bw:0, capmax:467,
      t:"长期", cap:"<b>长期结局（E26f 实测，3 seed 中位）：</b>C 类 <b>100% 存活</b>（它从不被配额拦、从不占带宽，只是被 FCFS 的 FIFO 活活排死——对照见 §4）；B 类 <b>100%</b>；A 类 15%（带宽就这么多，错峰保住的是\"不死光\"而不是\"全活\"）。对照：同场景 FCFS 的 C 只活 30%、A 活 7.5%。",
