@@ -1,0 +1,597 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>TFS 方案图解 —— 规则式带宽感知调度（流程图联动教学页）</title>
+<style>
+  :root{
+    --ink:#1c2733; --ink-soft:#4a5a6a; --paper:#faf9f6; --card:#ffffff;
+    --line:#d8d2c4; --accent:#0f6b6b;
+    --cA:#4C72B0; --cB:#DD8452; --cC:#55A868; --idle:#b9b3a5; --read:#8fb8e0;
+    --good:#2e8b57; --bad:#c0554d;
+    --doneN:#eaf2ea; --doneB:#a8c6ae;
+  }
+  *{box-sizing:border-box}
+  html{scroll-behavior:smooth}
+  body{margin:0; color:var(--ink); background:var(--paper); line-height:1.8; font-size:16px;
+    font-family:"PingFang SC","Hiragino Sans GB","Microsoft YaHei",system-ui,sans-serif}
+  main{max-width:1000px; margin:0 auto; padding:0 20px 90px}
+  header{border-bottom:2px solid var(--ink); padding:44px 0 22px; margin-bottom:30px}
+  header h1{font-size:29px; margin:0 0 10px}
+  header .sub{color:var(--ink-soft); font-size:15px; max-width:800px}
+  .selfbox{background:#eef4f0; border:1px solid #cfe0d5; border-radius:10px; padding:12px 18px; margin:16px 0; font-size:14.5px}
+  h2{font-size:22px; margin:54px 0 14px; padding-top:12px; border-top:1px solid var(--line)}
+  h2 .no{color:var(--accent); font-family:Georgia,serif; margin-right:8px}
+  h3{font-size:17px; margin:26px 0 8px}
+  p{margin:10px 0}
+  .toc{display:flex; flex-wrap:wrap; gap:8px; margin-top:14px}
+  .toc a{text-decoration:none; color:var(--accent); border:1px solid var(--line); background:var(--card); border-radius:999px; padding:4px 14px; font-size:14px}
+  .toc a:hover,.toc a:focus{border-color:var(--accent)}
+  .card{background:var(--card); border:1px solid var(--line); border-radius:10px; padding:18px 20px; margin:16px 0}
+  .note{background:#f2efe6; border-left:4px solid var(--accent); padding:10px 16px; border-radius:0 8px 8px 0; font-size:14.5px; color:var(--ink-soft)}
+  .note b{color:var(--ink)}
+  code{font-family:"SF Mono",Menlo,Consolas,monospace; font-size:13.5px; background:#f0ede4; padding:1px 6px; border-radius:4px}
+  .formula{background:#f7f5ee; border:1px dashed var(--line); border-radius:8px; padding:12px 16px; margin:12px 0; font-family:"SF Mono",Menlo,Consolas,monospace; font-size:14px; overflow-x:auto}
+  table{border-collapse:collapse; width:100%; margin:14px 0; font-size:14.5px; background:var(--card)}
+  th,td{border:1px solid var(--line); padding:7px 10px; text-align:center}
+  th{background:#efece2; font-weight:600}
+  td.l,th.l{text-align:left}
+  .win{outline:2.5px solid var(--good); outline-offset:-2.5px; font-weight:700; color:var(--good)}
+  .legend{display:flex; flex-wrap:wrap; gap:14px; align-items:center; font-size:13.5px; margin:10px 0; padding:10px 14px; background:#f4f1e8; border-radius:8px}
+  .legend .sw{display:inline-block; width:22px; height:13px; border-radius:3px; vertical-align:-1px; margin-right:5px}
+  /* ---------- §5 双栏:流程图 + 例子 ---------- */
+  .demo-wide{width:min(1180px, calc(100vw - 40px)); margin-inline:auto}
+  .demo-grid{display:grid; grid-template-columns:330px minmax(0,1fr); gap:20px; align-items:start; margin-top:6px}
+  .fc-aside{position:sticky; top:14px}
+  .fc-box{background:var(--card); border:1.5px solid var(--ink); border-radius:12px; padding:12px 12px 10px}
+  .fc-box h4{margin:0 0 2px; font-size:14.5px}
+  .fc-box .fc-hint{font-size:11.5px; color:var(--ink-soft); margin:0 0 6px}
+  svg.flow{width:100%; height:auto; display:block}
+  .flow .node{cursor:pointer; transition:opacity .3s}
+  .flow .node rect,.flow .node polygon{fill:#fff; stroke:var(--line); stroke-width:1.5; transition:fill .3s, stroke .3s, stroke-width .3s}
+  .flow .node .t{font-size:13px; font-weight:700; fill:var(--ink); text-anchor:middle}
+  .flow .node .s{font-size:10.5px; fill:var(--ink-soft); text-anchor:middle}
+  .flow .node.trig rect{fill:#eef4f0; stroke-dasharray:5 3}
+  .flow .node.done rect,.flow .node.done polygon{fill:var(--doneN); stroke:var(--doneB)}
+  .flow .node.active rect,.flow .node.active polygon{stroke:var(--accent); stroke-width:3; fill:#fff; filter:drop-shadow(0 0 5px rgba(15,107,107,.35))}
+  .flow .node.active .t{fill:var(--accent)}
+  .flow .node:focus{outline:none}
+  .flow .node:focus rect,.flow .node:focus polygon{stroke:var(--ink); stroke-width:2.5}
+  .flow .edge{stroke:#c9c2b0; stroke-width:1.5; fill:none; transition:stroke .3s}
+  .flow .edge.done{stroke:var(--doneB)}
+  .flow .edge.active{stroke:var(--accent); stroke-width:2.5; stroke-dasharray:7 5; animation:edash 1s linear infinite}
+  .flow .elabel{font-size:10.5px; fill:var(--ink-soft); font-weight:700}
+  @keyframes edash{to{stroke-dashoffset:-12}}
+  .fc-legend{font-size:11.5px; color:var(--ink-soft); margin:6px 0 8px}
+  .fc-now{font-size:13px; background:#eef4f0; border-left:4px solid var(--accent); border-radius:0 8px 8px 0; padding:7px 10px; min-height:34px}
+  .fc-now b{color:var(--accent)}
+  .phasebar{display:none}
+  .phasebar .pb{border:1.5px solid var(--line); border-radius:999px; padding:2px 10px; background:var(--card); cursor:pointer; font-family:inherit; font-size:12px}
+  .phasebar .pb.done{background:var(--doneN); border-color:var(--doneB); color:#4c6b52}
+  .phasebar .pb.active{background:var(--accent); color:#fff; border-color:var(--accent); font-weight:700}
+  .phasebar .pa{color:var(--ink-soft); align-self:center; font-size:11px}
+  @media (max-width:1020px){
+    .demo-grid{grid-template-columns:1fr}
+    .fc-aside{position:static}
+    .phasebar{display:flex; position:sticky; top:0; z-index:20; background:var(--paper); gap:5px; padding:8px 2px; border-bottom:1px solid var(--line); flex-wrap:wrap; align-items:center}
+  }
+  /* ---------- 例子舞台 ---------- */
+  .stage{background:var(--card); border:1.5px solid var(--ink); border-radius:12px; padding:18px 20px; margin:0}
+  .ctrl{display:flex; align-items:center; gap:10px; flex-wrap:wrap; margin-bottom:6px}
+  .ctrl button{border:1.5px solid var(--ink); background:var(--card); color:var(--ink); border-radius:8px; padding:6px 16px; font-size:14.5px; cursor:pointer; font-family:inherit}
+  .ctrl button:hover,.ctrl button:focus{background:#efece2}
+  .ctrl button.primary{background:var(--accent); border-color:var(--accent); color:#fff}
+  .ctrl .t-now{font-family:Menlo,Consolas,monospace; font-size:14px; margin-left:auto}
+  .cap{min-height:76px; background:#f4f1e8; border-radius:8px; padding:10px 14px; font-size:14.5px; margin:8px 0 14px}
+  .cap b{color:var(--accent)}
+  .paneltitle{font-size:13px; color:var(--ink-soft); margin:14px 0 6px; font-weight:600}
+  .queue{display:flex; gap:10px; flex-wrap:wrap; align-items:stretch; min-height:86px}
+  .qgrp{border:2px solid var(--qc); border-radius:10px; background:var(--card); padding:6px 12px; text-align:center; min-width:118px; transition:transform .35s, opacity .35s}
+  .qgrp b{font-size:15px; display:block}
+  .qgrp .qd{font-family:Menlo,Consolas,monospace; font-size:11.5px; color:var(--ink-soft); display:block}
+  .qgrp .qsl{font-family:Menlo,Consolas,monospace; font-size:11px; display:block; margin-top:2px; color:var(--accent); visibility:hidden}
+  .qgrp.showd .qd{font-weight:700; color:var(--ink)}
+  .qgrp.shows .qsl{visibility:visible}
+  .qgrp.dim{opacity:.25}
+  .qgrp.empty{opacity:.18; filter:grayscale(1)}
+  .qarr{align-self:center; color:var(--ink-soft); font-size:15px}
+  .meters{display:grid; grid-template-columns:150px 1fr; gap:14px; align-items:start; margin-top:4px}
+  .quota{border:1.5px dashed var(--cA); border-radius:10px; padding:8px 10px; text-align:center; font-size:13px}
+  .quota b{font-family:Menlo,Consolas,monospace; font-size:22px; display:block; color:var(--cA)}
+  .quota .qc{color:var(--ink-soft); font-size:11.5px}
+  .npu{display:grid; grid-template-columns:repeat(16,1fr); gap:4px}
+  .cell{aspect-ratio:1; border-radius:5px; background:var(--idle); opacity:.45; transition:background .35s, opacity .35s; position:relative}
+  .cell.on{opacity:1}
+  .cell.a{background:var(--cA)} .cell.b{background:var(--cB)} .cell.c{background:var(--cC)}
+  .cell .lab{position:absolute; inset:0; display:flex; align-items:center; justify-content:center; color:#fff; font-size:9px; font-weight:700}
+  .bwbar{margin-top:10px}
+  .bwlab{display:flex; justify-content:space-between; font-size:12px; color:var(--ink-soft); margin-bottom:3px}
+  .bwtrack{height:16px; border-radius:8px; background:#efece2; position:relative; overflow:hidden}
+  .bwfill{height:100%; width:0%; background:linear-gradient(90deg,var(--read),var(--cA)); transition:width .5s}
+  .bwtrack .cap-line{position:absolute; top:-3px; bottom:-3px; left:100%; border-left:2.5px dashed var(--bad); transition:left .5s}
+  .bwtrack .cap-lab{position:absolute; top:-20px; transform:translateX(-50%); font-size:10.5px; color:var(--bad); font-family:Menlo,monospace; white-space:nowrap; transition:left .5s}
+  .bwtrack{overflow:visible} .bwtrack .clip{position:absolute; inset:0; border-radius:8px; overflow:hidden}
+  .bwtrack .clip .bwfill{position:absolute; left:0; top:0; bottom:0}
+  /* ---------- 对比条 ---------- */
+  .vsrow{margin:10px 0}
+  .vsrow .vslab{display:flex; justify-content:space-between; font-size:13px; margin-bottom:2px}
+  .vsrow .vstrack{height:20px; border-radius:6px; background:#efece2; position:relative}
+  .vsrow .vsfill{height:100%; border-radius:6px; color:#fff; font-size:11.5px; font-family:Menlo,monospace; display:flex; align-items:center; padding-left:8px; transition:width .6s}
+  footer{margin-top:60px; padding-top:14px; border-top:1px solid var(--line); color:var(--ink-soft); font-size:13px}
+  @media (prefers-reduced-motion: reduce){
+    .qgrp,.cell,.bwfill,.vsfill,.flow .edge{transition:none}
+    .flow .edge.active{animation:none; stroke-dasharray:none}
+  }
+  @media (max-width:640px){
+    .meters{grid-template-columns:1fr}
+    .npu{grid-template-columns:repeat(8,1fr)}
+    .qgrp{min-width:92px}
+  }
+</style>
+</head>
+<body>
+<main>
+
+<header>
+  <h1>TFS 方案图解 <span style="font-size:16px; color:var(--ink-soft)">规则式带宽感知调度 · 流程图联动版</span></h1>
+  <div class="sub">
+    TFS（Triage-Fill-Stagger，<code>cq_tfs</code>）是把 MPC 的赢法写成死规矩得到的<b>零推演</b>调度器：
+    不建副本、不推演、不预测带宽，每个决定只做<b>排序 + 计数</b>，单次决策约 0.11 毫秒（MPC 约 3.5 秒），
+    却拿到 MPC 相对 FCFS 收益的约九成（E26f 实测 95.3% / 91.3%）。
+    本页用一个可以手算的突发例子，逐步展示它的完整处理流程。
+  </div>
+  <div class="selfbox">
+    <b>本页自足。</b>看懂例子需要的全部背景在 <a href="#pre">§1 预备知识</a>（60 秒读完）；
+    规矩从哪来的在 <a href="#rules">§2</a>；<b>§3 左边是完整流程图、右边是联动的例子</b>——
+    例子每前进一步，流程图高亮当前环节（点击流程图节点可跳转）；
+    与 FCFS 的对照在 <a href="#vs">§4</a>；验证数字在 <a href="#proof">§5</a>。
+  </div>
+  <nav class="toc">
+    <a href="#pre">① 预备知识（60 秒）</a>
+    <a href="#rules">② 四条规矩从哪来</a>
+    <a href="#demo">③ 流程图 + 例子联动</a>
+    <a href="#vs">④ 和 FCFS 正面对比</a>
+    <a href="#proof">⑤ 验证数字</a>
+  </nav>
+</header>
+
+<!-- ============================================================ -->
+<h2 id="pre"><span class="no">①</span>预备知识：看懂例子需要的四个事实</h2>
+
+<h3>1.1 三类请求，读取压力天差地别</h3>
+<p>每个请求 = <b>已缓存的前缀 h（要读回来）+ 新算部分 u（要真算）</b>，逐层执行：读一层 → 算一层。
+把"每层要读的字节 ÷ 每层要算的时长"记作<b>读取压力 d</b>——它衡量这条请求对共享带宽的挤占强度：</p>
+<div class="reqs" style="display:grid; grid-template-columns:repeat(auto-fit,minmax(210px,1fr)); gap:10px; margin:12px 0">
+  <div class="card" style="margin:0; border-color:var(--cA)"><b style="color:var(--cA)">A · 重读快算</b>
+    <div class="row" style="display:flex; justify-content:space-between; color:var(--ink-soft)"><span>每层读 175.6 MB</span><span>每层算 6.0 ms</span></div>
+    <div class="row" style="display:flex; justify-content:space-between; color:var(--ink-soft)"><span>d = 29.2 GB/s</span><span>期限 198.5 ms</span></div></div>
+  <div class="card" style="margin:0; border-color:var(--cB)"><b style="color:var(--cB)">B · 轻读慢算</b>
+    <div class="row" style="display:flex; justify-content:space-between; color:var(--ink-soft)"><span>每层读 38.5 MB</span><span>每层算 28.6 ms</span></div>
+    <div class="row" style="display:flex; justify-content:space-between; color:var(--ink-soft)"><span>d = 1.35 GB/s</span><span>期限 914.9 ms</span></div></div>
+  <div class="card" style="margin:0; border-color:var(--cC)"><b style="color:var(--cC)">C · 零读纯算</b>
+    <div class="row" style="display:flex; justify-content:space-between; color:var(--ink-soft)"><span>每层读 0 MB</span><span>每层算 48.2 ms</span></div>
+    <div class="row" style="display:flex; justify-content:space-between; color:var(--ink-soft)"><span>d = 0 GB/s</span><span>期限 192.7 ms</span></div></div>
+  <div class="card" style="margin:0"><b>系统</b>
+    <div class="row" style="display:flex; justify-content:space-between; color:var(--ink-soft)"><span>32 个 NPU</span><span>带宽上限 B = 120 GB/s</span></div>
+    <div class="row" style="display:flex; justify-content:space-between; color:var(--ink-soft)"><span>每批 1 条</span><span>期限 = 4 × T0</span></div></div>
+</div>
+
+<h3>1.2 手算钥匙</h3>
+<div class="formula">
+门槛 = 全体排队请求 d 的 P75（本例 16A+16B+16C → P75 = 29.2，恰好圈中 A 类）<br>
+配额 C = ⌊ 带宽 B ÷ 门槛 ⌋ = ⌊ 120 ÷ 29.2 ⌋ = <b>4</b> —— 同时最多 4 条 A 在跑<br>
+时间预算 slack = 期限 − 当前时刻 − 服务时长 T0（到达瞬间 = 3×T0）：<br>
+　C：3×48.2 = <b>144.5 ms</b> ＜ A：3×49.6 = <b>148.9 ms</b> ＜ B：3×228.7 = <b>686.2 ms</b><br>
+一条 A 的服务 ≈ 读 1.5 ms/层（与算重叠）+ 算 48.2 ms ≈ 49.7 ms
+</div>
+<p class="note"><b>为什么 C 的期限反而比 A 短？</b>C 不用读第一层，T0 更短（48.2 vs 49.6 ms），期限 = 4×T0 也就更紧。
+这条"最急的病人恰好不占任何资源"是本例最有意思的地方。</p>
+
+<!-- ============================================================ -->
+<h2 id="rules"><span class="no">②</span>四条规矩从哪来（都有实验出处）</h2>
+<table>
+  <thead><tr><th class="l" style="width:190px">规矩</th><th class="l">内容</th><th class="l" style="width:300px">出处（E26 系列）</th></tr></thead>
+  <tbody>
+    <tr><td class="l"><b>R1 填空</b></td><td class="l">轻流与零读流<b>永远可派</b>——不占带宽配额，有空闲 NPU 就上</td><td class="l">E26f：C 类在 MPC/TFS 下 100% 活，在 FCFS 下只活 30%（纯排队死）</td></tr>
+    <tr><td class="l"><b>R2 守门</b></td><td class="l">重流并发 ≤ 配额 C；满员就<b>跳过它继续往下找</b>，不中断扫描</td><td class="l">E26e：MPC 每簇只放 ≤5 条 vs FCFS 一口气 16 条，A 存活 20% vs 7.5%</td></tr>
+    <tr><td class="l"><b>R3 错峰等待</b></td><td class="l">无可派时 WAIT 到<b>最早在跑重批的完成时刻</b>——用确定的事实，不用预测</td><td class="l">E26f：MPC 需求超订 75% ＜ 实际饱和 86% = 压平了扎堆申请</td></tr>
+    <tr><td class="l"><b>R4 反单维排序</b></td><td class="l">排队按<b>时间预算</b>（谁先耗尽谁先），宽预算让位；老请求保底但<b>不越过在等的轻流</b></td><td class="l">E26f：纯期限序的 EDF 把 B 饿死（28%）；纯到达序的 FCFS 在计算饱和下把 B 排队死（40%）</td></tr>
+  </tbody>
+</table>
+<p class="note">一句话：MPC 两小时推演换来的动作，与这四条规矩的输出重合度超过九成
+（MPC 对其基础策略的有效偏离不足 2%，且集中在洪峰时刻）——<b>规矩比想象中值钱，剩下的才是"看远"的溢价</b>。</p>
+
+<!-- ============================================================ -->
+<h2 id="demo"><span class="no">③</span>完整流程 + 例子联动</h2>
+
+<div class="legend">
+  <span><span class="sw" style="background:var(--cC)"></span>C 计算（零读）</span>
+  <span><span class="sw" style="background:var(--cA)"></span>A 计算（重读）</span>
+  <span><span class="sw" style="background:var(--cB)"></span>B 计算（轻读）</span>
+  <span><span class="sw" style="background:var(--idle)"></span>NPU 空闲</span>
+  <span style="color:var(--bad)">红虚线 = 带宽上限 120 GB/s</span>
+</div>
+
+<div class="demo-wide">
+  <div class="phasebar" id="phasebar" aria-label="当前所处环节">
+    <span class="pb" data-pb="T" role="button" tabindex="0">触发</span><span class="pa">›</span>
+    <span class="pb" data-pb="1" role="button" tabindex="0">1 算 d</span><span class="pa">›</span>
+    <span class="pb" data-pb="2" role="button" tabindex="0">2 门槛</span><span class="pa">›</span>
+    <span class="pb" data-pb="3" role="button" tabindex="0">3 排序</span><span class="pa">›</span>
+    <span class="pb" data-pb="4" role="button" tabindex="0">4 扫描派发</span><span class="pa">›</span>
+    <span class="pb" data-pb="back" role="button" tabindex="0">↺</span>
+  </div>
+  <div class="demo-grid">
+
+    <aside class="fc-aside" aria-label="TFS 完整处理流程图">
+      <div class="fc-box">
+        <h4>TFS · 完整处理流程</h4>
+        <p class="fc-hint">随右侧例子逐步高亮；点击节点可跳到该环节</p>
+        <svg class="flow" id="flow" viewBox="0 0 360 846" role="img" aria-label="TFS 处理流程：事件触发后算读取压力、定门槛与配额、按时间预算排序、逐 NPU 扫描派发；轻流直接派、重流受配额、满员跳过；扫尽无可派时老化豁免或 WAIT 至最早重批完成；执行后批完成释放资源回到触发">
+          <defs>
+            <marker id="arw" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="7" markerHeight="7" orient="auto"><path d="M0,0 L10,5 L0,10 z" fill="#c9c2b0"/></marker>
+            <marker id="arwA" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="7" markerHeight="7" orient="auto"><path d="M0,0 L10,5 L0,10 z" fill="#0f6b6b"/></marker>
+          </defs>
+          <!-- 连线（先画，压在节点下） -->
+          <path class="edge" id="e-T1" d="M180,50 L180,66" marker-end="url(#arw)"/>
+          <path class="edge" id="e-12" d="M180,122 L180,138" marker-end="url(#arw)"/>
+          <path class="edge" id="e-23" d="M180,194 L180,210" marker-end="url(#arw)"/>
+          <path class="edge" id="e-34" d="M180,266 L180,282" marker-end="url(#arw)"/>
+          <path class="edge" id="e-4d" d="M180,338 L180,358" marker-end="url(#arw)"/>
+          <path class="edge" id="e-dyes" d="M180,430 L180,466" marker-end="url(#arw)"/>
+          <text class="elabel" x="188" y="452">是</text>
+          <path class="edge" id="e-dno" d="M54,394 L28,394 L28,447 L46,447" marker-end="url(#arw)"/>
+          <text class="elabel" x="30" y="386">否（重流满员）</text>
+          <path class="edge" id="e-skipback" d="M106,492 L106,394 L54,394" marker-end="url(#arw)"/>
+          <text class="elabel" x="112" y="446" style="writing-mode:tb">跳过后继续扫描</text>
+          <path class="edge" id="e-swait" d="M106,522 L106,548" marker-end="url(#arw)"/>
+          <text class="elabel" x="114" y="540">队列扫尽仍无可派</text>
+          <path class="edge" id="e-waity" d="M106,628 L106,650" marker-end="url(#arw)"/>
+          <text class="elabel" x="114" y="644">有</text>
+          <path class="edge" id="e-waitn" d="M106,676 L106,698" marker-end="url(#arw)"/>
+          <text class="elabel" x="114" y="692">无</text>
+          <path class="edge" id="e-dispback" d="M258,522 L258,560 L286,560 L286,776 L262,776" marker-end="url(#arw)"/>
+          <path class="edge" id="e-exback" d="M180,706 L180,750" marker-end="url(#arw)"/>
+          <path class="edge" id="e-loop" d="M96,776 L16,776 Q8,776 8,768 L8,36 Q8,28 16,28 L40,28" marker-end="url(#arw)"/>
+          <text class="elabel" x="16" y="400" style="writing-mode:tb">下一个事件重新来一轮</text>
+          <!-- 节点 -->
+          <g class="node trig" id="n-T" data-node="T" tabindex="0" role="button" aria-label="触发：跳到触发步">
+            <rect x="40" y="8" width="280" height="42" rx="21"/>
+            <text class="t" x="180" y="34">触发：请求到达 / NPU 空出 / 唤醒到点</text>
+          </g>
+          <g class="node" id="n-1" data-node="1" tabindex="0" role="button" aria-label="第 1 步算读取压力">
+            <rect x="50" y="68" width="260" height="54" rx="9"/>
+            <text class="t" x="180" y="90">第 1 步 · 算读取压力 d</text>
+            <text class="s" x="180" y="108">d = 每层读取字节 ÷ 每层计算时长</text>
+          </g>
+          <g class="node" id="n-2" data-node="2" tabindex="0" role="button" aria-label="第 2 步定门槛与配额">
+            <rect x="50" y="140" width="260" height="54" rx="9"/>
+            <text class="t" x="180" y="162">第 2 步 · 定门槛与配额</text>
+            <text class="s" x="180" y="180">门槛 = 全体 d 的 P75；配额 C = ⌊B ÷ 门槛⌋</text>
+          </g>
+          <g class="node" id="n-3" data-node="3" tabindex="0" role="button" aria-label="第 3 步按时间预算排序">
+            <rect x="50" y="212" width="260" height="54" rx="9"/>
+            <text class="t" x="180" y="234">第 3 步 · 按时间预算排序</text>
+            <text class="s" x="180" y="252">预算 = 期限 − now − T0，小者先</text>
+          </g>
+          <g class="node" id="n-4" data-node="4" tabindex="0" role="button" aria-label="第 4 步逐空闲 NPU 扫描">
+            <rect x="50" y="284" width="260" height="54" rx="9"/>
+            <text class="t" x="180" y="306">第 4 步 · 逐空闲 NPU 扫描</text>
+            <text class="s" x="180" y="324">按排序逐条看；派完一个 NPU 看下一个</text>
+          </g>
+          <g class="node" id="n-d" data-node="d" tabindex="0" role="button" aria-label="判定：可派吗">
+            <polygon points="180,360 306,394 180,428 54,394"/>
+            <text class="t" x="180" y="390">可派？</text>
+            <text class="s" x="180" y="407">轻流恒可；重流须在跑 &lt; C</text>
+          </g>
+          <g class="node" id="n-disp" data-node="disp" tabindex="0" role="button" aria-label="派发给该 NPU">
+            <rect x="60" y="468" width="240" height="54" rx="9"/>
+            <text class="t" x="180" y="490">派发给该 NPU</text>
+            <text class="s" x="180" y="508">重流派发后在跑计数 +1；执行读+逐层算</text>
+          </g>
+          <g class="node" id="n-skip" data-node="skip" tabindex="0" role="button" aria-label="跳过该条看下一条">
+            <rect x="46" y="470" width="120" height="46" rx="9"/>
+            <text class="t" x="106" y="490" style="font-size:12px">跳过该条</text>
+            <text class="s" x="106" y="506">看下一条</text>
+          </g>
+          <g class="node" id="n-wd" data-node="wd" tabindex="0" role="button" aria-label="判定：有超时老请求吗">
+            <polygon points="106,550 172,588 106,626 40,588"/>
+            <text class="t" x="106" y="584" style="font-size:11.5px">超时老请求？</text>
+            <text class="s" x="106" y="600" style="font-size:9.5px">且无轻流在等</text>
+          </g>
+          <g class="node" id="n-ex" data-node="ex" tabindex="0" role="button" aria-label="老化豁免">
+            <rect x="26" y="650" width="160" height="46" rx="9"/>
+            <text class="t" x="106" y="670" style="font-size:12px">老化豁免派发</text>
+            <text class="s" x="106" y="686">防饿死，可超配额</text>
+          </g>
+          <g class="node" id="n-wait" data-node="wait" tabindex="0" role="button" aria-label="WAIT 等待">
+            <rect x="26" y="698" width="160" height="46" rx="9"/>
+            <text class="t" x="106" y="718" style="font-size:12px">WAIT</text>
+            <text class="s" x="106" y="734">至最早在跑重批完成</text>
+          </g>
+          <g class="node" id="n-back" data-node="back" tabindex="0" role="button" aria-label="批完成回到触发">
+            <rect x="96" y="752" width="166" height="48" rx="9"/>
+            <text class="t" x="179" y="772" style="font-size:12px">批完成 → 释放 NPU 与配额</text>
+            <text class="s" x="179" y="789">下一个事件重新来一轮</text>
+          </g>
+        </svg>
+        <div class="fc-legend">青色粗框 = 当前环节 · 绿色 = 已完成 · 灰色 = 未到</div>
+        <div class="fc-now" id="fc-now">—</div>
+      </div>
+    </aside>
+
+    <div class="stage">
+      <div class="selfbox" style="margin:0 0 12px">
+        <b>怎么读这个例子：</b>t=0 三类各 16 条同时到达、32 个 NPU 全空。
+        按"下一步"走——<b>左边的流程图会跟着高亮</b>；
+        右边三块分别看：<b>中央队列</b>（排序与剩余量）、<b>NPU 阵列</b>（谁在上机）、
+        <b>配额与带宽</b>（重流在跑 x/4、带宽需求贴不贴上限）。
+      </div>
+
+      <div class="ctrl">
+        <button class="primary" id="btn-play">▶ 播放</button>
+        <button id="btn-prev">← 上一步</button>
+        <button id="btn-next">下一步 →</button>
+        <button id="btn-reset">重置</button>
+        <span class="t-now" id="t-now">t = 0 ms</span>
+      </div>
+      <div class="cap" id="cap"></div>
+
+      <div class="paneltitle">中央队列（自上而下 = 时间预算从小到大）</div>
+      <div class="queue" id="queue"></div>
+
+      <div class="meters">
+        <div>
+          <div class="quota">
+            <b id="q-num">0 / 4</b>
+            <span class="qc">在跑重流 ÷ 配额 C<br>（C = ⌊120 ÷ 29.2⌋）</span>
+          </div>
+          <div class="paneltitle" style="margin-top:12px">图例</div>
+          <div style="font-size:12px; color:var(--ink-soft); line-height:2">
+            <span class="sw" style="background:var(--cC); display:inline-block; width:16px; height:10px; border-radius:2px"></span> NPU 跑 C<br>
+            <span class="sw" style="background:var(--cA); display:inline-block; width:16px; height:10px; border-radius:2px"></span> NPU 跑 A<br>
+            <span class="sw" style="background:var(--cB); display:inline-block; width:16px; height:10px; border-radius:2px"></span> NPU 跑 B<br>
+            <span class="sw" style="background:var(--idle); display:inline-block; width:16px; height:10px; border-radius:2px"></span> 空闲
+          </div>
+        </div>
+        <div>
+          <div class="paneltitle">NPU 阵列（32 个）</div>
+          <div class="npu" id="npu"></div>
+          <div class="bwbar">
+            <div class="bwlab"><span>重流带宽需求 Σd</span><span id="bw-num">0 GB/s</span></div>
+            <div class="bwtrack">
+              <div class="clip"><div class="bwfill" id="bwfill"></div></div>
+              <div class="cap-line" id="capline" style="left:100%"></div>
+              <div class="cap-lab" id="caplab" style="left:100%">上限 120</div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+  </div>
+</div>
+
+<!-- ============================================================ -->
+<h2 id="vs"><span class="no">④</span>和 FCFS 正面对比：同一瞬发，两种命运</h2>
+<p>关键差别在<b>t=0 这一瞬间的派发选择</b>。FCFS 按到达序把 16 条 A 一起放出去；
+TFS 只放 4 条（=配额），把不占带宽的 C 全部塞满、轻读的 B 补位：</p>
+<h3>4.1 瞬时带宽需求（16 条 A 齐发 vs 4 条 A 错峰）</h3>
+<div class="vsrow"><div class="vslab"><span><b>FCFS</b>：16 条 A 同时在跑</span><span>467 GB/s</span></div>
+  <div class="vstrack"><div class="vsfill" style="width:100%; background:var(--bad)">16 × 29.2 = 467 ≫ 120（超订 3.9 倍）</div></div></div>
+<div class="vsrow"><div class="vslab"><span><b>TFS</b>：4 条 A + 12 B + 16 C</span><span>132.9 GB/s</span></div>
+  <div class="vstrack"><div class="vsfill" style="width:28.5%; background:var(--good)">重流 4×29.2 = 116.7 被配额钉住；轻流 12×1.35 = 16.2 随意</div></div></div>
+<p class="note">超订不产生额外吞吐——带宽物理上限就是 120。16 条 A 齐发的结果是全体 A 的读取排队变长、
+<b>算力空转等数据</b>（IO 等待海），紧期限的 A 和 C 反而成批死亡。</p>
+
+<h3>4.2 结局对照（E26f 存储瓶颈格点 D1fA，3 seed 中位数）</h3>
+<table>
+  <thead><tr><th class="l">策略</th><th>总 SLO</th><th>A 存活</th><th>B 存活</th><th>C 存活</th><th class="l">单次决策耗时</th></tr></thead>
+  <tbody>
+    <tr><td class="l">FCFS（按到达序派发）</td><td>43.6%</td><td>7.5%</td><td>93.3%</td><td>30.0%</td><td class="l">0.4 ms</td></tr>
+    <tr><td class="l">EDF（纯期限序）</td><td>27.8%</td><td>9.2%</td><td>28.3%</td><td>45.8%</td><td class="l">0.4 ms</td></tr>
+    <tr class="win"><td class="l">TFS（本页四条规矩）</td><td>71.7%</td><td>15.0%</td><td>100%</td><td>100%</td><td class="l">0.11 ms</td></tr>
+    <tr><td class="l">MPC（每步推演比较结局）</td><td>73.1%</td><td>19.2%</td><td>100%</td><td>100%</td><td class="l">≈ 3529 ms</td></tr>
+  </tbody>
+</table>
+<p class="note"><b>读法：</b>TFS 用 FCFS 的成本拿到接近 MPC 的成绩——差距 1.4pp；计算瓶颈格点（D1fB）上
+TFS 72.2% vs MPC 76.1% vs FCFS 31.4%。EDF 的教训值得一看：它优先救期限最短的 C（45.8%），却把宽期限的 B
+活活饿死（28.3%）——<b>单维排序在三类混合下必崩</b>，这正是 R4 存在的原因。</p>
+
+<!-- ============================================================ -->
+<h2 id="proof"><span class="no">⑤</span>验证数字（全部来自已入库的实验记录）</h2>
+<div class="card">
+  <b>收益捕获：</b>TFS 总 SLO − FCFS = 71.7 − 43.6 = 28.1pp；MPC − FCFS = 29.5pp → <b>捕获 95.3%</b>（存储瓶颈格点）。
+  计算瓶颈格点：40.8 ÷ 44.7 = <b>91.3%</b>。<br>
+  <b>成本：</b>单次决策纯耗时 0.11 ms（计时包装三次取中位）vs MPC 均摊 3529 ms——<b>便宜约 3 万倍</b>；
+  端到端墙钟 6.9 s vs 6896 s。<br>
+  <b>不变量单测：</b>8 项全过（配额守恒、16A+16B+16C 突发形态恰为 C×16+A×4+B×12、slack 序、锚点让位、
+  确定性、纯 C 排空解析吻合、单类重流与 MPC 基座逐动作等价）。
+</div>
+<p class="note"><b>边界：</b>这些规矩蒸馏自"带宽有争抢、读取压力异构、期限有松紧"的工况（分诊区）。
+带宽充裕时配额自动不生效，TFS 退化为带保底的排序派发，无害但也无增益；
+深度计算饱和与多请求合批（batch&gt;1）不在已验证范围。</p>
+
+<footer>
+  例子数字取自 E26f 工况（D1fA_k16：1:1:1、每类 λ=98/s、α=4、B=120 GB/s、32 NPU、A 簇 k=16）的 t=0 突发截面，
+  结局表为 3 seed 中位数（<code>results/cq/eval/e26f/</code>）。设计文档：<a href="TFS规则式调度器-20261014.md">TFS 规则式调度器</a>；
+  实验结果：<a href="../实验结果-E26f-零读第三类实验-20261011.md">实验结果-E26f</a> §9；
+  姊妹篇：<a href="MPC方案图解-20260920.html">MPC 方案图解</a>（TFS 的规矩正是从它的赢法里蒸馏出来的）。2026-10-15。
+</footer>
+
+</main>
+
+<script>
+(function(){
+  "use strict";
+  /* ---------- 例子状态 ---------- */
+  var N = 32;
+  var npuEl = document.getElementById("npu");
+  var cells = [];
+  for(var i=0;i<N;i++){
+    var c = document.createElement("div");
+    c.className = "cell";
+    c.innerHTML = '<span class="lab"></span>';
+    npuEl.appendChild(c); cells.push(c);
+  }
+  function setCells(assign){ // assign: {a:n,b:n,c:n}
+    var seq = [];
+    for(var k=0;k<(assign.c||0);k++) seq.push("c");
+    for(k=0;k<(assign.a||0);k++) seq.push("a");
+    for(k=0;k<(assign.b||0);k++) seq.push("b");
+    cells.forEach(function(cell, idx){
+      var t = seq[idx];
+      cell.className = "cell" + (t ? " on " + t : "");
+      cell.firstChild.textContent = t ? t.toUpperCase() : "";
+    });
+  }
+  function setQuota(run, cap){ document.getElementById("q-num").textContent = run + " / " + cap; }
+  function setBW(demand, scaleMax){
+    var pct = Math.min(100, demand / scaleMax * 100);
+    document.getElementById("bwfill").style.width = pct + "%";
+    document.getElementById("bw-num").textContent = demand.toFixed(1) + " GB/s";
+    var capPct = 120 / scaleMax * 100;
+    document.getElementById("capline").style.left = capPct + "%";
+    document.getElementById("caplab").style.left = capPct + "%";
+  }
+  /* ---------- 队列 ---------- */
+  var GRP = [
+    {id:"C", n:16, d:0,    sl:144.5, cls:"var(--cC)"},
+    {id:"A", n:16, d:29.2, sl:148.9, cls:"var(--cA)"},
+    {id:"B", n:16, d:1.35, sl:686.2, cls:"var(--cB)"}
+  ];
+  var queueEl = document.getElementById("queue");
+  function renderQueue(left, showD, showSl, dimC){
+    queueEl.innerHTML = "";
+    GRP.forEach(function(g){
+      var q = document.createElement("div");
+      q.className = "qgrp" + (showD ? " showd" : "") + (showSl ? " shows" : "");
+      if(left[g.id] === 0) q.className += " empty";
+      else if(dimC && g.id !== dimC) q.className += " dim";
+      q.style.setProperty("--qc", g.cls);
+      q.style.order = showSl ? GRP.indexOf(g) : (g.id === "A" ? 0 : g.id === "B" ? 1 : 2);
+      q.innerHTML = "<b>" + g.id + " × " + left[g.id] + "</b>" +
+        "<span class='qd'>d = " + (g.d === 0 ? "0（零读）" : g.d + " GB/s") + "</span>" +
+        "<span class='qsl'>时间预算 " + g.sl + " ms</span>";
+      queueEl.appendChild(q);
+    });
+  }
+  /* ---------- 步进脚本 ---------- */
+  var STEPS = [
+    {ph:"T", left:{A:16,B:16,C:16}, npu:{}, bw:0, cap:0, capmax:467,
+     t:"t = 0 ms", cap:"<b>触发。</b>三类各 16 条<b>同时到达</b>中央队列，32 个 NPU 全部空闲——触发条件成立。注意队列此刻还是到达序（A、B、C）。",
+     nodes:["T"], edges:[]},
+    {ph:"1", left:{A:16,B:16,C:16}, npu:{}, bw:0, capmax:467,
+     t:"t = 0", cap:"<b>第 1 步 · 算读取压力。</b>对每条排队请求算 d = 每层读取 ÷ 每层算：A = 29.2、B = 1.35、C = 0 GB/s。看队列芯片上的 d 标签——<b>C 类是 0，它根本不碰带宽</b>。",
+     nodes:["T","1"], edges:["e-T1"]},
+    {ph:"2", left:{A:16,B:16,C:16}, npu:{}, bw:0, capmax:467,
+     t:"t = 0", cap:"<b>第 2 步 · 定门槛与配额。</b>全体 48 个 d 值取 P75 → 29.2（正好圈中 A 类：它是\"重流\"；B 和 C 是\"轻流\"）。配额 C = ⌊120 ÷ 29.2⌋ = <b>4</b>——带宽同时只养得起 4 条 A。看左下角配额表出现 0/4。",
+     nodes:["T","1","2"], edges:["e-T1","e-12"]},
+    {ph:"3", left:{A:16,B:16,C:16}, npu:{}, bw:0, capmax:467,
+     t:"t = 0", cap:"<b>第 3 步 · 按时间预算排序。</b>预算 = 期限 − now − T0：C 144.5 ＜ A 148.9 ＜ B 686.2 ms。<b>队列重排为 C、A、B</b>——最先耗尽预算的排最前面（C 的期限反而比 A 还紧，因为它不用读第一层）。",
+     nodes:["T","1","2","3"], edges:["e-T1","e-12","e-23"]},
+    {ph:"4", left:{A:16,B:16,C:0}, npu:{c:16}, bw:0, capmax:467,
+     t:"t = 0", cap:"<b>第 4 步 · 扫描开始：NPU 1–16 ← C × 16。</b>队首是 C（轻流，d=0）——<b>轻流恒可派</b>（R1 填空）：16 条 C 一人一个 NPU，全部立刻上机。带宽需求纹丝不动（0 GB/s），配额也分文未动。",
+     nodes:["T","1","2","3","4","d","disp"], edges:["e-T1","e-12","e-23","e-34","e-4d","e-dyes"]},
+    {ph:"4", left:{A:12,B:16,C:0}, npu:{c:16,a:4}, bw:116.7, capmax:467,
+     t:"t = 0", cap:"<b>NPU 17–20 ← A × 4，配额满。</b>轮到 A（重流）：在跑重流 0 ＜ 4，派！派到第 4 条，计数 4/4。<b>带宽需求 4 × 29.2 = 116.7 GB/s，贴着 120 上限但不超</b>——这就是\"错峰\"的度：刚好喂饱带宽，不扎堆。",
+     nodes:["T","1","2","3","4","d","disp"], edges:["e-T1","e-12","e-23","e-34","e-4d","e-dyes"]},
+    {ph:"4", left:{A:12,B:4,C:0}, npu:{c:16,a:4,b:12}, bw:132.9, capmax:467,
+     t:"t = 0", cap:"<b>NPU 21–32：A 满员 → 跳过，派 B × 12。</b>扫描遇到剩下的 A，判定\"在跑 4 = 配额 4\"→ <b>跳过它继续往下看</b>（R2，跳过不中断扫描），找到 B（轻流）——派！12 条 B 补满最后 12 个 NPU。队列剩 12A + 4B。总带宽需求 116.7 + 12×1.35 = 132.9，略超 120——<b>这是设计允许的</b>：轻流不受配额限制，B 每层只读 38.5 MB、时间预算还有 680 ms，这点排队无伤；配额只管重流的大需求。",
+     nodes:["T","1","2","3","4","d","skip","disp"], edges:["e-T1","e-12","e-23","e-34","e-4d","e-dno","e-skipback","e-dyes"]},
+    {ph:"back", left:{A:12,B:0,C:0}, npu:{a:4,b:16}, bw:138.3, capmax:467,
+     t:"t ≈ 48 ms", cap:"<b>t=48.2 ms：16 条 C 同时完成（纯算 48.2 ms，不占带宽）。</b>16 个 NPU 一起空出 → 新一轮触发：扫描队列——A 满员跳过，B × 4（轻流）派上 4 个 NPU；<b>剩下 12 个 NPU 无可派 → WAIT</b>，唤醒时刻 = 最早在跑重批完成（≈50 ms，第一条 A）。注意 WAIT 用的是确定事实，不是预测。",
+     nodes:["T","1","2","3","4","d","wait","back"], edges:["e-T1","e-12","e-23","e-34","e-4d","e-dno","e-swait","e-waitn","e-dispback","e-exback"]},
+    {ph:"T", left:{A:11,B:0,C:0}, npu:{a:4,b:16}, bw:138.3, capmax:467,
+     t:"t ≈ 50 ms", cap:"<b>t≈50 ms：第一条 A 完成 → 释放 1 个配额 + 1 个 NPU → 唤醒。</b>WAIT 的 NPU 立刻接下一条 A（配额回到 4/4）——一轮新决策开始（回到流程图顶部）。此后每个"批完成/到达"都是新的触发：A 以配额节奏轮流上机，B 随到随派，这就是"滚动"。",
+     nodes:["T","back"], edges:["e-loop"]},
+    {ph:"back", left:{A:0,B:0,C:0}, npu:{}, bw:0, capmax:467,
+     t:"长期", cap:"<b>长期结局（E26f 实测，3 seed 中位）：</b>C 类 <b>100% 存活</b>（它从不被配额拦、从不占带宽，只是被 FCFS 的 FIFO 活活排死——对照见 §4）；B 类 <b>100%</b>；A 类 15%（带宽就这么多，错峰保住的是\"不死光\"而不是\"全活\"）。对照：同场景 FCFS 的 C 只活 30%、A 活 7.5%。",
+     nodes:["back"], edges:["e-exback"]}
+  ];
+  var cur = 0, playing = false, timer = null;
+  var capEl = document.getElementById("cap");
+  var tnow = document.getElementById("t-now");
+  function apply(i){
+    var s = STEPS[i];
+    renderQueue(s.left, i >= 1, i >= 3, null);
+    setCells(s.npu);
+    setQuota((s.npu.a || 0), 4);
+    setBW(s.bw, s.capmax);
+    capEl.innerHTML = s.cap;
+    tnow.textContent = s.t;
+    setPhase(s.ph, s.nodes, s.edges);
+  }
+  /* ---------- 流程图联动 ---------- */
+  var PBNODES = {T:["T"], "1":["1"], "2":["2"], "3":["3"], "4":["4","d","disp","skip"], back:["wait","ex","back","wd"]};
+  function setPhase(ph, nodes, edges){
+    document.querySelectorAll("#flow .node").forEach(function(n){
+      n.classList.remove("active","done");
+      if(nodes.indexOf(n.dataset.node) >= 0) n.classList.add("active");
+      else if(PBNODES_DONE(ph, n.dataset.node)) n.classList.add("done");
+    });
+    document.querySelectorAll("#flow .edge").forEach(function(e){
+      e.classList.remove("active","done");
+      if(edges.indexOf(e.id) >= 0) e.classList.add("active");
+    });
+    var LABEL = {T:"触发 · 事件到来", "1":"第 1 步 · 算读取压力", "2":"第 2 步 · 定门槛与配额",
+      "3":"第 3 步 · 时间预算排序", "4":"第 4 步 · 逐 NPU 扫描派发", back:"无可派 → WAIT / 完成释放 · 循环"};
+    document.getElementById("fc-now").innerHTML = "<b>当前：</b>" + (LABEL[ph] || ph);
+    document.querySelectorAll("#phasebar .pb").forEach(function(ch){
+      var k = ch.dataset.pb;
+      ch.classList.remove("active","done");
+      var order = ["T","1","2","3","4","back"], ki = order.indexOf(k), pi = order.indexOf(ph === "T" ? "T" : ph);
+      if(k === ph || (ph === "4" && (k === "4"))) ch.classList.add("active");
+      else if(ki < pi) ch.classList.add("done");
+    });
+  }
+  function PBNODES_DONE(ph, node){
+    var order = ["T","1","2","3","4","back"];
+    var pi = order.indexOf(ph);
+    var nodePh = {"T":"T","1":"1","2":"2","3":"3","4":"4","d":"4","disp":"4","skip":"4","wait":"back","ex":"back","back":"back","wd":"back"}[node];
+    return nodePh !== undefined && order.indexOf(nodePh) < pi;
+  }
+  /* ---------- 控件 ---------- */
+  function go(i){
+    cur = Math.max(0, Math.min(STEPS.length - 1, i));
+    apply(cur);
+  }
+  document.getElementById("btn-next").addEventListener("click", function(){ go(cur + 1); });
+  document.getElementById("btn-prev").addEventListener("click", function(){ go(cur - 1); });
+  document.getElementById("btn-reset").addEventListener("click", function(){ stop(); go(0); });
+  var playBtn = document.getElementById("btn-play");
+  function stop(){
+    playing = false; clearTimeout(timer);
+    playBtn.textContent = "▶ 播放"; playBtn.classList.add("primary");
+  }
+  playBtn.addEventListener("click", function(){
+    if(playing){ stop(); return; }
+    playing = true; playBtn.textContent = "⏸ 暂停"; playBtn.classList.remove("primary");
+    timer = setInterval(function(){
+      if(cur >= STEPS.length - 1){ stop(); return; }
+      go(cur + 1);
+    }, 2600);
+  });
+  /* 流程图节点点击 → 跳到首个该环节的步 */
+  var STEP_OF = {T:0, "1":1, "2":2, "3":3, "4":4, d:4, disp:4, skip:6, wait:7, ex:7, back:7, wd:7};
+  document.querySelectorAll("#flow .node").forEach(function(n){
+    function jump(){ stop(); go(STEP_OF[n.dataset.node] || 0); }
+    n.addEventListener("click", jump);
+    n.addEventListener("keydown", function(ev){ if(ev.key === "Enter" || ev.key === " "){ ev.preventDefault(); jump(); } });
+  });
+  document.querySelectorAll("#phasebar .pb").forEach(function(ch){
+    function jump(){ stop(); var k = ch.dataset.pb; for(var i = 0; i < STEPS.length; i++){ if(STEPS[i].ph === k){ go(i); return; } } }
+    ch.addEventListener("click", jump);
+    ch.addEventListener("keydown", function(ev){ if(ev.key === "Enter" || ev.key === " "){ ev.preventDefault(); jump(); } });
+  });
+  document.addEventListener("keydown", function(ev){
+    if(ev.target.closest("button, [role=button], a, input")) return;
+    if(ev.key === "ArrowRight"){ stop(); go(cur + 1); }
+    if(ev.key === "ArrowLeft"){ stop(); go(cur - 1); }
+  });
+  go(0);
+})();
+</script>
+</body>
+</html>
