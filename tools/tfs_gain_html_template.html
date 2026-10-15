@@ -1,0 +1,298 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>TFS 收益场景与真实 trace 比重</title>
+<style>
+:root{
+  --bg:#f7f6f3; --panel:#ffffff; --ink:#1f2430; --muted:#5b6472;
+  --line:#d8d4cc; --grid:#e8e4dc; --accent:#2c5f9e;
+  --c1:#4C72B0; --c2:#DD8452; --c3:#55A868; --c4:#C44E52;
+  --ok:#1d7a53; --warn:#9a6700; --chip:#eeeae2;
+}
+@media (prefers-color-scheme: dark){
+  :root{
+    --bg:#17191d; --panel:#1f232a; --ink:#e8e6e1; --muted:#9aa3b0;
+    --line:#3a4049; --grid:#2a2f37; --accent:#7fa8d9;
+    --c1:#7fa8d9; --c2:#e8a87c; --c3:#7cc49a; --c4:#e07a7e;
+    --ok:#5fc493; --warn:#e0b45c; --chip:#2a2f37;
+  }
+}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--ink);
+  font:15px/1.65 "PingFang SC","Songti SC","Microsoft YaHei",system-ui,sans-serif;}
+main{max-width:1120px;margin:0 auto;padding:28px 20px 60px}
+h1{font-size:24px;margin:0 0 6px}
+h2{font-size:18px;margin:34px 0 10px;padding-bottom:6px;border-bottom:1px solid var(--line)}
+.sub{color:var(--muted);font-size:13.5px;margin:0 0 4px}
+.badge{display:inline-block;background:var(--chip);border-radius:6px;
+  padding:2px 10px;margin:6px 8px 0 0;font-size:13px}
+.panel{background:var(--panel);border:1px solid var(--line);border-radius:10px;
+  padding:16px 18px;margin:14px 0}
+.controls{display:flex;flex-wrap:wrap;gap:14px;align-items:center;margin:10px 0 6px}
+.controls label{font-size:13px;color:var(--muted)}
+button{font:inherit;font-size:13px;padding:4px 12px;border-radius:7px;
+  border:1px solid var(--line);background:var(--panel);color:var(--ink);cursor:pointer}
+button[aria-pressed="true"]{background:var(--accent);color:#fff;border-color:var(--accent)}
+button:focus-visible,input:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+input[type=range]{flex:1;min-width:180px;accent-color:var(--accent)}
+.readout{width:100%;border-collapse:collapse;font-size:13.5px;margin-top:8px}
+.readout th,.readout td{padding:5px 8px;border-bottom:1px solid var(--grid);text-align:right}
+.readout th:first-child,.readout td:first-child{text-align:left}
+.sw{display:inline-block;width:22px;height:0;border-top:3px solid;vertical-align:middle;margin-right:6px}
+.dash1{border-top-style:dashed}
+.dash2{border-top-style:dotted}
+table.metrics{width:100%;border-collapse:collapse;font-size:13.5px}
+table.metrics th,table.metrics td{padding:6px 9px;border-bottom:1px solid var(--grid);text-align:right}
+table.metrics th:first-child,table.metrics td:first-child{text-align:left;color:var(--muted)}
+table.metrics tr:hover td{background:var(--chip)}
+.sparkrow{display:grid;grid-template-columns:190px 1fr;gap:10px;align-items:center;margin:8px 0}
+.sparklab{font-size:13px}
+.sparklab .k{color:var(--muted);font-size:12px;display:block}
+svg{display:block;width:100%}
+.legend{font-size:12.5px;color:var(--muted);margin-top:4px}
+.ok{color:var(--ok)} .warn{color:var(--warn)}
+ol.check{padding-left:22px} ol.check li{margin:6px 0}
+.fine{font-size:12.5px;color:var(--muted)}
+@media (max-width:760px){ .sparkrow{grid-template-columns:1fr} }
+</style>
+</head>
+<body>
+<main>
+<h1>TFS 收益场景与真实 trace 比重</h1>
+<p class="sub">数据:Mooncake 三文件(首现命中)+ AgentX 样本 2 会话(理想前缀命中)。画像:默认 ProfileConfig,L=32 层。复算:<code>tools/tfs_trace_gain.py</code> / <code>tools/tfs_gain_html.py</code>。</p>
+<span class="badge">结论一:原始节奏下大门不开(B*≤5.1 GB/s ≪ 供给 80~120)</span>
+<span class="badge">结论二:结构前提齐备(簇内请求 87.5~99.8%,d 的 CV 1.9~5.0)</span>
+<span class="badge">结论三:比重由部署决定——收紧 B 或加压回放即开门</span>
+
+<h2>一、拖动带宽 B:每条 trace 有多少落在收益区</h2>
+<div class="panel">
+  <div class="controls">
+    <div role="group" aria-label="指标切换">
+      <button id="mWin" aria-pressed="true">净窗口占比</button>
+      <button id="mReq" aria-pressed="false">净请求占比</button>
+    </div>
+    <label for="bslider">带宽供给 B:<b id="bval">80</b> GB/s</label>
+    <input id="bslider" type="range" min="0" max="1000" value="731"
+      step="1" aria-label="带宽供给 B,对数刻度 5 到 200 GB/s">
+  </div>
+  <div id="chart"></div>
+  <p class="legend">纵轴:超订窗口(或涉及请求)占比,净口径 = 1 秒内到达读取量 &gt; B 且窗口内 ≥2 条请求。横轴:B,对数刻度。灰色竖线:E23 用 B=80、E26 用 B=120。曲线左端起点 ≈ 该 trace 的窗口峰速率——B 低于它才出现收益区。</p>
+  <table class="readout" id="readout"></table>
+</div>
+
+<h2>二、到达读取速率时序(1 秒窗口,对数纵轴)</h2>
+<div class="panel" id="sparks"></div>
+<p class="fine">虚线 = 该 trace 的临界带宽 B*。峰值标注 = 窗口峰速率。Conversation / ToolAgent 的密集竖刺即簇到达;AgentX 会话跨 2.3 天,节奏极稀疏。</p>
+
+<h2>三、明细指标</h2>
+<div class="panel" style="overflow-x:auto">
+  <table class="metrics" id="metrics"></table>
+</div>
+
+<h2>四、收益场景四条件与换 case 三检查</h2>
+<div class="panel">
+  <table class="metrics">
+    <tr><th>条件</th><th>怎么判断</th><th>缺了会怎样</th></tr>
+    <tr><td>① 分诊区(大门)</td><td style="text-align:left">ρ = B*/B ≥ 0.7,或窗口读取速率 &gt; B</td><td style="text-align:left">收益为 0,但无害</td></tr>
+    <tr><td>② 簇到达</td><td style="text-align:left">50ms~1s 内多条重流</td><td style="text-align:left">无错峰对象</td></tr>
+    <tr><td>③ 轻重异构</td><td style="text-align:left">d 分布分散;存在零读或轻流</td><td style="text-align:left">分诊无信息</td></tr>
+    <tr><td>④ 期限有松紧</td><td style="text-align:left">部署参数 α</td><td style="text-align:left">退化为到达序</td></tr>
+  </table>
+  <ol class="check">
+    <li>看 d 分布:CV &lt; 0.5 时收益上限约 0。</li>
+    <li>算 ρ:ρ &lt; 0.7 时大门不开。</li>
+    <li>看簇与期限:有簇、期限有松紧,结构齐备。随后与 fcfs 对跑一次(TFS 单次运行秒级)。</li>
+  </ol>
+</div>
+
+<h2>五、口径注意</h2>
+<p class="fine">首现命中(Mooncake)与理想前缀命中(AgentX)口径不同,数字不可互推。窗口超订是到达侧上界,不建模排队动态。AgentX 样本仅 2 会话,需全量 393 会话并发回放才能下结论。“ρ≥0.7 时 TFS 捕获九成收益”来自 E26f 合成工况(95%/91%),trace 回放未验证。</p>
+
+<noscript><p>本页需要 JavaScript。静态版见 <code>docs/TFS收益场景与真实trace比重-20261015.md</code>。</p></noscript>
+</main>
+
+<script>
+const DATA = __DATA__;
+const COLORS = {conv:"var(--c1)", tool:"var(--c2)", synth:"var(--c3)", ax:"var(--c4)"};
+const DASH = {conv:"", tool:"7 4", synth:"2 3", ax:"1 3"};
+const NS = "http://www.w3.org/2000/svg";
+const B_MIN = 5, B_MAX = 200;
+const bOfSlider = v => B_MIN * Math.pow(B_MAX / B_MIN, v / 1000);
+function el(tag, attrs, parent){
+  const e = document.createElementNS(NS, tag);
+  for (const k in attrs) e.setAttribute(k, attrs[k]);
+  if (parent) parent.appendChild(e);
+  return e;
+}
+function txt(parent, x, y, s, attrs){
+  const t = el("text", Object.assign({x, y, "font-size": 11, fill: "var(--muted)"}, attrs||{}), parent);
+  t.textContent = s; return t;
+}
+const pct = v => (v*100).toFixed(1) + "%";
+
+/* ---------- 图一:B 扫描曲线 ---------- */
+let metric = "win";
+function renderChart(){
+  const box = document.getElementById("chart");
+  box.innerHTML = "";
+  const W = box.clientWidth || 900, H = 330;
+  const P = {l:44, r:14, t:16, b:30};
+  const iw = W - P.l - P.r, ih = H - P.t - P.b;
+  const svg = el("svg", {viewBox: `0 0 ${W} ${H}`, role: "img",
+    "aria-label": "超订占比随带宽 B 变化曲线"}, box);
+  const lg = Math.log;
+  const xOf = B => P.l + (lg(B) - lg(B_MIN)) / (lg(B_MAX) - lg(B_MIN)) * iw;
+  const yOf = v => P.t + (1 - Math.max(0, Math.min(1, v))) * ih;
+  for (const p of [0, .25, .5, .75, 1]){
+    el("line", {x1:P.l, x2:W-P.r, y1:yOf(p), y2:yOf(p),
+      stroke:"var(--grid)", "stroke-width":1}, svg);
+    txt(svg, P.l - 6, yOf(p) + 4, (p*100)+"%", {"text-anchor":"end"});
+  }
+  for (const b of [5,10,20,30,60,80,120,200]){
+    el("line", {x1:xOf(b), x2:xOf(b), y1:P.t, y2:P.t+ih, stroke:"var(--grid)"}, svg);
+    txt(svg, xOf(b), H-10, b, {"text-anchor":"middle"});
+  }
+  txt(svg, W/2, H-0.5+6, "", {});
+  for (const [b, lab] of [[80,"E23=80"], [120,"E26=120"]]){
+    el("line", {x1:xOf(b), x2:xOf(b), y1:P.t, y2:P.t+ih,
+      stroke:"var(--muted)", "stroke-dasharray":"4 4", opacity:.55}, svg);
+    txt(svg, xOf(b)+3, P.t+10, lab, {});
+  }
+  for (const tr of DATA.traces){
+    const pts = tr.curves.B.map((b, i) =>
+      `${xOf(b).toFixed(1)},${yOf(tr.curves[metric][i]).toFixed(1)}`).join(" ");
+    el("polyline", {points: pts, fill:"none", stroke: COLORS[tr.key],
+      "stroke-width": 2.2, "stroke-dasharray": DASH[tr.key] || "none"}, svg);
+  }
+  const cur = el("g", {}, svg);
+  el("line", {id:"cursorline", x1:0, x2:0, y1:P.t, y2:P.t+ih,
+    stroke:"var(--ink)", "stroke-width":1.2}, cur);
+  el("circle", {id:"cursordot", r:4, fill:"var(--ink)"}, cur);
+  txt(svg, P.l, P.t+10, "纵轴:超订占比(净口径)", {});
+  updateCursor();
+  function updateCursor(){ window.__updateCursor = (B)=>{
+    const x = xOf(B);
+    document.getElementById("cursorline").setAttribute("x1", x);
+    document.getElementById("cursorline").setAttribute("x2", x);
+    /* 最近网格点取 dot 位置 */
+    let bi = 0, bd = 1e9;
+    DATA.traces[0].curves.B.forEach((b, i) => {
+      const dd = Math.abs(Math.log(b) - Math.log(B));
+      if (dd < bd){ bd = dd; bi = i; }});
+    const v = DATA.traces[0].curves[metric][bi] || 0;
+    const d = document.getElementById("cursordot");
+    d.setAttribute("cx", x); d.setAttribute("cy", yOf(v));
+  };}
+}
+function nearestIdx(tr, B){
+  let bi = 0, bd = 1e9;
+  tr.curves.B.forEach((b, i) => {
+    const dd = Math.abs(Math.log(b) - Math.log(B));
+    if (dd < bd){ bd = dd; bi = i; }});
+  return bi;
+}
+function renderReadout(B){
+  const tb = document.getElementById("readout");
+  let html = "<tr><th>trace</th><th>B* (GB/s)</th><th>ρ=B*/B</th><th>净窗口占比</th><th>净请求占比</th><th>门(ρ≥0.7)</th></tr>";
+  for (const tr of DATA.traces){
+    const i = nearestIdx(tr, B);
+    const rho = tr.b_star / B;
+    html += `<tr><td><span class="sw" style="border-color:${COLORS[tr.key]}"` +
+      (DASH[tr.key] ? ` class="${tr.key==='tool'?'dash1':'dash2'}"` : "") +
+      `></span>${tr.label}</td><td>${tr.b_star}</td><td>${rho.toFixed(2)}</td>` +
+      `<td>${pct(tr.curves.win[i])}</td><td>${pct(tr.curves.req[i])}</td>` +
+      `<td class="${rho>=0.7?'ok':'warn'}">${rho>=0.7?"开门":"关门"}</td></tr>`;
+  }
+  tb.innerHTML = html;
+}
+const slider = document.getElementById("bslider");
+function onSlide(){
+  const B = bOfSlider(+slider.value);
+  document.getElementById("bval").textContent = B < 10 ? B.toFixed(1) : Math.round(B);
+  if (window.__updateCursor) window.__updateCursor(B);
+  renderReadout(B);
+}
+slider.addEventListener("input", onSlide);
+document.getElementById("mWin").onclick = () => setMetric("win");
+document.getElementById("mReq").onclick = () => setMetric("req");
+function setMetric(m){
+  metric = m;
+  document.getElementById("mWin").setAttribute("aria-pressed", m==="win");
+  document.getElementById("mReq").setAttribute("aria-pressed", m==="req");
+  renderChart(); onSlide();
+}
+
+/* ---------- 图二:时序 ---------- */
+function renderSparks(){
+  const box = document.getElementById("sparks");
+  box.innerHTML = "";
+  for (const tr of DATA.traces){
+    const row = document.createElement("div");
+    row.className = "sparkrow";
+    const lab = document.createElement("div");
+    lab.className = "sparklab";
+    lab.innerHTML = `<span class="sw" style="border-color:${COLORS[tr.key]}"` +
+      (DASH[tr.key] ? ` class="${tr.key==='tool'?'dash1':'dash2'}"` : "") +
+      `></span><b>${tr.label}</b><span class="k">${tr.note} · ` +
+      `${tr.n} 条 / ${tr.dur_s}s · 簇内 ${pct(tr.cluster_frac)} · ` +
+      `B*=${tr.b_star} · 峰 ${tr.v_peak} GB/s</span>`;
+    const holder = document.createElement("div");
+    row.appendChild(lab); row.appendChild(holder); box.appendChild(row);
+    const W = holder.clientWidth || 700, H = 64, P = {l:6, r:44, t:6, b:8};
+    const iw = W - P.l - P.r, ih = H - P.t - P.b;
+    const svg = el("svg", {viewBox: `0 0 ${W} ${H}`}, holder);
+    const lo = -3, hi = Math.log10(Math.max(tr.v_peak, 0.01) * 1.6);
+    const yOf = v => P.t + (1 - (Math.log10(Math.max(v, 1e-3)) - lo) / (hi - lo)) * ih;
+    const xOf = i => P.l + i / (tr.series.length - 1) * iw;
+    el("line", {x1:P.l, x2:W-P.r, y1:yOf(tr.b_star), y2:yOf(tr.b_star),
+      stroke:"var(--muted)", "stroke-dasharray":"4 3", opacity:.7}, svg);
+    txt(svg, W-P.r+3, yOf(tr.b_star)+3, "B*", {});
+    const pts = tr.series.map((p, i) =>
+      `${xOf(i).toFixed(1)},${yOf(p[1]).toFixed(1)}`).join(" ");
+    el("polyline", {points: pts, fill:"none", stroke: COLORS[tr.key],
+      "stroke-width":1}, svg);
+    let pi = 0;
+    tr.series.forEach((p, i) => { if (p[1] > tr.series[pi][1]) pi = i; });
+    el("circle", {cx:xOf(pi), cy:yOf(tr.series[pi][1]), r:2.5,
+      fill: COLORS[tr.key]}, svg);
+    txt(svg, W-P.r+3, yOf(tr.series[pi][1])+3, tr.v_peak+"", {});
+  }
+}
+
+/* ---------- 表三:明细 ---------- */
+function renderMetrics(){
+  const rows = [
+    ["请求数", tr => tr.n],
+    ["时长 (s)", tr => tr.dur_s],
+    ["到达率 (条/s)", tr => tr.arr_rate],
+    ["临界带宽 B* (GB/s)", tr => tr.b_star],
+    ["窗口峰读取速率 (GB/s)", tr => tr.v_peak],
+    ["B=80 推至 ρ=1 需加速", tr => tr.speedup80 + "×"],
+    ["1s 到达峰 / 均", tr => tr.peak1s + " / " + tr.mean1s],
+    ["簇内请求占比 (≥8 条/50ms)", tr => pct(tr.cluster_frac)],
+    ["d 的 CV", tr => tr.d_cv],
+    ["d P25 / P50 / P75 / P90 (GB/s)", tr =>
+      `${tr.d_p25} / ${tr.d_p50} / ${tr.d_p75} / ${tr.d_p90}`],
+    ["零读请求占比", tr => pct(tr.zero_read)],
+    ["近轻流占比 (d<0.1×门槛)", tr => pct(tr.near_light)],
+    ["重流读取量集中度", tr => pct(tr.heavy_v)],
+    ["token 命中率 (口径各异)", tr => pct(tr.hit)],
+    ["窗口计算需求峰 (NPU)", tr => tr.comp_peak + " / 32"],
+  ];
+  let html = "<tr><th>指标</th>" + DATA.traces.map(t => `<th>${t.label}</th>`).join("") + "</tr>";
+  for (const [name, fn] of rows)
+    html += `<tr><td>${name}</td>` + DATA.traces.map(t => `<td>${fn(t)}</td>`).join("") + "</tr>";
+  document.getElementById("metrics").innerHTML = html;
+}
+
+renderChart(); renderSparks(); renderMetrics(); onSlide();
+let rt = null;
+window.addEventListener("resize", () => {
+  clearTimeout(rt);
+  rt = setTimeout(() => { renderChart(); renderSparks(); onSlide(); }, 150);
+});
+</script>
+</body>
+</html>
