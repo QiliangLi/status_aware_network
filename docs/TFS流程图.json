@@ -1,0 +1,255 @@
+{
+  "schema_version": 2,
+  "diagram_type": "workflow",
+  "meta": {
+    "title": "TFS 规则式调度器:单决策点流程",
+    "locale": "zh-CN",
+    "quality_profile": "showcase",
+    "output": "docs/TFS流程图.html"
+  },
+  "lanes": [
+    {
+      "id": "trig",
+      "label": "触发与等待"
+    },
+    {
+      "id": "triage",
+      "label": "分诊"
+    },
+    {
+      "id": "disp",
+      "label": "派发"
+    },
+    {
+      "id": "heavy_lane",
+      "label": "重流路径"
+    }
+  ],
+  "mainPath": [
+    "trigger",
+    "compute_d",
+    "threshold",
+    "sort",
+    "scan",
+    "light",
+    "wait"
+  ],
+  "nodes": [
+    {
+      "id": "trigger",
+      "lane": "trig",
+      "col": 0,
+      "type": "messagebus",
+      "label": "决策点",
+      "sublabel": "空闲 NPU 或批次完成",
+      "width": 160,
+      "height": 44
+    },
+    {
+      "id": "compute_d",
+      "lane": "triage",
+      "col": 1,
+      "type": "backend",
+      "label": "算读取压力 d",
+      "sublabel": "d = V ÷ c",
+      "width": 160,
+      "height": 44
+    },
+    {
+      "id": "threshold",
+      "lane": "triage",
+      "col": 2,
+      "type": "backend",
+      "label": "定门槛与配额",
+      "sublabel": "C = 带宽 ÷ P75",
+      "width": 160,
+      "height": 44
+    },
+    {
+      "id": "sort",
+      "lane": "triage",
+      "col": 3,
+      "type": "backend",
+      "label": "时间预算排序",
+      "sublabel": "期限 − now − T0",
+      "width": 160,
+      "height": 44
+    },
+    {
+      "id": "scan",
+      "lane": "disp",
+      "col": 4,
+      "type": "backend",
+      "label": "逐 NPU 扫描",
+      "sublabel": "按排序取下一条",
+      "width": 160,
+      "height": 44
+    },
+    {
+      "id": "light",
+      "lane": "disp",
+      "col": 5,
+      "type": "cloud",
+      "label": "派发轻流",
+      "sublabel": "零读与轻读,不占配额",
+      "width": 160,
+      "height": 44
+    },
+    {
+      "id": "quota",
+      "lane": "heavy_lane",
+      "col": 4,
+      "type": "security",
+      "label": "配额检查",
+      "sublabel": "在跑重流 < C ?",
+      "width": 160,
+      "height": 44
+    },
+    {
+      "id": "heavy",
+      "lane": "heavy_lane",
+      "col": 5,
+      "type": "backend",
+      "label": "派发重流",
+      "sublabel": "计入配额",
+      "width": 160,
+      "height": 44
+    },
+    {
+      "id": "anchor",
+      "lane": "disp",
+      "col": 3,
+      "type": "security",
+      "label": "老化豁免",
+      "sublabel": "无轻流在等时",
+      "width": 160,
+      "height": 44
+    },
+    {
+      "id": "wait",
+      "lane": "trig",
+      "col": 5,
+      "type": "external",
+      "label": "WAIT",
+      "sublabel": "至最早重批完成",
+      "width": 160,
+      "height": 44
+    }
+  ],
+  "edges": [
+    {
+      "from": "trigger",
+      "to": "compute_d",
+      "variant": "emphasis",
+      "route": "drop",
+      "fromSide": "bottom",
+      "toSide": "top"
+    },
+    {
+      "from": "compute_d",
+      "to": "threshold"
+    },
+    {
+      "from": "threshold",
+      "to": "sort"
+    },
+    {
+      "from": "sort",
+      "to": "scan",
+      "variant": "emphasis",
+      "route": "drop",
+      "fromSide": "bottom",
+      "toSide": "top"
+    },
+    {
+      "from": "scan",
+      "to": "light",
+      "label": "轻流"
+    },
+    {
+      "from": "light",
+      "to": "wait",
+      "role": "main"
+    },
+    {
+      "from": "light",
+      "to": "scan",
+      "role": "branch",
+      "label": "派发后:下个 NPU"
+    },
+    {
+      "from": "scan",
+      "to": "quota",
+      "label": "重流"
+    },
+    {
+      "from": "quota",
+      "to": "heavy",
+      "label": "未满"
+    },
+    {
+      "from": "quota",
+      "to": "scan",
+      "role": "branch",
+      "label": "满员:跳过"
+    },
+    {
+      "from": "scan",
+      "to": "wait",
+      "role": "branch",
+      "fromSide": "top",
+      "toSide": "left",
+      "label": "无可派"
+    },
+    {
+      "from": "scan",
+      "to": "anchor",
+      "role": "branch",
+      "variant": "dashed",
+      "label": "有超时老请求"
+    },
+    {
+      "from": "anchor",
+      "to": "heavy",
+      "variant": "dashed",
+      "label": "豁免派发",
+      "fromSide": "bottom",
+      "toSide": "bottom",
+      "channelY": 548
+    },
+    {
+      "from": "wait",
+      "to": "trigger",
+      "role": "return",
+      "label": "唤醒"
+    }
+  ],
+  "cards": [
+    {
+      "dot": "cyan",
+      "title": "一个分诊变量",
+      "items": [
+        "分诊只看读取压力 d = V ÷ c,不读类别标签",
+        "门槛取当前请求集合的 P75,配额 = 带宽 ÷ 门槛",
+        "负载变了,门槛和配额自动跟着变"
+      ]
+    },
+    {
+      "dot": "emerald",
+      "title": "填空律",
+      "items": [
+        "轻流与零读流不占配额,有空闲 NPU 就派",
+        "E26f 中零读类满足率:FCFS 30%,TFS 100%"
+      ]
+    },
+    {
+      "dot": "amber",
+      "title": "错峰与保守账本",
+      "items": [
+        "重流满员即跳过,不中断扫描",
+        "WAIT 对齐最早重批完成时刻,不预测带宽",
+        "单次决策约 0.11ms,零推演"
+      ]
+    }
+  ]
+}
