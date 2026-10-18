@@ -29,6 +29,7 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
 REPO = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 ROOT = os.environ.get("E26F_ROOT") or os.path.join(REPO, "results", "cq", "eval", "e26f")
+TAG = os.environ.get("E26F_TAG", "e26f")   # 图文件名前缀（重跑目录用 e26f_max_min，勿覆盖入库图）
 FIG_DIR = os.path.join(REPO, "docs", "figures")
 B_GBPS = 120.0
 BIN_S = 0.01
@@ -142,7 +143,7 @@ def build_gantt(cell: str, rep: int, audit_only: bool):
                bbox_to_anchor=(0.5, 0.925))
     ov = audit_text_overlap(fig)
     if not audit_only:
-        fig.savefig(os.path.join(FIG_DIR, f"cq_fig_e26f_gantt_{tag}.png"),
+        fig.savefig(os.path.join(FIG_DIR, f"cq_fig_{TAG}_gantt_{tag}.png"),
                     dpi=125)
     plt.close(fig)
     print(f"{tag}: 甘特文字重叠 {len(ov)} 对")
@@ -210,7 +211,7 @@ def build_bw(cell: str, rep: int, audit_only: bool):
                  "C 零读不占带宽，两线仅由 A/B 贡献）", fontsize=12, y=0.97)
     ov = audit_text_overlap(fig)
     if not audit_only:
-        fig.savefig(os.path.join(FIG_DIR, f"cq_fig_e26f_bw_{tag}.png"),
+        fig.savefig(os.path.join(FIG_DIR, f"cq_fig_{TAG}_bw_{tag}.png"),
                     dpi=125)
     plt.close(fig)
     print(f"{tag}: 带宽图文字重叠 {len(ov)} 对")
@@ -254,7 +255,7 @@ def build_cdf(cell: str, rep: int, audit_only: bool):
     fig.tight_layout()
     ov = audit_text_overlap(fig)
     if not audit_only:
-        fig.savefig(os.path.join(FIG_DIR, f"cq_fig_e26f_cdf_{tag}.png"),
+        fig.savefig(os.path.join(FIG_DIR, f"cq_fig_{TAG}_cdf_{tag}.png"),
                     dpi=125)
     plt.close(fig)
     print(f"{tag}: CDF 图文字重叠 {len(ov)} 对")
@@ -330,7 +331,7 @@ def build_util(cell: str, rep: int, audit_only: bool):
     fig.tight_layout(rect=(0, 0, 1, 0.96))
     ov = audit_text_overlap(fig)
     if not audit_only:
-        fig.savefig(os.path.join(FIG_DIR, f"cq_fig_e26f_util_{tag}.png"),
+        fig.savefig(os.path.join(FIG_DIR, f"cq_fig_{TAG}_util_{tag}.png"),
                     dpi=125)
     plt.close(fig)
     print(f"{tag}: util 图文字重叠 {len(ov)} 对")
@@ -408,7 +409,7 @@ def build_bar(audit_only: bool):
     fig.tight_layout()
     ov = audit_text_overlap(fig)
     if not audit_only:
-        fig.savefig(os.path.join(FIG_DIR, "cq_fig_e26f_bar.png"), dpi=125)
+        fig.savefig(os.path.join(FIG_DIR, "cq_fig_{TAG}_bar.png"), dpi=125)
     plt.close(fig)
     print(f"bar: 文字重叠 {len(ov)} 对")
     return len(ov)
