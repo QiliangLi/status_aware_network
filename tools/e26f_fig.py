@@ -409,7 +409,7 @@ def build_bar(audit_only: bool):
     fig.tight_layout()
     ov = audit_text_overlap(fig)
     if not audit_only:
-        fig.savefig(os.path.join(FIG_DIR, "cq_fig_{TAG}_bar.png"), dpi=125)
+        fig.savefig(os.path.join(FIG_DIR, f"cq_fig_{TAG}_bar.png"), dpi=125)
     plt.close(fig)
     print(f"bar: 文字重叠 {len(ov)} 对")
     return len(ov)
