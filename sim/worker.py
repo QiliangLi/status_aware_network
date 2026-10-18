@@ -15,7 +15,10 @@ class Engine:
 
     def _run(self, req, action):
         if action == "fetch":
-            ev = self.storage.submit(req.rid, req.kv_gb)
+            tokens = req.cached_prefix_tokens
+            gbpt = req.kv_gb / tokens if tokens > 0 else 0.0
+            ev = self.storage.submit(req.rid, req.kv_gb, req.demand_gbps,
+                                     self.storage.plan_for(req.cls, tokens, gbpt))
             yield ev
             req.t_fetch_done = self.env.now
             self.metrics.on_fetch_done(req.rid, self.env.now)

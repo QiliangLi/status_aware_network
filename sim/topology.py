@@ -198,6 +198,7 @@ class World:
 
         cls_bytes = {c.name: c.tokens * spec.model.kv_gb_per_token for c in spec.wl.classes}
         self.cls_bytes = cls_bytes
+        self.kv_gb_per_token = spec.model.kv_gb_per_token   # 块计划换算用
         self.dir = MetadataDirectory(topo, [c.name for c in spec.wl.classes], cls_bytes)
         self.path_lat = topo.path_lat
 

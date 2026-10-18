@@ -19,13 +19,14 @@ class EngineV2:
         self.env.process(self._run(req, dec))
 
     # ---------- 取回链路 ----------
-    def _chain(self, rid, node, tier, nbytes):
+    def _chain(self, rid, node, tier, nbytes, tokens, cls, demand):
         if nbytes <= 1e-12:
             return
         yield self.env.timeout(self.world.path_lat[self.worker_id][node])
         res = self.world.res(node, tier)
-        yield res.submit(rid, nbytes)
-        yield self.world.fabric.submit(rid, nbytes)
+        gbpt = nbytes / tokens if tokens > 0 else 0.0
+        yield res.submit(rid, nbytes, demand, res.plan_for(cls, tokens, gbpt))
+        yield self.world.fabric.submit(rid, nbytes, demand)
 
     # ---------- 主流程 ----------
     def _run(self, req, dec):
@@ -37,14 +38,18 @@ class EngineV2:
             yield gpu.submit(req.rid, req.prompt_tokens)
         elif act == "fetch":
             t0 = self.env.now
-            yield self.env.process(self._chain(req.rid, dec.node, dec.tier, req.kv_gb))
+            yield self.env.process(self._chain(req.rid, dec.node, dec.tier, req.kv_gb,
+                                               req.cached_prefix_tokens, req.cls,
+                                               req.demand_gbps))
             req.t_fetch_done = self.env.now
             self.metrics.on_fetch_chain(req, self.env.now - t0)
             yield gpu.submit(req.rid, req.suffix_tokens)
         elif act == "partial":
             t0 = self.env.now
             nbytes = dec.fetch_gb
-            chain = self.env.process(self._chain(req.rid, dec.node, dec.tier, nbytes))
+            chain = self.env.process(self._chain(req.rid, dec.node, dec.tier, nbytes,
+                                                 dec.fetch_tokens, req.cls,
+                                                 req.demand_gbps))
             if dec.overlap:
                 g = gpu.submit(req.rid, req.prompt_tokens - dec.fetch_tokens)
                 yield chain

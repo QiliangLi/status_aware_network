@@ -19,6 +19,20 @@ from . import workload
 _TRACE_CACHE: dict = {}
 
 
+def cls_demand_gbps(spec: RunSpec) -> dict:
+    """各类请求的存储需求 d（GB/s）：kv_gb_per_token / prefill_s_per_token。
+
+    prefill 每 token 时间取 prefill_table 末点（REF 处收敛值）；per-class
+    覆盖经 WorkloadConfig.cls_demand_scale，全局缩放经 demand_scale。
+    d 是请求属性（模型配置推导），非存储内部状态——所有策略合法可见。
+    """
+    ref_tokens, ref_s = spec.gpu.prefill_table[-1]
+    d_ref = spec.model.kv_gb_per_token * ref_tokens / ref_s
+    scales = dict(spec.wl.cls_demand_scale) if spec.wl.cls_demand_scale else {}
+    return {c.name: d_ref * spec.wl.demand_scale * scales.get(c.name, 1.0)
+            for c in spec.wl.classes}
+
+
 def get_trace(spec: RunSpec) -> list:
     key = (spec.seed, spec.duration, spec.wl, spec.burst, spec.sessions, spec.drift)
     if key not in _TRACE_CACHE:
@@ -113,11 +127,13 @@ def run_once(spec: RunSpec) -> dict:
     _tickers()
 
     def _arrivals():
+        dem = cls_demand_gbps(spec)
         for rid, row in enumerate(trace):
             t, cls, hit = row[0], row[1], row[2]
             sid = row[3] if len(row) > 3 else -1
             yield env.timeout(max(0.0, t - env.now))
-            req = build_request(rid, t, cls, hit, spec.wl, spec.model, sid=sid)
+            req = build_request(rid, t, cls, hit, spec.wl, spec.model, sid=sid,
+                                demand_gbps=dem.get(cls, 0.0))
             metrics.on_arrival(req)
             wid, action = scheduler.dispatch(req, views)
             req.worker = wid
@@ -168,13 +184,19 @@ def _ctrl_loop(env, world, quote, ctrl, metrics, spec):
     hot_since = {}
     op_id = [0]
     last_op = {}   # cls -> 上次复制/迁移时刻（冷却）
+    _bg_demand = cls_demand_gbps(spec)   # 后台复制/迁移流的统一推导需求
 
     def _do_transfer(cls, src, dst, nbytes, evict_src):
         op_id[0] += 1
         rid = -(10 ** 6 + op_id[0])
         t0 = env.now
-        e1 = world.res(*src).submit(rid, nbytes)
-        e2 = world.res(*dst).submit(rid, nbytes)
+        kv = world.kv_gb_per_token
+        tokens = int(round(nbytes / kv)) if kv > 0 else 0
+        dem = _bg_demand.get(cls, 0.0)
+        e1 = world.res(*src).submit(rid, nbytes, dem,
+                                    world.res(*src).plan_for(cls, tokens, kv))
+        e2 = world.res(*dst).submit(rid, nbytes, dem,
+                                    world.res(*dst).plan_for(cls, tokens, kv))
         yield e1 & e2
         world.dir.add(cls, dst, nbytes)
         metrics.on_replication(cls, src, dst, nbytes, env.now - t0)
@@ -350,11 +372,13 @@ def run_once_v2(spec: RunSpec) -> dict:
         env.process(_ctrl_loop(env, world, quote, spec.topo.ctrl, metrics, spec))
 
     def _arrivals():
+        dem = cls_demand_gbps(spec)
         for rid, row in enumerate(trace):
             t, cls, hit = row[0], row[1], row[2]
             sid = row[3] if len(row) > 3 else -1
             yield env.timeout(max(0.0, t - env.now))
-            req = build_request(rid, t, cls, hit, spec.wl, spec.model, sid=sid)
+            req = build_request(rid, t, cls, hit, spec.wl, spec.model, sid=sid,
+                                demand_gbps=dem.get(cls, 0.0))
             req.local_avail = bool(hit) and any(l.holds(cls) for l in world.locals)
             metrics.on_arrival(req)
             dec = policy.decide(req)

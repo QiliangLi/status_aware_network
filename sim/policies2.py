@@ -438,11 +438,14 @@ class CoordinatedJoint2(DynamicJoint2):
 class OracleV2(V2Base):
     """真值上界：GPU/存储 hypothetical 精确预测，遍历 worker × 副本 × F。"""
 
-    def _hyp_fetch(self, nbytes, w, node, tier):
+    def _hyp_fetch(self, nbytes, w, node, tier, req, tokens):
         r = self.ctx.world.res(node, tier)
         f = self.ctx.world.fabric
+        gbpt = nbytes / tokens if tokens > 0 else 0.0
+        plan = r.plan_for(req.cls, tokens, gbpt)
         return (self.ctx.world.path_lat[w][node]
-                + r.hypothetical_fetch_time(nbytes) + f.hypothetical_fetch_time(nbytes))
+                + r.hypothetical_fetch_time(nbytes, req.demand_gbps, plan)
+                + f.hypothetical_fetch_time(nbytes, req.demand_gbps))
 
     def decide(self, req) -> Decision:
         world = self.ctx.world
@@ -462,7 +465,8 @@ class OracleV2(V2Base):
             for (n, t) in self.holders(req):
                 for F in self.f_grid:
                     fb = req.kv_gb * F
-                    ft = self._hyp_fetch(fb, w, n, t) if F > 0 else 0.0
+                    ftok = int(req.cached_prefix_tokens * F)
+                    ft = self._hyp_fetch(fb, w, n, t, req, ftok) if F > 0 else 0.0
                     if F >= 1.0:
                         # 顺序全量 fetch
                         c = ft + world.gpus[w].hypothetical(req.suffix_tokens)
@@ -473,7 +477,6 @@ class OracleV2(V2Base):
                             req.prompt_tokens - int(req.cached_prefix_tokens * F))
                         c = max(ft, comp)
                         if c < best.cost:
-                            ftok = int(req.cached_prefix_tokens * F)
                             best = Decision(worker=w, action="partial", node=n, tier=t,
                                             fetch_tokens=ftok, fetch_gb=fb, cost=c)
         return best
@@ -527,7 +530,7 @@ class ClairvoyantJoint2(OracleV2):
                     for F in (0.5, 1.0):
                         ftok = int(req.cached_prefix_tokens * F)
                         fb = req.kv_gb * F
-                        ft = self._hyp_fetch(fb, w, n, ti) if F > 0 else 0.0
+                        ft = self._hyp_fetch(fb, w, n, ti, req, ftok) if F > 0 else 0.0
                         loads = [(tier_key, fb / b_tier)]
                         if F >= 1.0:
                             comp = world.gpus[w].hypothetical(req.suffix_tokens)
@@ -626,7 +629,7 @@ class ClairvoyantFluid2(OracleV2):
         best = None
         for w in range(world.n_workers):
             for (n, t) in self.holders(req):
-                ft = self._hyp_fetch(req.kv_gb, w, n, t)
+                ft = self._hyp_fetch(req.kv_gb, w, n, t, req, req.cached_prefix_tokens)
                 if best is None or ft + world.gpus[w].hypothetical(req.suffix_tokens) < best[0]:
                     best = (ft + world.gpus[w].hypothetical(req.suffix_tokens),
                             Decision(worker=w, action="fetch", node=n, tier=t))

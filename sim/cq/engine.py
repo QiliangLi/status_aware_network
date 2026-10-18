@@ -46,7 +46,8 @@ class WorldState:
         self.workers: Dict[int, WorkerState] = {
             i: WorkerState(i, state_since=self.zero) for i in range(self.m)}
         self.storage = StorageSim(scenario.storage.b_schedule,
-                                  scenario.storage.q_max_gbps, numeric)
+                                  scenario.storage.q_max_gbps, numeric,
+                                  alloc=scenario.storage.alloc)
         self.wake_timers: Dict[int, Tuple[object, int]] = {}
         self.wake_gen = 0
         self.n_queued = 0
@@ -98,6 +99,7 @@ class WorldState:
         st = type(self.storage).__new__(type(self.storage))
         st.num, st.zero, st.b_schedule, st.q_max = (
             self.num, self.zero, self.storage.b_schedule, self.storage.q_max)
+        st.alloc = self.storage.alloc   # 分配模式必须随 clone 穿透（推演与真实同规则）
         st.flows = {seq: _copy.copy(f) for seq, f in self.storage.flows.items()}
         st.next_seq = self.storage.next_seq
         st.integrated_capacity_gb = self.storage.integrated_capacity_gb

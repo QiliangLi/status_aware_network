@@ -16,6 +16,17 @@ def _topo(replicas=(), **kw):
     return TopoConfig(replicas=replicas, **kw)
 
 
+def _ps_topo(**kw):
+    """ps_share 旧臂拓扑（回归锚测试用：解析时间线按旧等分模型口径）。"""
+    from sim.config import NodeConfig
+    nodes = tuple(NodeConfig(f"n{i}", mem=StorageConfig(b_total=100.0, bw_policy="ps_share"),
+                             ssd=StorageConfig(b_total=30.0, bw_policy="ps_share"))
+                  for i in range(3))
+    kw.setdefault("nodes", nodes)
+    kw.setdefault("fabric", StorageConfig(b_total=120.0, bw_policy="ps_share"))
+    return TopoConfig(replicas=kw.pop("replicas", ()), **kw)
+
+
 def _spec(policy, seed=0, topo=None, duration=60.0, lam=None, **kw):
     if lam is not None and "wl" not in kw:
         kw["wl"] = WorkloadConfig(lam=lam)
@@ -60,8 +71,9 @@ class TestEngineChain:
     def test_fetch_chain_analytic(self):
         """单请求 fetch：路径延迟 + tier 传输 + fabric 传输，解析可算。"""
         from sim.config import NodeConfig
-        nodes = (NodeConfig("n0", mem=StorageConfig(b_total=100.0, bg_schedule=stable(0.0)),
-                            ssd=StorageConfig(b_total=10.0)),)
+        nodes = (NodeConfig("n0", mem=StorageConfig(b_total=100.0, bg_schedule=stable(0.0),
+                                                    bw_policy="ps_share"),
+                            ssd=StorageConfig(b_total=10.0, bw_policy="ps_share")),)
         topo = _topo(replicas=(("A", ((0, "mem"),)),), path_lat=((0.01, 0.02, 0.02),),
                      n_workers=1, nodes=nodes)
         spec = _spec("joint2", topo=topo, wl=WorkloadConfig(lam=0.0001))
@@ -85,7 +97,7 @@ class TestEngineChain:
     def test_partial_overlap_max_semantics(self):
         """partial overlap：完成时间 = max(取回链, GPU 计算)。"""
         env = simpy.Environment()
-        spec = _spec("joint2")
+        spec = _spec("joint2", topo=_ps_topo())
         world = World(env, spec)
         from sim.engine2 import EngineV2
         from sim.metrics import Collector
@@ -202,7 +214,7 @@ class TestReplication:
 class TestQuote:
     def test_quote_pressure_levels(self):
         env = simpy.Environment()
-        topo = _topo()
+        topo = _ps_topo()
         spec = _spec("joint2", topo=topo)
         world = World(env, spec)
         from sim.quote import AccessCostQuery

@@ -58,6 +58,11 @@ N_EACH = 120                      # 三类各 120（1:1:1，共 360）
 SCALE_TOTAL = int(os.environ.get("E26F_TOTAL", str(3 * N_EACH)))
 SHOCK_WINDOW_S = 0.05             # 簇冲击响应窗口：簇心后 50ms
 K_BUCKETS = 200
+# 20261018 存储层重跑（docs/存储带宽maxmin替换设计-20261016.md）：max_min =
+# 按申请率 q 的带需求上限水土填充（新流提交即时重配全部在途流速率），默认
+# fcfs 保持既有口径；输出目录/records 自动分流到 e26f_mm，互不覆盖。
+ALLOC = os.environ.get("E26F_ALLOC", "fcfs")
+EXP_DIR_NAME = "e26f" if ALLOC == "fcfs" else f"e26f_{ALLOC}"
 
 ARMS = [("fcfs", "cq_fcfs", None, None, None),
         ("edf", "cq_edf", None, None, None),
@@ -289,6 +294,9 @@ def run_cell(cell: str, rep: int, d: str, arms=None):
     n_each = max(1, SCALE_TOTAL // 3)
     specs, centers = d1f_specs(16, seed, C_CLASSES[variant], n=n_each)
     scn = e26.e26_scenario(ALPHA)
+    if ALLOC != "fcfs":
+        from dataclasses import replace as _replace
+        scn = _replace(scn, storage=_replace(scn.storage, alloc=ALLOC))
     c_ref = float(np.median([float(s.T0_s) for s in specs]))
     anchor = None
     records = []
@@ -338,7 +346,7 @@ def run_cell(cell: str, rep: int, d: str, arms=None):
         s.update({"policy": label, "pid": pid, "theta": theta,
                   "mpc_base": base_pol, "composer": composer, "cell": cell,
                   "c_variant": variant, "k": 16, "rep": rep, "seed": seed,
-                  "alpha": ALPHA, "n_total": len(specs),
+                  "alpha": ALPHA, "n_total": len(specs), "alloc": ALLOC,
                   "makespan_s": float(eng.w.t), "wall_s": wall,
                   "last_arrival_s": last_arr, "max_F_s": max_f,
                   "drain_s": max_f - last_arr,
@@ -390,7 +398,7 @@ def run_cell(cell: str, rep: int, d: str, arms=None):
 
 
 def main(seeds, procs=None, duration=None, stage="eval", **kw):
-    d = out_dir("eval", "e26f")
+    d = out_dir("eval", EXP_DIR_NAME)
     only = [x for x in os.environ.get("E26F_ONLY", "").split(",") if x]
     reps = [int(x) for x in os.environ.get("E26F_REPS", "0").split(",")]
     shard = os.environ.get("E26F_SHARD", "main")

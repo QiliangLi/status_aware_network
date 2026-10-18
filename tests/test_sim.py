@@ -18,7 +18,7 @@ def drive(env, proc):
 class TestStorage:
     def test_single_fetch_analytic(self):
         env = simpy.Environment()
-        s = SharedKVStorage(env, 0, StorageConfig(b_total=100.0, t_base=0.005, bg_schedule=stable(0.0)))
+        s = SharedKVStorage(env, 0, StorageConfig(b_total=100.0, t_base=0.005, bg_schedule=stable(0.0), bw_policy="ps_share"))
 
         def proc(env):
             ev = s.submit(1, 10.0)
@@ -29,7 +29,7 @@ class TestStorage:
 
     def test_equal_sharing(self):
         env = simpy.Environment()
-        s = SharedKVStorage(env, 0, StorageConfig(b_total=100.0, t_base=0.005))
+        s = SharedKVStorage(env, 0, StorageConfig(b_total=100.0, t_base=0.005, bw_policy="ps_share"))
 
         def proc(env):
             e1 = s.submit(1, 10.0)
@@ -47,7 +47,8 @@ class TestStorage:
     def test_starvation_release(self):
         env = simpy.Environment()
         s = SharedKVStorage(env, 0, StorageConfig(
-            b_total=100.0, t_base=0.005, bg_schedule=((0.0, 100.0), (1.0, 0.0))))
+            b_total=100.0, t_base=0.005, bg_schedule=((0.0, 100.0), (1.0, 0.0)),
+            bw_policy="ps_share"))
 
         def proc(env):
             ev = s.submit(1, 10.0)
@@ -59,7 +60,7 @@ class TestStorage:
 
     def test_byte_conservation(self):
         env = simpy.Environment()
-        s = SharedKVStorage(env, 0, StorageConfig(b_total=100.0, t_base=0.0, bg_schedule=stable(40.0)))
+        s = SharedKVStorage(env, 0, StorageConfig(b_total=100.0, t_base=0.0, bg_schedule=stable(40.0), bw_policy="ps_share"))
         sizes = [3.0, 7.0, 12.0]
 
         def proc(env):
@@ -75,7 +76,7 @@ class TestStorage:
     def test_hypothetical_matches_actual(self):
         # oracle 自顾预测：提交前预测的完成时间与真实完成时间应接近
         env = simpy.Environment()
-        s = SharedKVStorage(env, 0, StorageConfig(b_total=100.0, t_base=0.005))
+        s = SharedKVStorage(env, 0, StorageConfig(b_total=100.0, t_base=0.005, bw_policy="ps_share"))
 
         def proc(env):
             for i in range(10):

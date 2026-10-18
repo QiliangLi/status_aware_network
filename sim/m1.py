@@ -507,8 +507,12 @@ class M1System:
         self.hist.inflight_gb += req.kv_gb
         req.fetch_t0 = self.env.now
         yield self.env.timeout(self.world.path_lat[req.worker][req.node])
-        yield self.world.res(req.node, req.tier).submit(req.rid, req.kv_gb)
-        yield self.world.fabric.submit(req.rid, req.kv_gb)
+        res = self.world.res(req.node, req.tier)
+        gbpt = req.kv_gb / req.H if req.H > 0 else 0.0
+        # m1 为旧里程碑模型（无 prefill 曲线可推导需求）：demand=None ->
+        # 无界需求（同质无界 ≡ 按块数比例分配），见存储设计 §7 后台流处置
+        yield res.submit(req.rid, req.kv_gb, None, res.plan_for(req.cls, req.H, gbpt))
+        yield self.world.fabric.submit(req.rid, req.kv_gb, None)
         req.fetch_t1 = self.env.now
         req.fetch_done = True
         self.hist.inflight_gb = max(0.0, self.hist.inflight_gb - req.kv_gb)

@@ -9,7 +9,12 @@ class Oracle(BasePolicy):
         tr = view.gpu.hypothetical(req.prompt_tokens)
         if not req.hit or not view.holds_class:
             return tr, "prefill"
-        tf = view.storage.hypothetical_fetch_time(req.kv_gb) + self.est_fetch_tail(req, view)
+        tokens = req.cached_prefix_tokens
+        gbpt = req.kv_gb / tokens if tokens > 0 else 0.0
+        tf = (view.storage.hypothetical_fetch_time(
+                  req.kv_gb, req.demand_gbps,
+                  view.storage.plan_for(req.cls, tokens, gbpt))
+              + self.est_fetch_tail(req, view))
         if tr <= tf:
             return tr, "recompute" if req.hit else "prefill"
         return tf, "fetch"

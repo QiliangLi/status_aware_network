@@ -11,7 +11,7 @@ NODES = (
     NodeConfig("n1", mem=StorageConfig(b_total=60.0), ssd=StorageConfig(b_total=25.0)),
     NodeConfig("n2", mem=StorageConfig(b_total=40.0), ssd=StorageConfig(b_total=15.0)),
 )
-FABRIC = StorageConfig(b_total=120.0)
+FABRIC = StorageConfig(b_total=120.0, disk_bps=120.0)   # fabric 单链路聚合（disk_bps=b_total → 1 盘）
 PATH_LAT = ((0.002, 0.004, 0.008), (0.003, 0.002, 0.006), (0.006, 0.003, 0.002), (0.008, 0.004, 0.002))
 
 LABELS = {

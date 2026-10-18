@@ -1,5 +1,14 @@
-"""仿真配置：全部参数以 dataclass 定义，单位约定时间为秒、字节用 GB(十进制)、带宽 GB/s。"""
+"""仿真配置：全部参数以 dataclass 定义，单位约定时间为秒、字节用 GB(十进制)、带宽 GB/s。
+
+存储带宽策略（docs/存储带宽maxmin替换设计-20261016.md）：bw_policy 选
+max_min_fair（新默认，带需求上限的水土填充）/ ps_share（旧等分，回归锚）；
+盘数不是配置项，派生 disks = ceil(b_total/disk_bps)（单盘 ≤ disk_bps，
+默认 40 GB/s 物理基元；fabric 惯例 disk_bps=b_total → 单链路聚合）；
+块 = block_tokens 个 token（一致性哈希放置粒度，默认 512 对齐 Mooncake）。
+"""
 from __future__ import annotations
+
+import math
 
 from dataclasses import dataclass, replace
 
@@ -22,6 +31,15 @@ class StorageConfig:
     t_base: float = 0.005
     # 分段常数背景负载 ((t0, GB/s), (t1, GB/s), ...)，t < t0 取首段
     bg_schedule: tuple = ((0.0, 0.0),)
+    # 带宽策略：max_min_fair（新默认，水土填充）| ps_share（旧等分，回归锚）
+    bw_policy: str = "max_min_fair"
+    disk_bps: float = 40.0        # 单盘上限带宽（物理基元）；fabric 惯例 = b_total
+    block_tokens: int = 512       # 块粒度（token 数），一致性哈希放置用
+
+    @property
+    def disks(self) -> int:
+        """盘数派生：总带宽是主配置，盘数 = ceil(b_total/disk_bps)。"""
+        return max(1, math.ceil(self.b_total / self.disk_bps - 1e-12))
 
 
 @dataclass(frozen=True)
@@ -52,6 +70,9 @@ class WorkloadConfig:
         PrefixClass("C", 8192, 0.15),
         PrefixClass("D", 65536, 0.25),
     )
+    # max_min_fair 需求（GB/s）：全局缩放 + 按类覆盖（制造异质需求实验用）
+    demand_scale: float = 1.0
+    cls_demand_scale: tuple = ()      # ((cls, scale), ...)
 
     @property
     def mean_hit_tokens(self) -> float:
@@ -72,7 +93,7 @@ class TopoConfig:
     """v2 共享分布式 KV 存储拓扑（对应架构图：计算节点+本地缓存 / 高速网络 / 多存储节点+元数据目录）。"""
     n_workers: int = 4
     nodes: tuple = (NodeConfig("n0"), NodeConfig("n1"), NodeConfig("n2"))
-    fabric: StorageConfig = StorageConfig(b_total=120.0)
+    fabric: StorageConfig = StorageConfig(b_total=120.0, disk_bps=120.0)
     # 路径延迟矩阵 W×N（秒），worker->node 的静态路径差异
     path_lat: tuple = ((0.002, 0.004, 0.008),) * 4
     local_cache_gb: float = 12.0

@@ -75,14 +75,25 @@ class ProfileConfig:
 
 @dataclass(frozen=True)
 class StorageConfig:
-    """聚合存储：B(t) schedule + 连接上限 q_max（GB/s）。"""
+    """聚合存储：B(t) schedule + 连接上限 q_max（GB/s）+ 带宽分配模式。
+
+    alloc（20261018，docs/存储带宽maxmin替换设计-20261016.md §cq 移植）：
+    - "fcfs"（默认，旧模型）：按 submit_seq 升序 rate=min(q, free)，后到流饿等；
+    - "max_min"：对全部活跃流按申请率 q 做带需求上限的水土填充——Σq ≤ B 时
+      按需分+剩余均分（独占流可得全带宽），超订时迭代到不动点；每个事件点
+      （提交/完成/升速/带宽断点）全量重算，新流提交会改变所有在途流的速率
+      与完成时刻（在途重配）。
+    """
 
     b_schedule: Tuple[Tuple[Fraction, Fraction], ...] = ((Fraction(0), Fraction(80)),)
     q_max_gbps: Fraction = Fraction(200)
     b_ref_gbps: Fraction = Fraction(80)   # T0 与 history 观测使用的参考带宽
+    alloc: str = "fcfs"                   # fcfs | max_min
 
     def __post_init__(self):
         object.__setattr__(self, "b_schedule", _parse_schedule(self.b_schedule))
+        if self.alloc not in ("fcfs", "max_min"):
+            raise ValueError(f"storage.alloc 必须为 fcfs|max_min，得到 {self.alloc!r}")
 
     def b_at(self, t) -> Fraction:
         """右连续阶梯：最后一个 time<=t 的项的值。"""
@@ -106,6 +117,7 @@ class StorageConfig:
             "b_schedule": [[str(t), str(v)] for t, v in self.b_schedule],
             "q_max_gbps": str(self.q_max_gbps),
             "b_ref_gbps": str(self.b_ref_gbps),
+            "alloc": self.alloc,
         }
 
 

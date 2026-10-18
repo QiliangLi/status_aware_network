@@ -172,7 +172,8 @@ def build_forecast_engine(snap: ObservableSnapshot, scn: CqScenario,
     scn_est = replace(
         scn, storage=StorageConfig(b_schedule=((Fraction(0), Fraction(int(bw * 1e9), 10**9)),),
                                    q_max_gbps=scn.storage.q_max_gbps,
-                                   b_ref_gbps=scn.storage.b_ref_gbps),
+                                   b_ref_gbps=scn.storage.b_ref_gbps,
+                                   alloc=scn.storage.alloc),
         cohort=replace(scn.cohort, drain_budget_s=Fraction(10**6)))
     specs = []
     for r in snap.requests:

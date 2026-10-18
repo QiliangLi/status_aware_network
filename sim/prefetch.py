@@ -79,14 +79,14 @@ class Prefetcher:
             return
         if target == dec.worker and dec.action in ("fetch", "partial"):
             return
-        self._maybe_prefetch(target, req.cls, req.kv_gb)
+        self._maybe_prefetch(target, req.cls, req.kv_gb, req.demand_gbps)
 
     # ---------- 引擎完成钩子（回写） ----------
     def on_complete(self, req) -> None:
         if self.cfg.writeback and req.hit and req.action in ("recompute", "prefill"):
             self._maybe_writeback(req)
 
-    def _maybe_prefetch(self, worker: int, cls: str, nbytes: float) -> None:
+    def _maybe_prefetch(self, worker: int, cls: str, nbytes: float, demand: float) -> None:
         best = None
         for (n, t) in sorted(self.world.dir.holders(cls)):
             q = self.quote.estimate(nbytes, worker, n, t)
@@ -99,12 +99,15 @@ class Prefetcher:
         _, n, t = best
         self._op += 1
         self.env.process(self._prefetch_chain(worker, n, t, cls, nbytes,
-                                              -(10 ** 7 + self._op)))
+                                              -(10 ** 7 + self._op), demand))
 
-    def _prefetch_chain(self, worker, node, tier, cls, nbytes, rid):
+    def _prefetch_chain(self, worker, node, tier, cls, nbytes, rid, demand):
         yield self.env.timeout(self.world.path_lat[worker][node])
-        yield self.world.res(node, tier).submit(rid, nbytes)
-        yield self.world.fabric.submit(rid, nbytes)
+        res = self.world.res(node, tier)
+        kv = self.world.kv_gb_per_token
+        tokens = int(round(nbytes / kv)) if kv > 0 else 0
+        yield res.submit(rid, nbytes, demand, res.plan_for(cls, tokens, kv))
+        yield self.world.fabric.submit(rid, nbytes, demand)
         self.world.locals[worker].insert(cls, nbytes, source="prefetch")
 
     def _maybe_writeback(self, req) -> None:
@@ -127,7 +130,11 @@ class Prefetcher:
         rid = -(10 ** 7 + self._op)
 
         def _wb():
-            ev = self.world.res(best[0], "mem").submit(rid, nbytes)
+            res = self.world.res(best[0], "mem")
+            kv = self.world.kv_gb_per_token
+            tokens = int(round(nbytes / kv)) if kv > 0 else 0
+            ev = res.submit(rid, nbytes, req.demand_gbps,
+                            res.plan_for(req.cls, tokens, kv))
             yield ev
             self.world.dir.add(req.cls, best, nbytes)
 
