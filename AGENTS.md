@@ -75,7 +75,7 @@
 | trace | 位置 | 要点 |
 |---|---|---|
 | Mooncake 官方（FAST'25 公开 trace） | `mooncake_trace/` | conversation / toolagent / synthetic 三文件 + `derived/` 前缀命中派生。**512 token 块**，hash_ids 全局唯一；行数与 sha256 校验登记在 `sim/cq/trace.py` 的 `MOONCAKE_FILES`。E23 等 trace 实验的输入 |
-| AgentX（SemiAnalysis cc-traces-weka，Claude Code 编程会话，已转 Mooncake JSONL 格式） | `AgentX及trace转换分析/` | `原始trace样本/` 为 Weka JSON（**64 token 块**、会话内局部编号）；`convert_agentx_to_mooncake.py` 转换（hash_ids 重编号为全局命名空间、subagent 展平为独立会话）；`转换结果/agentx_mooncake_sample.jsonl` 为 2 会话 231 请求样本，全量 393 会话从 HF `semianalysisai/cc-traces-weka-062126` 拉取转换 |
+| AgentX（SemiAnalysis cc-traces-weka，Claude Code 编程会话，已转 Mooncake JSONL 格式） | `AgentX及trace转换分析/` | `原始trace样本/` 为 Weka JSON（**64 token 块**、会话内局部编号）；`convert_agentx_to_mooncake.py` 转换（hash_ids 重编号为全局命名空间、subagent 展平为独立会话，`--input-jsonl` 流式模式）。全量已落地（20260919）：`原始trace全量/traces.jsonl`（393 会话打包，1.85 GB）→ `转换结果/agentx_mooncake_full.jsonl`（98827 请求 / 2090 会话，约 2.99 GB），两者均 gitignored，重建步骤与 sha256 见转换说明 §4 |
 
-- 两套 trace 负载特征差异大（AgentX 长上下文多轮、理想前缀命中率中位数 98.8%；Mooncake 短上下文单轮），**容量/缓存结论不可互推**。
+- 两套 trace 负载特征差异大（AgentX 长上下文多轮、理想前缀命中率中位数 99.1%（全量 98827 请求实测，样本期为 98.8%）；Mooncake 短上下文单轮），**容量/缓存结论不可互推**。
 - 接入 AgentX trace 前先读 `AgentX及trace转换分析/AgentX trace转换说明.md` §3.3：块大小 64 ≠ Mooncake 的 512（AIPerf 回放须 `--isl-block-size 64`）、时间戳为会话内相对时间（多会话起点近 0，需加偏移才构成全局到达节奏）、hash_ids 已全局重编号无需再处理。AgentX 背景调研见同目录 `AgentX调研.md`；Mooncake 命中口径见 `docs/MooncakeTrace命中模型首现判定-变更设计-20260915.md`。

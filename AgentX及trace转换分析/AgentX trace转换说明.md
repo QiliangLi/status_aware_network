@@ -5,8 +5,10 @@
 | 文件 | 说明 |
 |---|---|
 | convert_agentx_to_mooncake.py | 转换脚本，含使用说明注释 |
-| 原始trace样本/ | 2 个真实的 AgentX trace JSON 文件，转换输入 |
-| 转换结果/agentx_mooncake_sample.jsonl | 对上述 2 个样本执行转换的输出，231 行，约 3.5 MB |
+| 原始trace样本/ | 2 个真实的 AgentX trace JSON 文件，小样本转换输入 |
+| 原始trace全量/traces.jsonl | HF 数据集全量打包文件，393 行（每行一个会话），1.85 GB，gitignored，重新下载命令见 §4 |
+| 转换结果/agentx_mooncake_sample.jsonl | 2 会话样本转换输出，231 行，约 3.5 MB |
+| 转换结果/agentx_mooncake_full.jsonl | 全量 393 会话转换输出，gitignored，重新生成命令见 §4 |
 | 1013-AgentX.md | AgentX 背景调研报告，介绍 AgentX 基准测试整体情况 |
 
 ---
@@ -124,7 +126,7 @@ subagent 级（截取自 002001296e8a8c38ad9d7cc436d691afc602.json）：
 
 ### 1.7 转换量级
 
-本次 2 个样本会话的实测转换规模：
+20260915 的 2 个样本会话实测转换规模：
 
 | 指标 | 数值 | 含义 |
 |---|---|---|
@@ -138,7 +140,7 @@ subagent 级（截取自 002001296e8a8c38ad9d7cc436d691afc602.json）：
 
 subagent 的内部请求会被展平为独立会话，时间戳保持原始值（与父会话同一时间轴），父会话与子会话的并行关系通过时间戳重叠自然表达。
 
-全量数据集为 393 个会话。按本样本平均每会话约 115 条请求估算，转换后为数万行请求、百万量级唯一块，具体以实际运行为准（会话间方差较大）。
+全量数据集为 393 个会话，20260919 完成全量拉取与转换，实测规模见 3.4。
 
 ---
 
@@ -147,17 +149,25 @@ subagent 的内部请求会被展平为独立会话，时间戳保持原始值�
 ### 2.1 依赖
 
 - 本地文件模式：Python 3.8 及以上，仅使用标准库，无需安装任何第三方包
-- HuggingFace 模式：额外执行 pip install datasets
+- HuggingFace 模式：额外执行 pip install datasets（推荐改用下述"下载 + --input-jsonl"两步法，可完全绕开该依赖）
 
 ### 2.2 命令
 
-本地 Weka JSON 文件目录转换：
+本地 Weka JSON 文件目录转换（小样本）：
 
 ```bash
 python convert_agentx_to_mooncake.py --input-dir 原始trace样本 -o 转换结果/agentx_mooncake_sample.jsonl --prefix-hit --keep-model
 ```
 
-直接从 HuggingFace 拉取并转换全量 393 个会话：
+全量 393 会话：先从 HuggingFace 下载打包文件（注意必须加 -L 跟随重定向，否则只会存下 1 KB 的跳转页），再流式转换：
+
+```bash
+curl -L -C - -o 原始trace全量/traces.jsonl \
+  "https://huggingface.co/datasets/semianalysisai/cc-traces-weka-062126/resolve/main/traces.jsonl"
+python convert_agentx_to_mooncake.py --input-jsonl 原始trace全量/traces.jsonl -o 转换结果/agentx_mooncake_full.jsonl --prefix-hit --keep-model
+```
+
+或用 datasets 库一步完成（会额外生成 arrow 缓存，占用约两倍磁盘）：
 
 ```bash
 python convert_agentx_to_mooncake.py --hf semianalysisai/cc-traces-weka-062126 -o agentx_mooncake_full.jsonl --prefix-hit
@@ -167,8 +177,9 @@ python convert_agentx_to_mooncake.py --hf semianalysisai/cc-traces-weka-062126 -
 
 | 参数 | 说明 |
 |---|---|
-| --input-dir | 本地 Weka trace JSON 文件目录，与 --hf 二选一 |
-| --hf | HuggingFace 数据集仓库 ID，与 --input-dir 二选一 |
+| --input-dir | 本地 Weka trace JSON 文件目录，三种输入方式之一 |
+| --input-jsonl | 打包 JSONL 文件（每行一个会话，即数据集的 traces.jsonl 原始格式），逐行流式读取，全量转换首选 |
+| --hf | HuggingFace 数据集仓库 ID，经 datasets 库拉取，三种输入方式之一 |
 | -o / --output | 输出 JSONL 路径，缺省 agentx_mooncake.jsonl |
 | --prefix-hit | 额外输出 prefix_hit_tokens 字段，即理想前缀缓存命中 token 数，口径见 3.3.3 |
 | --keep-model | 额外保留每条请求的 model 字段 |
@@ -283,6 +294,28 @@ AgentX 转换结果与 mooncake 官方 arxiv trace 面向完全不同的负载�
 
 其中前缀命中率与 prefix_hit_tokens 的口径说明：脚本对每个会话维护一个已见块编号集合，模拟无限容量、按内容寻址的 KV 缓存；每条请求的命中等于其 hash_ids 开头连续出现在集合中的块数乘 64。该口径是理想上界，不等于任何具体实现（如 LRU 有限缓存）的命中率。98.8% 的含义是：若缓存容量无限，几乎所有请求的输入主体都无需重新计算 prefill。做容量规划或缓存策略对比时，应按目标策略重新仿真。
 
+### 3.4 全量转换实测（20260919）
+
+对 HF 全量打包文件（393 行，sha256 29b6a19e751ff5230771519aab755f80a0f43a4ba9cf96b72d3a6a437ec99276）执行 `--input-jsonl` 流式转换，独立脚本复核的实测规模：
+
+| 指标 | 数值 | 含义 |
+|---|---|---|
+| 输出请求数 | 98827 | JSONL 行数 |
+| 输出会话数 | 2090 | 393 条主链 + 1697 条 subagent 子会话 |
+| 全局唯一块数 | 5717185 | 去重后的真实内容量，约 3.66 亿 token |
+| 输入 token 总量 | 约 216.4 亿 | 全部请求 input 累加，含大量重复前缀 |
+| 输出 token 总量 | 约 1.06 亿 | 全部请求 output 累加 |
+| 理想命中 token 总量 | 约 212.7 亿 | 占输入总量 98.3%（总量口径） |
+| input_length | 最小 128，中位数 142016，p90 549504，最大 989824 | 单请求输入规模分布 |
+| output_length | 中位数 444，最大 59903 | 单请求输出规模分布 |
+| 前缀命中率（理想口径） | 中位数 99.1%，均值 90.0%，p10 83.2% | 按请求平均，与 3.3.3 样本口径一致 |
+| 块数一致性 | 0 条不一致 | (len-1)*64 < in <= len*64 全部满足 |
+| 产物大小 | 约 2.99 GB | agentx_mooncake_full.jsonl，gitignored |
+
+与 2 会话样本相比的两个量级修正：全量请求均摊到主链约 251 条/会话（样本仅约 115 条/会话，样本偏小偏短）；理想命中率分布的长尾在 83% 附近（p10），均值被首请求拉低到 90%，做缓存收益评估时应看分布而非只看中位数。
+
+时间戳仍是会话内相对时间，单会话最大跨度 254.8 小时；全量合并回放前须按 3.3.2 的说明给各会话加偏移，否则 2090 个会话会全部在 t≈0 并发启动。
+
 ---
 
 ## 4. 完整复现步骤
@@ -291,12 +324,19 @@ AgentX 转换结果与 mooncake 官方 arxiv trace 面向完全不同的负载�
 # 1. 用本目录样本转换（Python 3.8+，无第三方依赖）
 python convert_agentx_to_mooncake.py --input-dir 原始trace样本 -o 转换结果/agentx_mooncake_sample.jsonl --prefix-hit --keep-model
 
-# 2. 转换全量 393 个会话（需 pip install datasets）
-python convert_agentx_to_mooncake.py --hf semianalysisai/cc-traces-weka-062126 -o agentx_mooncake_full.jsonl --prefix-hit --keep-model
+# 2. 下载全量打包文件（1.85 GB，393 行；-L 必须加，-C - 支持断点续传）
+curl -L -C - -o 原始trace全量/traces.jsonl \
+  "https://huggingface.co/datasets/semianalysisai/cc-traces-weka-062126/resolve/main/traces.jsonl"
+shasum -a 256 原始trace全量/traces.jsonl   # 应为 29b6a19e751ff5230771519aab755f80a0f43a4ba9cf96b72d3a6a437ec99276
 
-# 3. 校验输出与块数一致性（应无输出）
-python -c "import json; [None for l in open('agentx_mooncake_full.jsonl') for r in [json.loads(l)] if not ((len(r['hash_ids'])-1)*64 < r['input_length'] <= len(r['hash_ids'])*64) and print('inconsistent:', r['session_id'], r['timestamp'])]"
+# 3. 流式转换全量 393 会话（无第三方依赖）
+python convert_agentx_to_mooncake.py --input-jsonl 原始trace全量/traces.jsonl -o 转换结果/agentx_mooncake_full.jsonl --prefix-hit --keep-model
 
-# 4. 通过 AIPerf 回放（块大小必须为 64，原因见 3.3.2）
-aiperf profile --input-file agentx_mooncake_full.jsonl --custom-dataset-type mooncake_trace --isl-block-size 64 --fixed-schedule --url <地址> --model <模型>
+# 4. 校验输出与块数一致性（应无输出）
+python -c "import json; [None for l in open('转换结果/agentx_mooncake_full.jsonl') for r in [json.loads(l)] if not ((len(r['hash_ids'])-1)*64 < r['input_length'] <= len(r['hash_ids'])*64) and print('inconsistent:', r['session_id'], r['timestamp'])]"
+
+# 5. 通过 AIPerf 回放（块大小必须为 64，原因见 3.3.2）
+aiperf profile --input-file 转换结果/agentx_mooncake_full.jsonl --custom-dataset-type mooncake_trace --isl-block-size 64 --fixed-schedule --url <地址> --model <模型>
 ```
+
+原始打包文件与全量转换产物体积过大（合计约 2.6 GB），均已 gitignored，删掉后按上述步骤即可完整重建。

@@ -34,7 +34,12 @@ Replay note:
 
 Usage:
   python convert_agentx_to_mooncake.py --input-dir <dir> -o agentx_mooncake.jsonl [--prefix-hit] [--keep-model]
+  python convert_agentx_to_mooncake.py --input-jsonl <traces.jsonl> -o agentx_mooncake_full.jsonl
   python convert_agentx_to_mooncake.py --hf semianalysisai/cc-traces-weka-062126 -o agentx_mooncake.jsonl
+
+--input-jsonl expects one trace object per line (the format of the dataset's
+bundled traces.jsonl); it streams line by line so a full 1.8 GB corpus needs
+no more memory than one trace at a time.
 """
 
 from __future__ import annotations
@@ -49,6 +54,14 @@ def iter_traces_from_dir(directory: str):
     for path in sorted(Path(directory).glob("*.json")):
         with open(path, encoding="utf-8") as f:
             yield json.load(f)
+
+
+def iter_traces_from_jsonl(path: str):
+    with open(path, encoding="utf-8") as f:
+        for line in f:
+            line = line.strip()
+            if line:
+                yield json.loads(line)
 
 
 def iter_traces_from_hf(repo_id: str):
@@ -80,7 +93,13 @@ def collect_entries(trace: dict):
     return entries
 
 
-def convert(traces, prefix_hit: bool = False, keep_model: bool = False):
+def convert(traces, prefix_hit: bool = False, keep_model: bool = False, emit=None):
+    """Convert traces to Mooncake rows.
+
+    emit(row), when given, receives each row as it is produced (streaming,
+    constant memory); otherwise all rows are collected and returned, which
+    keeps the old return-based behavior for small inputs.
+    """
     rows = []
     stats = {
         "traces": 0,
@@ -143,7 +162,10 @@ def convert(traces, prefix_hit: bool = False, keep_model: bool = False):
                 row["model"] = r["model"]
             if prefix_hit:
                 row["prefix_hit_tokens"] = hit_blocks * block_size
-            rows.append(row)
+            if emit is not None:
+                emit(row)
+            else:
+                rows.append(row)
             stats["requests"] += 1
 
         stats["subagent_sessions"] += len(subagent_sessions)
@@ -151,11 +173,11 @@ def convert(traces, prefix_hit: bool = False, keep_model: bool = False):
     stats["global_blocks"] = next_global_id[0]
     return rows, stats
 
-
 def main():
     ap = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     g = ap.add_mutually_exclusive_group(required=True)
     g.add_argument("--input-dir", help="directory of Weka trace JSON files")
+    g.add_argument("--input-jsonl", help="JSONL file with one Weka trace object per line (dataset's bundled traces.jsonl)")
     g.add_argument("--hf", help="HuggingFace dataset repo id, e.g. semianalysisai/cc-traces-weka-062126")
     ap.add_argument("-o", "--output", default="agentx_mooncake.jsonl")
     ap.add_argument("--prefix-hit", action="store_true", help="add prefix_hit_tokens field")
@@ -164,17 +186,20 @@ def main():
 
     if args.input_dir:
         traces = iter_traces_from_dir(args.input_dir)
+    elif args.input_jsonl:
+        traces = iter_traces_from_jsonl(args.input_jsonl)
     else:
         traces = iter_traces_from_hf(args.hf)
 
-    rows, stats = convert(traces, prefix_hit=args.prefix_hit, keep_model=args.keep_model)
-
     with open(args.output, "w", encoding="utf-8") as f:
-        for row in rows:
+        def emit(row):
             f.write(json.dumps(row) + "\n")
+        rows, stats = convert(traces, prefix_hit=args.prefix_hit,
+                              keep_model=args.keep_model, emit=emit)
+        n_rows = stats["requests"]
 
     print(json.dumps(stats, indent=2))
-    print("wrote {} lines -> {}".format(len(rows), args.output))
+    print("wrote {} lines -> {}".format(n_rows, args.output))
 
 
 if __name__ == "__main__":

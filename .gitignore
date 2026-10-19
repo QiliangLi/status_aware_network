@@ -15,6 +15,10 @@ venv/
 results/
 *.parquet
 
+# AgentX 全量 trace（1.8GB 级原始文件与全量转换产物，不入库，重新生成见 AgentX及trace转换分析/AgentX trace转换说明.md §4）
+AgentX及trace转换分析/原始trace全量/
+AgentX及trace转换分析/转换结果/agentx_mooncake_full.jsonl
+
 # 编辑器
 .idea/
 .vscode/
