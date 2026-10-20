@@ -33,7 +33,7 @@ F2  注意力 KV 的 HBM 读取按"每层每请求的上下文至多读一遍"�
     FlashMLA 稀疏 kernel prefill 实测 640 TFLOPS（H800）/410 TFLOPS（昇腾950，95% 峰值），
     说明 prefill 注意力是算力瓶颈而非逐 query 重复读 KV 的带宽瓶颈。kv_hbm_reuse=False
     给出无复用上界 bs*ut*topk。kernel 内精确复用因子待核实。
-F3  fused MLA 的 QK 计算量与 Q 读取补上 qk_rope_head_dim（原版只算 nope 的 192）。
+F3  fused MLA 的 QK 计算补 qk_rope_head_dim（后被 F11 的 absorb 口径覆盖）。
 F4  dense 层（前 3 层）去掉 MoE dispatch/combine：无专家路由就没有 all-to-all 通信。
 F5  字节单位统一十进制 GB（1e9），与 FLOPS 的 1e12、NPU 带宽 GB/s 及本仓库 sim/config.py
     约定一致。原版按 1024^3 折算字节却按十进制 GB/s 除，访存项低估约 7%（新版在访存受限项
@@ -50,6 +50,17 @@ F9  indexer 打分写回按每 (query, key) 对一个标量计：head 归约在 
     [seq_len, seq_len_kv]。原版按逐 head FP16 物化（index_n_heads 倍），decode 下可忽略，
     prefill 下会把长上下文的主导项高估 16 倍。标量 dtype 按 FP32（DeepGEMM 惯例，待核实；
     若为 FP16 该项再减半）。
+F10 补上 MLA 线性投影（原版 DSA 层时间只含 indexer(2)+gather+fused_mla+MoE，漏掉了每个新
+    token 都要过的 GEMM）：q_a(dim→q_lora)、q_b(q_lora→h·(nope+rope))、nope 侧吸收 W_UK
+    (逐 head nope→kv_lora)、kv_a(dim→kv_lora+rope，生成本 token 的 KV 缓存)、注意力输出
+    W_UV(逐 head kv_lora→v)、o(h·v→dim)、indexer K 投影(dim→index_head_dim)。合计每 token
+    每层约 332 MFLOP，占线性层 FLOPs 的 1/3；GEMM 走 FP8 与 MoE/MLP 一致，权重每层读一遍。
+    来源：DeepSeek-V3 技术报告 MLA 定义（arXiv:2412.19437 §2.1.1）；第一性原理复算见
+    prefill_time/validate_prefill_time.py。
+F11 注意力核心改 absorb（MQA）口径：Q/K 在潜空间 d_qk = kv_lora+rope = 576，V 为
+    d_v = kv_lora = 512。来源：FlashMLA 稀疏 prefill API flash_mla_sparse_fwd 的
+    q[s_q,h_q,d_qk]、kv[s_kv,h_kv,d_qk]（github.com/deepseek-ai/FlashMLA）。原版按 MHA 口径
+    （192/256）算 FLOPs 却读 576 维潜 KV，不自洽，核心 FLOPs 少算 2.1 倍。
 
 保留的外部 kernel 模型假设（未改，已核实或待核实）
 - 索引 K 缓存每 token 128 维 FP8（与 vLLM "key cache of 128 per token" 一致），每请求
@@ -196,15 +207,16 @@ def _t_gather_kv(m, c, g):
 
 
 def _t_fused_mla_attention(m, c, g):
-    # 外部 sim_code_v2.py:1262；F1/F2/F3：计算与 Q 读写随新 token 数缩放、KV 按并集
-    # 条目读、QK 计算补 rope 维度
+    # 外部 sim_code_v2.py:1262；F1/F2/F11：计算与 Q 读写随新 token 数缩放、KV 按并集条目读、
+    # absorb 口径——Q/K 潜空间 d_qk = kv_lora+rope，V 为 d_v = kv_lora
     nq = _nq(c); tp = c["tp"]
     seq_len = m["index_topk"]
-    qk_d = m["qk_nope_head_dim"] + m["qk_rope_head_dim"]
-    sfa_cal = 2 * nq * m["n_heads"] * seq_len * (qk_d + m["v_head_dim"]) / tp
-    mem_q = nq * m["n_heads"] * qk_d / tp * FP16
-    mem_kv = _kv_entries(m, c) * (m["kv_lora_rank"] + m["qk_rope_head_dim"]) * FP8
-    mem_w = nq * m["n_heads"] * m["v_head_dim"] / tp * FP16
+    d_qk = m["kv_lora_rank"] + m["qk_rope_head_dim"]
+    d_v = m["kv_lora_rank"]
+    sfa_cal = 2 * nq * m["n_heads"] * seq_len * (d_qk + d_v) / tp
+    mem_q = nq * m["n_heads"] * d_qk / tp * FP16
+    mem_kv = _kv_entries(m, c) * d_qk * FP8
+    mem_w = nq * m["n_heads"] * d_v / tp * FP16
     pipe = g["pipeline_floor_moe"]
     s2 = 128
     n_iter = max(1, math.ceil(seq_len / s2))
@@ -212,6 +224,28 @@ def _t_fused_mla_attention(m, c, g):
     mem_per_iter = (mem_q + mem_kv + mem_w) / GB / B_MEM * 1e6 / n_iter
     t_per_iter = max(cal_per_iter, mem_per_iter, pipe)
     return n_iter * t_per_iter + g["kernel_launch"]
+
+
+def _t_mla_proj(m, c, g):
+    # F10：MLA 线性投影（absorb 模式），原版 DSA 层未计。每个 GEMM 单独 roofline，
+    # 激活按 FP8 读入+写出，权重 FP8 每层读一遍；逐 head 的吸收矩阵按 (h·in, out) 计
+    # FLOPs/字节与分块对角形式相同
+    nq = _nq(c); tp = c["tp"]; h = m["n_heads"]
+    gemms = (
+        (m["dim"], m["q_lora_rank"]),                                               # q_a
+        (m["q_lora_rank"], h * (m["qk_nope_head_dim"] + m["qk_rope_head_dim"]) / tp),  # q_b
+        (h * m["qk_nope_head_dim"] / tp, m["kv_lora_rank"]),                      # W_UK 吸收
+        (m["dim"], m["kv_lora_rank"] + m["qk_rope_head_dim"]),                      # kv_a
+        (h * m["kv_lora_rank"] / tp, m["v_head_dim"]),                              # W_UV
+        (h * m["v_head_dim"] / tp, m["dim"]),                                       # o
+        (m["dim"], m["index_head_dim"]),                                            # indexer K
+    )
+    t = 0.0
+    for din, dout in gemms:
+        cal = 2 * nq * din * dout
+        mem = nq * (din + dout) + din * dout
+        t += _roof(cal, mem, fp=FP8)
+    return t
 
 
 def _t_mlp(m, c, g):
@@ -293,20 +327,22 @@ def _t_sparse_kv_load(m, c, g):
 
 
 def _t_dense_layer(m, c, g):
-    """dense 层 DSA：indexer(2) + gather_kv + fused_mla_attention + mlp。
+    """dense 层 DSA：indexer(2) + gather_kv + fused_mla_attention + mla_proj + mlp。
 
     F4：dense 层无专家路由，不含 MoE dispatch/combine 通信，只有稀疏 KV 拉取。
     """
     cal = (_t_indexer_qb_linear(m, c, g) + _t_indexer_qk_score(m, c, g)
-           + _t_gather_kv(m, c, g) + _t_fused_mla_attention(m, c, g) + _t_mlp(m, c, g))
+           + _t_gather_kv(m, c, g) + _t_fused_mla_attention(m, c, g) + _t_mla_proj(m, c, g)
+           + _t_mlp(m, c, g))
     comm = max(0, _t_sparse_kv_load(m, c, g))
     return cal + comm
 
 
 def _t_moe_layer(m, c, g):
-    """MoE 层 DSA：indexer(2) + gather_kv + fused_mla_attention + moe(shared+routed) + 通信。"""
+    """MoE 层 DSA：indexer(2) + gather_kv + fused_mla_attention + mla_proj + moe(shared+routed) + 通信。"""
     cal = (_t_indexer_qb_linear(m, c, g) + _t_indexer_qk_score(m, c, g)
-           + _t_gather_kv(m, c, g) + _t_fused_mla_attention(m, c, g) + _t_moe(m, c, g))
+           + _t_gather_kv(m, c, g) + _t_fused_mla_attention(m, c, g) + _t_mla_proj(m, c, g)
+           + _t_moe(m, c, g))
     comm = max(0, _t_moe_dispatch(m, c, g)) + max(0, _t_moe_combine(m, c, g)) + max(0, _t_sparse_kv_load(m, c, g))
     return cal + comm
 
