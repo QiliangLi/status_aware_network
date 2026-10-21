@@ -21,6 +21,11 @@ class PublicRequest:
     u_tokens: int
     deadline_s: object
     T0_s: object
+    # 盘模式（20261021）公开确定性前缀标识的原料（盘计划可由任何策略重建，
+    # 设计 §3：放置是公开确定性信息）；不改变既有策略可见语义。
+    class_id: str = ""
+    source_file: Optional[str] = None
+    source_line: Optional[int] = None
 
 
 @dataclass(frozen=True)
@@ -254,7 +259,9 @@ class Observable:
             if rr.state in ("QUEUED", "ACTIVE"):
                 s = rr.spec
                 reqs.append(PublicRequest(rid, s.arrival_s, s.h_tokens,
-                                          s.u_tokens, s.deadline_s, s.T0_s))
+                                          s.u_tokens, s.deadline_s, s.T0_s,
+                                          s.class_id, s.source_file,
+                                          s.source_line))
         workers = []
         for i in range(w.m):
             wk = w.workers[i]

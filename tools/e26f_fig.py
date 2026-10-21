@@ -1,15 +1,17 @@
 """E26f 图工具：每格点四张图（五色甘特 5 行 + 带宽时序 5 行 + TTFT CDF +
-逐 NPU 利用率）+ 双格点汇总条形图。
+逐 NPU 利用率）+ 双格点汇总条形图 + 每盘带宽利用率图（max_min_disk 臂）。
 
 用法：
   .venv/bin/python tools/e26f_fig.py --kind gantt --cell=D1fA_k16 [--rep 0] [--audit]
-  .venv/bin/python tools/e26f_fig.py --kind bw|cdf|util --cell=D1fB_k16
+  .venv/bin/python tools/e26f_fig.py --kind bw|cdf|util|disk --cell=D1fB_k16
   .venv/bin/python tools/e26f_fig.py --kind bar
 甘特：蓝=A算 橙=B算 绿=C算 红=IO等 灰=无请求（NPU0..31 泳道，五列五色
 ——e26f 甘特桶为 [A,B,C,等,闲] 五列，与 e26_ab 四列格式不通用）。
 带宽：10ms 分箱需求 Σq vs 实际 Σrate +120 黑虚线，对数纵轴；C 零读不出现。
 CDF：5 线 + 同色点线期限宽度（三类期限分层，点线自动呈台阶）。
 util：箱线（32 NPU 纯算利用率分布）+CV+编号热图；纯算口径含 C 算。
+disk：行=6 臂 × 每盘一条速率曲线 +40 黑虚线（数据源 npz disk_rates，
+仅 max_min_disk 运行有；E26F_ROOT/E26F_TAG 指向 e26f_max_min_disk 目录）。
 bar：5 策略 × 2 格点总 SLO；条内 A/B/C 分类白字（cA vs cB 并排=挤出轻/重对照）。
 数据源：results/cq/eval/e26f/<cell>@s<rep>/<arm>.{gantt.json.gz,intervals.npz,
 requests.json.gz} 与 results/cq/eval/e26f/records_part_*.json。
@@ -32,6 +34,7 @@ ROOT = os.environ.get("E26F_ROOT") or os.path.join(REPO, "results", "cq", "eval"
 TAG = os.environ.get("E26F_TAG", "e26f")   # 图文件名前缀（重跑目录用 e26f_max_min，勿覆盖入库图）
 FIG_DIR = os.path.join(REPO, "docs", "figures")
 B_GBPS = 120.0
+DISK_GBPS = 40.0   # 单盘容量（B=120/disks=3；max_min_disk 臂的容量虚线）
 BIN_S = 0.01
 
 ROWS = [("FCFS", "fcfs"), ("EDF", "edf"), ("local v2.1", "localS_v2.1"),
@@ -344,6 +347,79 @@ def build_util(cell: str, rep: int, audit_only: bool):
     return len(ov)
 
 
+def build_disk(cell: str, rep: int, audit_only: bool):
+    """每盘带宽利用率（仅 max_min_disk 臂有盘数据，设计 §5）：行=6 臂，
+    行内每盘一条速率曲线（10ms 分箱，与总带宽图同口径）+ 40 GB/s 盘容量
+    虚线（利用率=曲线/40 直读）；行标题附每盘时间加权忙占比。
+    数据源 npz disk_rates 矩阵（与 intervals 行逐行同区段）。
+    """
+    import matplotlib
+    matplotlib.use("Agg")
+    import matplotlib.pyplot as plt
+    plt.rcParams["font.sans-serif"] = ["PingFang SC", "Heiti TC", "DejaVu Sans"]
+    plt.rcParams["axes.unicode_minus"] = False
+    from e25_ts_compare import audit_text_overlap
+    from matplotlib.gridspec import GridSpec
+
+    tag = f"{cell}@s{rep}"
+    disk_cap = DISK_GBPS
+    disk_cols = ["#4C72B0", "#DD8452", "#55A868", "#937860"]
+    n_row = len(ROWS)
+    fig = plt.figure(figsize=(14.6, 2.3 * n_row + 0.9), dpi=125)
+    gs = GridSpec(n_row, 1, hspace=0.46, left=0.14, right=0.985, top=0.88,
+                  bottom=0.05)
+    for ri, (label, fn) in enumerate(ROWS):
+        p = os.path.join(ROOT, tag, f"{fn}.intervals.npz")
+        ax = fig.add_subplot(gs[ri, 0])
+        if not os.path.exists(p):
+            ax.text(.5, .5, "无数据", ha="center", va="center",
+                    transform=ax.transAxes)
+            continue
+        z = np.load(p)
+        if z["disk_rates"].size == 0:
+            ax.text(.5, .5, "非盘模式（无 disk_rates）", ha="center", va="center",
+                    transform=ax.transAxes)
+            continue
+        arr, dr = z["intervals"], z["disk_rates"]
+        n_disk = dr.shape[1]
+        w = arr[:, 1] - arr[:, 0]
+        n = int(arr[-1, 1] / BIN_S) + 1
+        idx = np.clip((arr[:, 0] / BIN_S).astype(int), 0, n - 1)
+        cnt = np.bincount(idx, weights=w, minlength=n)
+        safe = np.where(cnt > 0, cnt, 1.0)
+        xs = np.arange(n) * BIN_S + BIN_S / 2
+        busy = []
+        for d in range(n_disk):
+            r = np.bincount(idx, weights=w * dr[:, d], minlength=n) / safe
+            ax.plot(xs, r, lw=.9, color=disk_cols[d % len(disk_cols)],
+                    label=f"盘{d}")
+            busy.append(float(w @ dr[:, d] / max(w.sum(), 1e-12) / disk_cap))
+        ax.axhline(disk_cap, color="k", ls="--", lw=1.1)
+        ax.text(xs[-1] * 0.995, disk_cap * 1.12,
+                f"盘容量 {disk_cap:.0f}", ha="right", fontsize=8.5)
+        ax.set_xlim(0, xs[-1])
+        ax.set_ylim(0, disk_cap * 1.35)
+        ax.set_ylabel(f"{label}\nGB/s（每盘）", fontsize=9.5)
+        ax.grid(alpha=.2)
+        if ri == 0:
+            ax.legend(loc="upper right", fontsize=7.5, ncol=n_disk)
+        if ri == n_row - 1:
+            ax.set_xlabel("仿真时间 (s)", fontsize=10)
+        ax.set_title("盘忙占比（时间加权均值利用率）"
+                     + "/".join(f"{b:.0%}" for b in busy),
+                     fontsize=8.5, loc="right")
+    fig.suptitle(f"图D｜E26f 每盘带宽利用率：{tag}（{CELL_LABEL[cell]}）"
+                 "（每盘一条曲线，黑虚线=单盘 40 GB/s；曲线分离=哈希倾斜/错峰"
+                 "印记；总带宽图即功守恒检验位）", fontsize=12, y=0.97)
+    ov = audit_text_overlap(fig)
+    if not audit_only:
+        fig.savefig(os.path.join(FIG_DIR, f"cq_fig_{TAG}_disk_{tag}.png"),
+                    dpi=125)
+    plt.close(fig)
+    print(f"{tag}: 每盘图文字重叠 {len(ov)} 对")
+    return len(ov)
+
+
 def build_bar(audit_only: bool):
     """汇总条形：5 策略 × 2 格点总 SLO；条内 A/B/C 分类白字。
 
@@ -434,5 +510,7 @@ if __name__ == "__main__":
         build_cdf(cell or CELLS[0], rep, audit)
     elif kind == "util":
         build_util(cell or CELLS[0], rep, audit)
+    elif kind == "disk":
+        build_disk(cell or CELLS[0], rep, audit)
     else:
         build_bar(audit)

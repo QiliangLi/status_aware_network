@@ -47,7 +47,9 @@ class WorldState:
             i: WorkerState(i, state_since=self.zero) for i in range(self.m)}
         self.storage = StorageSim(scenario.storage.b_schedule,
                                   scenario.storage.q_max_gbps, numeric,
-                                  alloc=scenario.storage.alloc)
+                                  alloc=scenario.storage.alloc,
+                                  disk_bps=scenario.storage.disk_bps_gbps,
+                                  kappa=scenario.profile.kappa_gb_per_token_layer)
         self.wake_timers: Dict[int, Tuple[object, int]] = {}
         self.wake_gen = 0
         self.n_queued = 0
@@ -100,6 +102,11 @@ class WorldState:
         st.num, st.zero, st.b_schedule, st.q_max = (
             self.num, self.zero, self.storage.b_schedule, self.storage.q_max)
         st.alloc = self.storage.alloc   # 分配模式必须随 clone 穿透（推演与真实同规则）
+        st.uses_groups = self.storage.uses_groups
+        st.disks = self.storage.disks   # 盘模型参数与盘组状态逐字段穿透（§A.4）
+        st.disk_bps = self.storage.disk_bps
+        st.block_tokens = self.storage.block_tokens
+        st.kappa = self.storage.kappa
         st.flows = {seq: _copy.copy(f) for seq, f in self.storage.flows.items()}
         st.next_seq = self.storage.next_seq
         st.integrated_capacity_gb = self.storage.integrated_capacity_gb
@@ -108,7 +115,20 @@ class WorldState:
         st.rate_log = []
         st.record_intervals = False   # 搜索分支不记录时间序列账本
         st.interval_log = []
+        st.disk_interval_log = []
         st.tol = self.storage.tol
+        if self.storage.uses_groups:
+            from .storage import _DiskGroup
+            st.groups = {}
+            for seq, gs in self.storage.groups.items():
+                st.groups[seq] = [
+                    _DiskGroup(g.seq, g.disk, g.n_blocks, g.total_gb, st.zero)
+                    for g in gs]
+                for og, ng in zip(gs, st.groups[seq]):
+                    ng.remaining_gb = og.remaining_gb
+                    ng.rate_gbps = og.rate_gbps
+        else:
+            st.groups = {}
         w.storage = st
         w.wake_timers = dict(self.wake_timers)
         w.wake_gen = self.wake_gen
@@ -202,7 +222,14 @@ class CqEngine:
     def _physical_step(self, t):
         """§4.4 的步骤 1/2/4：完成、到达、带宽、旧批闭包、到期提升（无决策）。"""
         st = self.w.storage
-        # 已完成的读取
+        # 盘模式：组完成（重配事件，完成由最慢盘决定）——先摘组再判流完成
+        if st.uses_groups:
+            done_g = st.completed_groups()
+            for seq, disk in sorted(done_g):
+                st.remove_group(seq, disk)
+            if done_g:
+                st.allocate(t)
+        # 已完成的读取（盘模式：全部盘组已摘除 → 流剩余 ≤ 容差）
         done_seqs = [seq for seq, f in st.flows.items() if st.is_complete(f)]
         for seq in sorted(done_seqs):
             f = st.remove(seq, t)
@@ -344,13 +371,22 @@ class CqEngine:
                 else:
                     q = self.w.storage.q_max
                     due = None
-                f = self.w.storage.submit(b.batch_id * 1000 + l + 1, b.batch_id,
-                                          l + 1, C, V_next, q, due)
+                pid, hs = self._members_h(b.members)
+                f = self.w.storage.submit(
+                    b.batch_id * 1000 + l + 1, b.batch_id, l + 1, C, V_next,
+                    q, due, prefix_id=pid, h_tokens=hs)
                 if self.observable is not None:
                     self.observable.on_flow_submit(f, t)
                 self.w.storage.allocate(t)
             else:
                 b.read_ready[l + 1] = C
+
+    def _members_h(self, rids):
+        """批成员的 (prefix_ids, h_tokens) 序列（盘模式 submit 用；公开确定性
+        信息：合成负载 "{class_id}:{h_tokens}"，trace "{source_file}:{source_line}"）。"""
+        pids = tuple(_prefix_of(self.w.specs[r]) for r in rids)
+        hs = tuple(self.w.specs[r].h_tokens for r in rids)
+        return (pids, hs) if len(rids) != 1 else (pids[0], hs[0])
 
     def _finish_batch(self, b: BatchRuntime, t):
         F = b.Z[self.w.L - 1]
@@ -496,7 +532,9 @@ class CqEngine:
             self.observable.on_dispatch(b, t)
         if Vl > 0:
             q = w.storage.q_max
-            f = w.storage.submit(b.batch_id * 1000, b.batch_id, 0, t, Vl, q, None)
+            pid, hs = self._members_h(rids)
+            f = w.storage.submit(b.batch_id * 1000, b.batch_id, 0, t, Vl, q,
+                                 None, prefix_id=pid, h_tokens=hs)
             if self.observable is not None:
                 self.observable.on_flow_submit(f, t)
             w.storage.allocate(t)
@@ -564,3 +602,11 @@ def _act_json(act: JointAction):
              "members": list(a.members),
              "wake_at": str(a.wake_at) if a.wake_at is not None else None}
             for a in act.actions]
+
+
+def _prefix_of(spec) -> str:
+    """公开确定性前缀标识（盘计划重建键）：trace 负载 "{source_file}:{source_line}"，
+    合成负载 "{class_id}:{h_tokens}"（同类同 h → 同计划）。"""
+    if spec.source_file is not None:
+        return f"{spec.source_file}:{spec.source_line}"
+    return f"{spec.class_id}:{spec.h_tokens}"

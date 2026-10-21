@@ -109,7 +109,10 @@ class RequestRuntime:
 @dataclass
 class FlowState:
     """一个聚合读取流。submit_seq 决定 FCFS 排位；due 到期未读完则 q 提升为
-    q_max 且保留原序号，不可撤回重提。"""
+    q_max 且保留原序号，不可撤回重提。
+
+    盘模式（max_min_disk，20261021）：n_blocks 为流的总块数（Σ各盘组块数），
+    逐块需求 = q/n_blocks 由 allocate 现算；组状态在 StorageSim.groups。"""
 
     flow_id: int
     batch_id: int
@@ -123,6 +126,7 @@ class FlowState:
     boosted: bool = False
     rate_gbps: object = 0
     completed_s: Optional[object] = None
+    n_blocks: int = 0
 
 
 @dataclass

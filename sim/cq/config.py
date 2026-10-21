@@ -5,6 +5,7 @@
 """
 from __future__ import annotations
 
+import math
 from dataclasses import dataclass, field, asdict
 from fractions import Fraction
 from typing import Optional, Tuple
@@ -83,17 +84,37 @@ class StorageConfig:
       按需分+剩余均分（独占流可得全带宽），超订时迭代到不动点；每个事件点
       （提交/完成/升速/带宽断点）全量重算，新流提交会改变所有在途流的速率
       与完成时刻（在途重配）。
+
+    alloc="max_min_disk"（20261021，docs/E26f-盘维度存储实验设计-20261021.md）：
+    总带宽来自各盘——B(t) 平摊为 disks × B(t)/disks 的独立盘容量；KVCache 块
+    按 HRW 一致性哈希落在唯一盘上；分配主体为 (流,盘) 组 × 块展开，每盘独立
+    waterfill；流完成 = 全部盘组完成（最慢盘决定）。disk_bps_gbps 为单盘上限
+    带宽（物理基元，40 GB/s 缺省）；盘数派生 disks = ceil(峰值B/disk_bps)，
+    非配置项。fcfs/max_min 忽略 disk_bps（已跑两组结果逐位可复现）。
     """
 
     b_schedule: Tuple[Tuple[Fraction, Fraction], ...] = ((Fraction(0), Fraction(80)),)
     q_max_gbps: Fraction = Fraction(200)
     b_ref_gbps: Fraction = Fraction(80)   # T0 与 history 观测使用的参考带宽
-    alloc: str = "fcfs"                   # fcfs | max_min
+    alloc: str = "fcfs"                   # fcfs | max_min | max_min_disk
+    disk_bps_gbps: Fraction = Fraction(40)   # 单盘上限带宽（仅 max_min_disk 用）
 
     def __post_init__(self):
         object.__setattr__(self, "b_schedule", _parse_schedule(self.b_schedule))
-        if self.alloc not in ("fcfs", "max_min"):
-            raise ValueError(f"storage.alloc 必须为 fcfs|max_min，得到 {self.alloc!r}")
+        if self.alloc not in ("fcfs", "max_min", "max_min_disk"):
+            raise ValueError(
+                f"storage.alloc 必须为 fcfs|max_min|max_min_disk，得到 {self.alloc!r}")
+        if self.disk_bps_gbps <= 0:
+            raise ValueError(f"disk_bps_gbps 必须为正，得到 {self.disk_bps_gbps!r}")
+
+    @property
+    def disks(self) -> int:
+        """盘数派生（非配置项）：峰值 B / 单盘带宽 上取整，至少 1。
+
+        B(t) 非降场景取峰值口径（E26f B 恒 120 → 40/盘 → 3 盘），单测锁定。
+        """
+        b_peak = max(v for _t, v in self.b_schedule)
+        return max(1, math.ceil(b_peak / self.disk_bps_gbps))
 
     def b_at(self, t) -> Fraction:
         """右连续阶梯：最后一个 time<=t 的项的值。"""
@@ -118,6 +139,8 @@ class StorageConfig:
             "q_max_gbps": str(self.q_max_gbps),
             "b_ref_gbps": str(self.b_ref_gbps),
             "alloc": self.alloc,
+            "disk_bps_gbps": str(self.disk_bps_gbps),
+            "disks": self.disks,
         }
 
 

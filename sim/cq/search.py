@@ -169,17 +169,28 @@ def build_forecast_engine(snap: ObservableSnapshot, scn: CqScenario,
     bw = est_bw if est_bw is not None else snap.est_bw()
     if local:
         bw = snap.est_bw()   # local 评分由独立分配实现，见 _LocalStorage
+    # 盘模式（20261021）：盘拓扑是公开确定性信息（放置不随 B̂ 变）——估计世界
+    # 钉住与真实场景相同的盘数（disk_bps 取 B̂/disks_real，使 ceil 精确回
+    # disks_real）；估计的只是带宽，不是拓扑。
+    disk_bps = scn.storage.disk_bps_gbps
+    if scn.storage.alloc == "max_min_disk":
+        bw_frac = Fraction(int(float(bw) * 1e9), 10**9)
+        disk_bps = bw_frac / scn.storage.disks
     scn_est = replace(
         scn, storage=StorageConfig(b_schedule=((Fraction(0), Fraction(int(bw * 1e9), 10**9)),),
                                    q_max_gbps=scn.storage.q_max_gbps,
                                    b_ref_gbps=scn.storage.b_ref_gbps,
-                                   alloc=scn.storage.alloc),
+                                   alloc=scn.storage.alloc,
+                                   disk_bps_gbps=disk_bps),
         cohort=replace(scn.cohort, drain_budget_s=Fraction(10**6)))
     specs = []
     for r in snap.requests:
         specs.append(RequestSpec(rid=r.rid, arrival_s=r.arrival_s,
                                  h_tokens=r.h_tokens, u_tokens=r.u_tokens,
-                                 class_id="", T0_s=r.T0_s, deadline_s=r.deadline_s))
+                                 class_id=r.class_id, T0_s=r.T0_s,
+                                 deadline_s=r.deadline_s,
+                                 source_file=r.source_file,
+                                 source_line=r.source_line))
     obs = Observable(scn_est, numeric=float)
     eng = CqEngine(scn_est, specs, policy=pi, numeric=float, observable=obs,
                    record_decisions=False)
@@ -189,7 +200,10 @@ def build_forecast_engine(snap: ObservableSnapshot, scn: CqScenario,
         # 独立带宽评分世界：替换推演存储（须在流注入前；clone 按类型保留子类）
         w.storage = _IndependentBWStorage(
             ((Fraction(0), Fraction(int(bw * 1e9), 10**9)),),
-            scn_est.storage.q_max_gbps, float)
+            scn_est.storage.q_max_gbps, float,
+            alloc=scn_est.storage.alloc,
+            disk_bps=scn_est.storage.disk_bps_gbps,
+            kappa=scn_est.profile.kappa_gb_per_token_layer)
     now = float(snap.now)
     # QUEUED 请求直接入队
     for r in snap.requests:
@@ -303,16 +317,37 @@ def build_forecast_engine(snap: ObservableSnapshot, scn: CqScenario,
         wk.state_since = now
         wk.compute_s = 0.0
         wk.stall_s = 0.0
-    # 未完成流注入
+    # 未完成流注入（盘模式：按批成员 (prefix_id, h) 重建盘组——与真实引擎
+    # 同一 disk_plan；批不可考时退化为 V=κh 反解单成员，公开确定性口径不变）
+    from .engine import _prefix_of
     for f in snap.flows:
         if f.completed:
             continue
         served = f.served_reported_gb if f.served_reported_gb is not None else 0.0
         remaining = max(0.0, float(f.V_gb) - float(served))
         st = w.storage
+        pid, hs = None, 0
+        if st.uses_groups:
+            mb = w.batches.get(f.batch_id)
+            if mb is not None and mb.members:
+                specs_pub = {r.rid: r for r in snap.requests}
+                mem = [specs_pub[x] for x in mb.members if x in specs_pub]
+                if mem:
+                    pid = tuple(_prefix_of(
+                        RequestSpec(rid=r.rid, arrival_s=0, h_tokens=r.h_tokens,
+                                    u_tokens=r.u_tokens, class_id=r.class_id,
+                                    T0_s=1, deadline_s=1,
+                                    source_file=r.source_file,
+                                    source_line=r.source_line)) for r in mem)
+                    hs = tuple(r.h_tokens for r in mem)
+            if pid is None:
+                h_rev = max(1, round(float(f.V_gb)
+                                     / float(st.kappa)))
+                pid, hs = f"rev:{h_rev}", h_rev
         fl = st.submit(f.flow_id, f.batch_id, f.layer, float(f.submit_s),
-                       float(f.V_gb), st.q_max, None)
-        fl.remaining_gb = remaining
+                       float(f.V_gb), st.q_max, None,
+                       prefix_id=pid, h_tokens=hs)
+        st.rescale_remaining(fl.submit_seq, remaining)
     w.next_batch_id = max(max_bid, -1) + 1
     w.t = now
     w.storage.allocate(now)
@@ -324,12 +359,19 @@ class _IndependentBWStorage(StorageSim):
     min(申请率, B̂)，忽略 FCFS 共享竞争。仅用于推演评分世界（物理执行
     仍走共享 FCFS）；作用是隔离"预测时是否建模跨 worker 干扰"的价值：
     带宽不紧张时与共享预测几乎一致，竞争紧张时系统性乐观（低估等待）。
+
+    盘模式（20261021）：流级速率仍 min(q, B̂)（池级独立语义不变）；组速率
+    按组字节比例分摊（该消融臂不建模盘倾斜长尾，倾斜效应归共享推演臂）。
     """
 
     def allocate(self, t):
         cap = self.b_at(t)
         for f in sorted(self.flows.values(), key=lambda x: x.submit_seq):
             f.rate_gbps = min(f.q_gbps, cap)
+            if self.uses_groups:
+                factor = (f.rate_gbps / f.V_gb) if f.V_gb else self.zero
+                for g in self.groups[f.submit_seq]:
+                    g.rate_gbps = g.total_gb * factor
 
 
 class _HoldPi:

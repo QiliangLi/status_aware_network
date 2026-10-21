@@ -61,6 +61,10 @@ K_BUCKETS = 200
 # 20261018 存储层重跑（docs/存储带宽maxmin替换设计-20261016.md）：max_min =
 # 按申请率 q 的带需求上限水土填充（新流提交即时重配全部在途流速率），默认
 # fcfs 保持既有口径；输出目录/records 自动分流到 e26f_mm，互不覆盖。
+# 20261021 盘维度第三臂（docs/E26f-盘维度存储实验设计-20261021.md）：
+# E26F_ALLOC=max_min_disk → B=120 平摊 3 盘（disk_bps=40 派生）、块 HRW 落盘、
+# (流,盘) 组级分配/完成事件；records 增盘统计、npz 增盘速率矩阵，输出目录
+# e26f_max_min_disk（EXP_DIR_NAME 规则沿用），前两组结果不覆盖。
 ALLOC = os.environ.get("E26F_ALLOC", "fcfs")
 EXP_DIR_NAME = "e26f" if ALLOC == "fcfs" else f"e26f_{ALLOC}"
 
@@ -268,6 +272,54 @@ def npu_util_from_gantt(buckets, m: int, makespan: float) -> dict:
             if wait_t + act_t > 0 else None}
 
 
+def disk_stats(st) -> dict:
+    """盘维度统计（仅 max_min_disk；数据源 disk_interval_log，设计 §5）。
+
+    disk_util_mean_d：每盘时间加权均值利用率（分母=区段起点盘容量 B(t0)/disks）；
+    disk_util_cv：逐区段盘间 CV 的时间加权均值；cv15_frac：CV>0.15 的时间占比
+    （H3 判定口径）；max_disk_frac_{A,B,C}：类计划的最慢盘字节占比（E26f
+    合成负载下为类常量，由真实类前缀 disk_plan 算出，单测锁定）。
+    """
+    from sim.cq.storage import disk_plan
+    out = {"disks": st.disks if st.uses_groups else None,
+           "disk_bps_gbps": float(st.disk_bps) if st.uses_groups else None,
+           "disk_util_cv": None, "disk_cv15_frac": None,
+           "max_disk_frac_A": None, "max_disk_frac_B": None,
+           "max_disk_frac_C": None}
+    for d in range(getattr(st, "disks", 0) if st.uses_groups else 0):
+        out[f"disk_util_mean_{d}"] = None
+    if not st.uses_groups:
+        return out
+    wsum = 0.0
+    acc = [0.0] * st.disks
+    cv_acc = cv15_t = 0.0
+    for (t0, t1, rates) in st.disk_interval_log:
+        dt = float(t1) - float(t0)
+        if dt <= 0:
+            continue
+        cap_d = float(st.b_at(t0)) / st.disks
+        utils = [float(r) / cap_d if cap_d > 0 else 0.0 for r in rates]
+        wsum += dt
+        for d in range(st.disks):
+            acc[d] += utils[d] * dt
+        mu = sum(utils) / st.disks
+        cv = ((sum((u - mu) ** 2 for u in utils) / st.disks) ** 0.5 / mu
+              if mu > 0 else 0.0)
+        cv_acc += cv * dt
+        if cv > 0.15:
+            cv15_t += dt
+    for d in range(st.disks):
+        out[f"disk_util_mean_{d}"] = acc[d] / wsum if wsum > 0 else None
+    out["disk_util_cv"] = cv_acc / wsum if wsum > 0 else None
+    out["disk_cv15_frac"] = cv15_t / wsum if wsum > 0 else None
+    for cls, (h, _u) in (("A", e26.A_CLASS), ("B", e26.B_CLASS)):
+        plan = disk_plan(f"{cls}:{h}", h, st.disks, st.block_tokens, st.kappa)
+        tot = sum(b for _d, _c, b in plan)
+        out[f"max_disk_frac_{cls}"] = (
+            max(b for _d, _c, b in plan) / tot if tot > 0 else None)
+    return out
+
+
 def cluster_shock3(engine, centers, window_s: float = SHOCK_WINDOW_S):
     """簇冲击响应：每簇心后 window_s 内实际派发的 A/B/C 条数（三列观测）。"""
     specs = engine.w.specs
@@ -367,6 +419,7 @@ def run_cell(cell: str, rep: int, d: str, arms=None):
                   if shock["A"] else None,
                   "cluster_A_disp_max": int(max(shock["A"])) if shock["A"] else 0})
         s.update(util)
+        s.update(disk_stats(eng.w.storage))
         with gzip.open(os.path.join(d, f"{cell}@s{rep}/{label}.gantt.json.gz"),
                        "wt") as f:
             json.dump({"meta": {"cell": cell, "rep": rep, "policy": label,
@@ -375,9 +428,17 @@ def run_cell(cell: str, rep: int, d: str, arms=None):
                       f, separators=(",", ":"))
         arr = np.asarray([(float(a), float(b), float(r_), float(q))
                           for (a, b, r_, q) in eng.w.storage.interval_log])
+        # 盘速率矩阵（仅 max_min_disk；与 intervals 行逐行同区段，E25 工具读
+        # intervals 键不受影响）
+        if eng.w.storage.uses_groups:
+            disk_arr = np.asarray([list(r) for (_a, _b, r)
+                                   in eng.w.storage.disk_interval_log],
+                                  dtype=float)
+        else:
+            disk_arr = np.zeros((0, 0))
         np.savez_compressed(
             os.path.join(d, f"{cell}@s{rep}/{label}.intervals.npz"),
-            intervals=arr)
+            intervals=arr, disk_rates=disk_arr)
         with gzip.open(os.path.join(d, f"{cell}@s{rep}/{label}.requests.json.gz"),
                        "wt") as f:
             json.dump({"meta": {"cell": cell, "rep": rep, "policy": label,
