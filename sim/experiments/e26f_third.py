@@ -316,7 +316,7 @@ def disk_stats(st) -> dict:
         plan = disk_plan(f"{cls}:{h}", h, st.disks, st.block_tokens, st.kappa)
         tot = sum(b for _d, _c, b in plan)
         out[f"max_disk_frac_{cls}"] = (
-            max(b for _d, _c, b in plan) / tot if tot > 0 else None)
+            float(max(b for _d, _c, b in plan) / tot) if tot > 0 else None)
     return out
 
 
