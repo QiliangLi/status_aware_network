@@ -1,0 +1,480 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>prefill_time 仿真解释（2026-10-21）</title>
+<style>
+  :root {
+    --paper: #faf8f4;
+    --paper-2: #f1ede5;
+    --ink: #23272d;
+    --ink-2: #5b6470;
+    --line: #d8d2c6;
+    --accent: #0f6b62;        /* 青：新仿真 / 注意力侧 */
+    --accent-2: #b05518;      /* 橙：旧仿真 / 误差 */
+    --ok: #3a7d44;
+    --code-bg: #efeae0;
+    --serif: "Songti SC", "Noto Serif CJK SC", serif;
+    --sans: "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei", system-ui, sans-serif;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --paper: #1c1f24; --paper-2: #24282f; --ink: #e6e3dc; --ink-2: #a7adb8;
+      --line: #3a4049; --accent: #4fc2b4; --accent-2: #e09a5d; --ok: #7ec98a;
+      --code-bg: #2a2f37;
+    }
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; background: var(--paper); color: var(--ink);
+    font-family: var(--sans); line-height: 1.75; font-size: 16px;
+  }
+  main { max-width: 920px; margin: 0 auto; padding: 0 20px 80px; }
+  header.hero { padding: 46px 0 10px; }
+  .kicker { color: var(--accent); font-weight: 600; letter-spacing: .12em; font-size: 13px; }
+  h1 { font-family: var(--serif); font-size: 30px; line-height: 1.35; margin: 6px 0 4px; }
+  .meta { color: var(--ink-2); font-size: 13.5px; }
+  .meta code { font-size: 12.5px; }
+  nav.toc {
+    position: sticky; top: 0; z-index: 5; background: var(--paper);
+    border-bottom: 1px solid var(--line); margin: 18px -20px 0; padding: 8px 20px;
+    display: flex; gap: 4px 18px; flex-wrap: wrap; font-size: 13.5px;
+  }
+  nav.toc a { color: var(--ink-2); text-decoration: none; white-space: nowrap; }
+  nav.toc a:hover, nav.toc a:focus-visible { color: var(--accent); text-decoration: underline; }
+  h2 {
+    font-family: var(--serif); font-size: 22px; margin: 54px 0 6px;
+    border-bottom: 2px solid var(--line); padding-bottom: 6px;
+  }
+  section[id] { scroll-margin-top: 78px; }
+  h2 .no { color: var(--accent); margin-right: 8px; font-family: var(--sans); font-size: 15px; }
+  h3 { font-size: 17px; margin: 26px 0 2px; }
+  p { margin: 8px 0; }
+  section > p:first-of-type { margin-top: 10px; }
+  code { background: var(--code-bg); border-radius: 4px; padding: 1px 6px; font-size: 0.9em;
+         font-family: "SF Mono", Menlo, Consolas, monospace; }
+  pre { background: var(--code-bg); border-radius: 8px; padding: 14px 16px; overflow-x: auto;
+        font-size: 13.5px; line-height: 1.7; }
+  pre code { background: none; padding: 0; }
+  .verdict {
+    border: 1px solid var(--accent); border-left-width: 5px; border-radius: 8px;
+    background: color-mix(in srgb, var(--accent) 7%, transparent);
+    padding: 14px 18px; margin: 22px 0;
+  }
+  .verdict h3 { margin: 0 0 6px; color: var(--accent); }
+  .verdict ul { margin: 4px 0 2px; padding-left: 20px; }
+  .verdict li { margin: 4px 0; }
+  table { border-collapse: collapse; width: 100%; margin: 14px 0; font-size: 14px; }
+  th, td { border: 1px solid var(--line); padding: 7px 10px; text-align: left; vertical-align: top; }
+  th { background: var(--paper-2); font-weight: 600; }
+  td.num, th.num { text-align: right; font-variant-numeric: tabular-nums; white-space: nowrap; }
+  caption { caption-side: top; text-align: left; color: var(--ink-2); font-size: 13px; padding-bottom: 6px; }
+  figure { margin: 22px 0; }
+  figure svg { width: 100%; height: auto; display: block; }
+  figcaption { color: var(--ink-2); font-size: 13.5px; margin-top: 8px; }
+  figcaption b { color: var(--ink); }
+  .dl { display: grid; grid-template-columns: 150px 1fr; gap: 8px 18px; margin: 12px 0; }
+  .dl dt { font-weight: 600; color: var(--ink); }
+  .dl dd { margin: 0; color: var(--ink); }
+  .dl dt .en { color: var(--ink-2); font-weight: 400; font-size: 12.5px; }
+  .card { border: 1px solid var(--line); border-radius: 10px; padding: 14px 18px; margin: 14px 0; }
+  .card.warn { border-left: 5px solid var(--accent-2); }
+  .card h3 { margin-top: 0; }
+  .card .impact { color: var(--accent-2); font-weight: 600; }
+  .card .src { color: var(--ink-2); font-size: 13px; }
+  .bars { margin: 10px 0; }
+  .bar-row { display: grid; grid-template-columns: 210px 1fr; gap: 12px; align-items: center; margin: 9px 0; }
+  .bar-row .lab { font-size: 13.5px; text-align: right; color: var(--ink-2); }
+  .bar-pair { display: grid; grid-template-rows: 14px 14px; gap: 3px; padding-right: 92px; }
+  .bar { height: 14px; border-radius: 3px; min-width: 2px; position: relative; }
+  .bar.old { background: var(--accent-2); opacity: .55; }
+  .bar.new { background: var(--accent); }
+  .bar span { position: absolute; left: calc(100% + 8px); top: -3px; font-size: 12.5px;
+              font-variant-numeric: tabular-nums; color: var(--ink-2); white-space: nowrap; }
+  details { border: 1px solid var(--line); border-radius: 8px; padding: 10px 16px; margin: 12px 0; }
+  summary { cursor: pointer; font-weight: 600; }
+  summary:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+  .note { color: var(--ink-2); font-size: 13.5px; }
+  .tag { display: inline-block; border: 1px solid var(--line); border-radius: 99px;
+         padding: 0 9px; font-size: 12px; color: var(--ink-2); margin-right: 6px; }
+  ol.src { padding-left: 22px; font-size: 14px; }
+  ol.src li { margin: 4px 0; word-break: break-all; }
+  @media (max-width: 640px) {
+    .dl { grid-template-columns: 1fr; gap: 2px 0; }
+    .dl dd { margin-bottom: 8px; }
+    .bar-row { grid-template-columns: 1fr; gap: 4px; }
+    .bar-row .lab { text-align: left; }
+    .bar-pair { padding-right: 72px; }
+    table { display: block; overflow-x: auto; }
+    td.num { white-space: normal; }
+  }
+  @media print {
+    nav.toc { display: none; }
+    body { background: #fff; }
+  }
+</style>
+</head>
+<body>
+<main>
+
+<header class="hero">
+  <div class="kicker">仿真解释文档</div>
+  <h1>prefill_time：这套计算时间仿真是怎么算的，旧版错在哪，还差多少</h1>
+  <p class="meta">日期 2026-10-21 ｜ 对象 <code>prefill_time/prefill_time_single.py</code>（单请求）与 <code>prefill_time_batch.py</code>（任意 batch） ｜ 修正提交 <code>1ad80ee</code> ｜ 原始版入库 <code>bd8422d</code> ｜ 详细验证见 <code>docs/prefill_time计算时间仿真合理性验证-20261021.md</code></p>
+</header>
+
+<nav class="toc" aria-label="目录">
+  <a href="#tldr">结论</a>
+  <a href="#terms">术语</a>
+  <a href="#what">在算什么</a>
+  <a href="#how">仿真原理</a>
+  <a href="#old">旧版三个错误</a>
+  <a href="#new">修正后的仿真</a>
+  <a href="#err">还剩多少误差</a>
+  <a href="#proof">怎么知道修对了</a>
+  <a href="#use">怎么用</a>
+  <a href="#src">来源</a>
+</nav>
+
+<section id="tldr">
+  <div class="verdict">
+    <h3>三句话结论</h3>
+    <ul>
+      <li>这套脚本回答一个问题：<b>一个请求（或一批请求）做 prefill，芯片要算多久、要从存储搬多少 KV 缓存</b>。它不算排队，不算网络，只算芯片上一层流水线的纯计算时间。</li>
+      <li>旧版把「逐字生成答案」的公式拿来算「一次算完新输入」，漏掉随新 token 数增长的全部注意力计算，还漏掉两道工序。修正后，真实 trace 上的 prefill 时延估计变为旧版的 <b>2.4 倍</b>。</li>
+      <li>修正版与教科书公式逐项对账通过。但它是「理想车间」的下界：真实生产系统还要慢 <b>2 到 3 倍</b>。用它比较方案快慢可信；用它报绝对时间，必须先校准。</li>
+    </ul>
+  </div>
+</section>
+
+<section id="terms">
+  <h2><span class="no">0</span>术语</h2>
+  <p>本文的专用词都在本节定义。定义按本文用法写。读者只读本文即可，不需要别的材料。</p>
+  <dl class="dl">
+    <dt>token <span class="en">／词元</span></dt><dd>模型读写的最小文字单位。一个汉字约等于一到两个 token。</dd>
+    <dt>上下文 <span class="en">／context</span></dt><dd>一次请求里已有的全部 token。模型回答问题前，先读完整段上下文。</dd>
+    <dt>prefill <span class="en">／预填充</span></dt><dd>把新收到的输入 token 一次算完。本文仿真的对象。输入越长，prefill 越久。</dd>
+    <dt>decode <span class="en">／解码</span></dt><dd>答案逐字生成。每个步骤只算一个新 token。本文仿真不算 decode。</dd>
+    <dt>层 <span class="en">／layer</span></dt><dd>模型的计算单元。GLM5 有 78 层，全部串行。数据穿过 78 层，答案才出来。</dd>
+    <dt>注意力 <span class="en">／attention</span></dt><dd>每层的工序之一。每个新 token 回看上下文，找出与它相关的部分，再合并信息。</dd>
+    <dt>MLA</dt><dd>注意力用的压缩记忆格式。每个 token 的记忆压缩成 576 个数。本文称这段压缩记忆为「KV 向量」。</dd>
+    <dt>KV 缓存 <span class="en">／KV cache</span></dt><dd>已算过的上下文 token 的 KV 向量集合。存起来后，再次对话不必重算旧的部分。</dd>
+    <dt>前缀命中 <span class="en">／prefix hit</span></dt><dd>新请求的上下文开头与缓存里已有的一段完全相同。命中的部分不用重算，但它的 KV 向量必须搬进芯片内存。</dd>
+    <dt>DSA 稀疏注意力</dt><dd>GLM5 用的省力版注意力。新 token 不回看全文，只看打分最高的 2048 个 token。打分由「索引器」完成。</dd>
+    <dt>索引器 <span class="en">／lightning indexer</span></dt><dd>每层的小打分网络。它给上下文的每个 token 打一个分。之后取分数最高的 2048 个。</dd>
+    <dt>top-2048</dt><dd>每个新 token 实际回看的 token 数量上限。这是 DSA 的固定参数。</dd>
+    <dt>MoE 专家</dt><dd>每层有 256 个「专家」小网络。每个 token 只走 8 个，另加 1 个所有 token 都走的共享专家。选哪些专家由路由器决定。</dd>
+    <dt>NPU</dt><dd>算力芯片。本仿真用型号 D950PR：FP8 每秒 1024 万亿次乘加，FP16 每秒 512 万亿次，内存带宽每秒 1600 GB。</dd>
+    <dt>HBM <span class="en">／高速内存</span></dt><dd>NPU 卡上的内存。权重和 KV 向量都放在这里。带宽每秒 1600 GB（十进制）。</dd>
+    <dt>FLOPs</dt><dd>浮点乘加次数。乘一次加一次计 2 次。做一道乘法题的工作量单位。</dd>
+    <dt>算力受限</dt><dd>一道工序的用时由「做多少乘加」决定。料已在手边，手速不够。</dd>
+    <dt>访存受限</dt><dd>一道工序的用时由「搬多少字节」决定。手速够快，等料。</dd>
+    <dt>roofline</dt><dd>本文仿真的核心公式。一道工序的用时取两个值的较大者：乘加数 ÷ 算力，字节数 ÷ 带宽。</dd>
+    <dt>kernel</dt><dd>芯片上执行一道工序的程序。启动一个 kernel 有 7 微秒固定开销。</dd>
+    <dt>DP <span class="en">／数据并行</span></dt><dd>32 张卡各拿不同的请求，各算各的。每张卡存全部权重。</dd>
+    <dt>EP <span class="en">／专家并行</span></dt><dd>256 个专家平摊到 32 张卡，每卡 8 个。token 的专家部分经互连总线送到专家所在的卡。</dd>
+    <dt>bs <span class="en">／每卡 batch</span></dt><dd>一张卡同时 prefill 的请求数。脚本约定：bs 增大时，DP 卡数 = 32 ÷ bs。全局并发恒为 32 个请求重新分组。</dd>
+    <dt>input_length</dt><dd>trace 里的字段。上下文全长，单位 token。含本次的新 token。</dd>
+    <dt>u_tokens</dt><dd>trace 里的字段。本次要 prefill 的新 token 数。等于上下文全长减去命中的部分。</dd>
+  </dl>
+</section>
+
+<section id="what">
+  <h2><span class="no">1</span>这套仿真在算什么</h2>
+  <p>一个请求到达时，上下文有两部分。前缀命中的部分不必重算，但它的 KV 向量要从存储搬进 HBM。新到的部分（u_tokens 个）必须逐层算完。这套仿真回答两个数：</p>
+  <ul>
+    <li><b>每层计算时间</b>（微秒）。新 token 穿过一层流水线要多久。乘 78 层，得到这个请求的 prefill 计算时间。</li>
+    <li><b>每层 KV 加载量</b>（GB）。命中前缀的 KV 向量一共多少字节。这个数给存储调度研究用。</li>
+  </ul>
+  <p>数据穿过一层，要经过 7 道工序。下图按真实比例画出典型工况（上下文 8192、新 token 512）下每道工序的耗时。</p>
+
+  <figure>
+    <svg viewBox="0 0 860 300" role="img" aria-label="一层流水线的七道工序耗时占比条形图">
+      <style>
+        .seg { stroke: var(--paper); stroke-width: 2; }
+        .lbl { font: 12px var(--sans); fill: var(--ink); }
+        .sub { font: 11px var(--sans); fill: var(--ink-2); }
+        .axl { font: 600 13px var(--sans); fill: var(--ink); }
+      </style>
+      <text x="10" y="24" class="axl">一层 = 7 道工序，总耗时 1184 微秒（上下文 8192，新 token 512，单卡单请求）</text>
+      <!-- 占比条：注意力侧 657us(55%) | MoE 425us(36%) | 通信 103us(9%)，x 起点 10，总宽 840 -->
+      <g>
+        <rect x="10"  y="50" width="467" height="44" rx="6" fill="var(--accent)" class="seg"/>
+        <rect x="479" y="50" width="302" height="44" rx="6" fill="#8a6d3b" class="seg"/>
+        <rect x="783" y="50" width="65"  height="44" rx="6" fill="#6b7280" class="seg"/>
+        <text x="244" y="77" text-anchor="middle" fill="#fff" font-weight="600">注意力＋索引侧 55%</text>
+        <text x="630" y="77" text-anchor="middle" fill="#fff" font-weight="600">专家 36%</text>
+        <text x="815" y="77" text-anchor="middle" fill="#fff" font-weight="600">通信</text>
+      </g>
+      <!-- 明细：宽度按 657us 区间内占比 -->
+      <g>
+        <rect x="10"  y="140" width="7"   height="26" fill="var(--accent)"/>
+        <rect x="19"  y="140" width="34"  height="26" fill="var(--accent)" opacity=".85"/>
+        <rect x="55"  y="140" width="9"   height="26" fill="var(--accent)" opacity=".7"/>
+        <rect x="66"  y="140" width="258" height="26" fill="var(--accent)" opacity=".55"/>
+        <rect x="326" y="140" width="151" height="26" fill="var(--accent)" opacity=".4"/>
+        <rect x="479" y="140" width="302" height="26" fill="#8a6d3b"/>
+        <rect x="783" y="140" width="65"  height="26" fill="#6b7280"/>
+      </g>
+      <text x="10"  y="132" class="sub">① 索引器投影 10 微秒</text>
+      <text x="19"  y="188" class="sub">② 打分 48</text>
+      <text x="66"  y="188" class="sub">③ 取 KV 13</text>
+      <text x="90"  y="132" class="sub">④ 注意力核心 364 微秒（FP16）</text>
+      <text x="330" y="132" class="sub">⑤ MLA 投影 222</text>
+      <text x="480" y="132" class="sub">⑥ 专家（8 路由＋1 共享）425 微秒（FP8）</text>
+      <text x="786" y="188" class="sub">⑦ 通信 103</text>
+      <line x1="10" y1="210" x2="850" y2="210" stroke="var(--line)"/>
+      <text x="10" y="238" class="lbl">工序①② 打分：新 token 各自给全文打分，选 top-2048。</text>
+      <text x="10" y="262" class="lbl">工序③④ 只看选中的 2048 个 token：先把它们的 KV 向量取来，再做注意力。</text>
+      <text x="10" y="286" class="lbl">工序⑤⑥⑦ 把结果投影回原空间、过专家网络、卡间送取数据。</text>
+    </svg>
+    <figcaption><b>读法</b>：上条是三块大头，下条是七道工序的明细，宽度都按耗时等比。注意力加索引这一侧占 55%，专家占 36%。「旧版认为专家一家独大」的判断不成立。</figcaption>
+  </figure>
+
+  <p>两个脚本只差一点：<code>prefill_time_single.py</code> 固定一张卡算一个请求；<code>prefill_time_batch.py</code> 允许一张卡同时算 bs 个请求，另给「一批长短不同的请求」的估法。两者的算子公式逐字相同。</p>
+</section>
+
+<section id="how">
+  <h2><span class="no">2</span>仿真原理</h2>
+
+  <h3>2.1 每道工序：roofline</h3>
+  <p>每道工序的用时取两个值的较大者：</p>
+  <pre><code>工序用时 = max( 乘加次数 ÷ 有效算力 , 搬运字节数 ÷ 有效带宽 ) ＋ 固定开销</code></pre>
+  <p>有效算力 = 峰值 × 0.8。这个 0.8 是外部仿真器给的折扣，代表 kernel 级效率。固定开销含每次 7 微秒的 kernel 启动，和每 128 条数据一次的流水线下限。roofline 说的是：料少时等料（访存受限），料多时比手速（算力受限）。交点在「每份权重摊到 320 个 token」附近。这个数有公式：算力 ÷（2 × 带宽）＝ 320。</p>
+
+  <figure>
+    <svg viewBox="0 0 860 330" role="img" aria-label="每 token 耗时随 token 数的三段式曲线与 roofline 两条边界线">
+      <style>
+        .ax { stroke: var(--ink-2); stroke-width: 1; }
+        .grid { stroke: var(--line); stroke-width: .7; stroke-dasharray: 3 4; }
+        .lbl { font: 12px var(--sans); fill: var(--ink-2); }
+        .lbl-ink { font: 12px var(--sans); fill: var(--ink); }
+        .tlt { font: 600 13px var(--sans); fill: var(--ink); }
+      </style>
+      <!-- 坐标区 x:70..830, y:30..260; x=log2(M) 0..16; y=log10(us) 0..3 -->
+      <line class="ax" x1="70" y1="260" x2="830" y2="260"/>
+      <line class="ax" x1="70" y1="260" x2="70" y2="30"/>
+      <text class="tlt" x="450" y="316" text-anchor="middle">每份权重摊到的 token 数（对数轴）</text>
+      <text class="tlt" x="26" y="150" transform="rotate(-90 26 150)" text-anchor="middle">每 token 每层耗时（微秒，对数轴）</text>
+      <!-- x 刻度 1,8,64,320,1024,8192,65536 -> log2 = 0,3,6,8.32,10,13,16 -->
+      <g>
+        <text class="lbl" x="70"  y="278" text-anchor="middle">1</text>
+        <text class="lbl" x="212" y="278" text-anchor="middle">8</text>
+        <text class="lbl" x="355" y="278" text-anchor="middle">64</text>
+        <text class="lbl" x="465" y="278" text-anchor="middle">320</text>
+        <text class="lbl" x="548" y="278" text-anchor="middle">1024</text>
+        <text class="lbl" x="690" y="278" text-anchor="middle">8192</text>
+        <text class="lbl" x="830" y="278" text-anchor="middle">65536</text>
+        <!-- y 刻度 1,10,100,1000 -->
+        <text class="lbl" x="60" y="264" text-anchor="end">1</text>
+        <text class="lbl" x="60" y="191" text-anchor="end">10</text>
+        <text class="lbl" x="60" y="117" text-anchor="end">100</text>
+        <text class="lbl" x="60" y="44"  text-anchor="end">1000</text>
+      </g>
+      <!-- ridge 竖线 M=320 -> x=465 -->
+      <line x1="465" y1="30" x2="465" y2="260" stroke="var(--accent)" stroke-width="1.2" stroke-dasharray="5 4"/>
+      <text class="lbl-ink" x="473" y="44" fill="var(--accent)">ridge ≈ 320</text>
+      <!-- 访存摊薄线 402/M: M=1:402us(y=?) log10(402)=2.604 -> y=260-2.604/3*230=60.3; M=8:50.3->176.1; M=64:6.3->227.5; M=155:2.59->248.1 -->
+      <path d="M 70 60 L 212 176 L 355 228 L 452 248" fill="none" stroke="var(--accent-2)" stroke-width="1.6" stroke-dasharray="7 5"/>
+      <text x="86" y="70" class="lbl" fill="var(--accent-2)">访存摊薄线：权重读 ÷ token 数</text>
+      <!-- 算力平台线 2.3us -> log10=0.362 -> y=232.3 -->
+      <line x1="70" y1="232" x2="830" y2="232" stroke="var(--accent-2)" stroke-width="1.6" stroke-dasharray="7 5"/>
+      <text x="620" y="226" class="lbl" fill="var(--accent-2)">算力平台线：乘加数 ÷ 算力</text>
+      <!-- 脚本真实点 (M,us): 1:616->log=2.79,y=46.4; 8:77.5->1.889,y=115.1; 64:10.8->1.033,y=180.8; 320:3.02->0.480,y=223.2; 1024:2.67->0.427,y=227.3; 8192:2.58->0.412,y=228.4; 65536:2.29->0.360,y=232.4 -->
+      <g fill="var(--ink)">
+        <circle cx="70"  cy="46"  r="4"/><circle cx="212" cy="115" r="4"/>
+        <circle cx="355" cy="181" r="4"/><circle cx="465" cy="223" r="4"/>
+        <circle cx="548" cy="227" r="4"/><circle cx="690" cy="228" r="4"/>
+        <circle cx="830" cy="232" r="4"/>
+      </g>
+      <text x="78" y="42" class="lbl-ink">616</text>
+      <text x="220" y="111" class="lbl-ink">77.5</text>
+      <text x="363" y="177" class="lbl-ink">10.8</text>
+      <text x="473" y="215" class="lbl-ink">3.02</text>
+      <text x="698" y="222" class="lbl-ink">2.58</text>
+      <!-- 区域标注 -->
+      <text x="150" y="150" class="lbl-ink">访存受限区</text>
+      <text x="150" y="167" class="lbl">等料：加 token 就省料钱</text>
+      <text x="600" y="255" class="lbl-ink">算力受限区</text>
+      <text x="600" y="272" class="lbl">比手速：加 token 不省时</text>
+    </svg>
+    <figcaption><b>读法</b>：点是脚本输出（上下文 65536，单卡单请求），虚线是 roofline 的两条边界。左侧点贴着访存摊薄线，右侧点贴着算力平台线，中间 320 附近换挡。点高出虚线的部分是固定开销（kernel 启动与流水线下限）。</figcaption>
+  </figure>
+
+  <h3>2.2 两个输入怎么影响工序</h3>
+  <table>
+    <caption>输入字段与各工序的关系（逐 token 的工作量）</caption>
+    <tr><th>工序</th><th>乘加量由什么决定</th><th>每 token 每层乘加</th><th>精度</th></tr>
+    <tr><td>① 索引器投影</td><td>固定</td><td class="num">17 MFLOPs</td><td>FP8</td></tr>
+    <tr><td>② 打分</td><td>新 token 数 × 上下文全长（唯一的二次项）</td><td class="num">65（上下文 8k）到 536（64k）</td><td>FP8</td></tr>
+    <tr><td>③ 取 KV</td><td>最多 2048 条，且不超过上下文</td><td class="num">—（按字节计）</td><td>FP8 字节</td></tr>
+    <tr><td>④ 注意力核心</td><td>固定：2048 条 × 64 头 ×（576＋512）维</td><td class="num">285 MFLOPs</td><td>FP16</td></tr>
+    <tr><td>⑤ MLA 投影</td><td>固定：6 个投影矩阵</td><td class="num">330 MFLOPs</td><td>FP8</td></tr>
+    <tr><td>⑥ 专家</td><td>固定：9 个专家 × 3 个矩阵</td><td class="num">680 MFLOPs</td><td>FP8</td></tr>
+    <tr><td>⑦ 通信</td><td>新 token 数（卡间送取）</td><td class="num">—（按字节计）</td><td>—</td></tr>
+  </table>
+  <p>线性部分（①⑤⑥，加 dense 层的 MLP）折合每 token 乘以 79.6 亿次乘加，相当于激活参数 397 亿。同类的 DeepSeek-V3 是 370 亿。数量级一致。</p>
+
+  <h3>2.3 bs 语义</h3>
+  <p>脚本约定：bs 是每卡请求数。bs 增大时，DP 卡数按 32 ÷ bs 减少，全局仍是 32 个请求重新分组。两个后果：</p>
+  <ul>
+    <li>每卡的专家数变为 8 × bs。访存受限时，每卡要读的专家权重也变为 bs 倍。</li>
+    <li>每卡的总 token 数 = bs × 新 token 数。计算量只随这个总数走，与分组方式无关。</li>
+  </ul>
+  <p>因此，批处理只在访存受限区省时间。新 token 多的时候（算力受限），合批不省时间。这符合推理服务的常识：合批对逐字生成收益大，对长输入 prefill 收益小。</p>
+
+  <h3>2.4 KV 加载量</h3>
+  <p>命中前缀有 1408 字节每 token 每层（MLA 向量 1152 ＋ 索引 K 256）。全部 78 层相加，得到这个请求要从存储搬的总字节数。这个口径与仓库存储调度实验（E23 系列）一致。</p>
+</section>
+
+<section id="old">
+  <h2><span class="no">3</span>旧版仿真错在哪</h2>
+  <p>旧版抄自外部仿真器（文件 GBK 编码，在 Python 3 下无法运行，已修）。除编码外，有三个大错误和三个小错误。每个错误写四项：错在哪、差多少、怎么发现、依据。</p>
+
+  <div class="card warn">
+    <h3>大错误一：拿「逐字生成」的公式算「一次算完新输入」（F1）</h3>
+    <p><b>错在哪</b>：旧版的打分、取 KV、注意力核心都不随新 token 数增长。那是 decode 的算法：每步只算一个 token。prefill 的新 token 有几百到几万个，每个都要打分、选 top-2048、做注意力。</p>
+    <p><b>差多少</b>：上下文 8192、新 token 512 的工况，注意力加索引侧从 64 微秒变为 657 微秒（每层）。这是三个错误里影响最大的一个。</p>
+    <p class="src"><b>依据</b>：DeepSeek-V3.2 报告（arXiv:2512.02556）；vLLM 官方博文 2025-09-29；FlashMLA 仓库的接口（每个 token 各带一份 2048 选中项）。</p>
+  </div>
+
+  <div class="card warn">
+    <h3>大错误二：漏了两道工序（F10），注意力口径也错（F11）</h3>
+    <p><b>错在哪</b>：其一，一层里 6 个投影矩阵（把数据送进注意力、再送回来）完全没算。其二，注意力核心按「每头 192＋256 维」数乘加，但它读的料是 576 维压缩格式。按真实 kernel 的口径（576＋512 维），乘加量是旧口径的 2.1 倍。</p>
+    <p><b>差多少</b>：投影每 token 每层 3.3 亿次乘加，占线性工序的三分之一。两项合计，旧版少算全部乘加的四分之一到三分之一。</p>
+    <p class="src"><b>依据</b>：MLA 定义见 DeepSeek-V3 报告（arXiv:2412.19437）；kernel 口径见 FlashMLA 稀疏 prefill 接口（输入 576 维，输出 512 维）。</p>
+  </div>
+
+  <div class="card warn">
+    <h3>大错误三：打分结果的写回量高估 16 倍（F9）</h3>
+    <p><b>错在哪</b>：旧版按「32 个头各写一份打分」计字节。真实 kernel 在内部把 32 个头加成一个分。每个（新 token，上下文 token）对只写一个数，不写 32 个。</p>
+    <p><b>差多少</b>：长上下文工况，这一项从每层 1686 微秒变为 341 微秒。修正后这项只由乘加决定，写多少字节不再影响结果。</p>
+    <p class="src"><b>依据</b>：DeepGEMM 仓库的 mqa_logits 说明（输出形状是二维，头在 kernel 内归约）。</p>
+  </div>
+
+  <table>
+    <caption>三个小错误</caption>
+    <tr><th>编号</th><th>错在哪</th><th>差多少</th></tr>
+    <tr><td>F5 单位</td><td>字节数按 1024 进制折算，带宽按 1000 进制给。两种进制混用。</td><td class="num">访存项低估 7%</td></tr>
+    <tr><td>F6 因果性</td><td>打分一律扫全文。第 i 个新 token 只看得到它前面的部分。</td><td class="num">首轮长输入高估到 2 倍</td></tr>
+    <tr><td>F4 通信</td><td>前 3 个 dense 层没有专家，却计了专家互连通信。</td><td class="num">3 层，量小</td></tr>
+  </table>
+</section>
+
+<section id="new">
+  <h2><span class="no">4</span>修正后的仿真</h2>
+  <p>修正共 11 项，编号 F1 到 F11，全部记录在两个脚本的文件头。每项写明依据，可以对照来源复查。修正后的数字如下。</p>
+
+  <div class="bars">
+    <div class="bar-row"><div class="lab">上下文 8k，新 64（多轮命中）</div>
+      <div class="bar-pair"><div class="bar old" style="width:29%"><span>旧 29.9 ms</span></div>
+      <div class="bar new" style="width:38%"><span>新 44.9 ms</span></div></div></div>
+    <div class="bar-row"><div class="lab">上下文 8k，新 512</div>
+      <div class="bar-pair"><div class="bar old" style="width:41%"><span>旧 45.2 ms</span></div>
+      <div class="bar new" style="width:54%"><span>新 91.6 ms</span></div></div></div>
+    <div class="bar-row"><div class="lab">上下文 8k，新 8192（无命中）</div>
+      <div class="bar-pair"><div class="bar old" style="width:64%"><span>旧 577 ms</span></div>
+      <div class="bar new" style="width:75%"><span>新 1324 ms</span></div></div></div>
+    <div class="bar-row"><div class="lab">上下文 64k，新 512</div>
+      <div class="bar-pair"><div class="bar old" style="width:42%"><span>旧 57.4 ms</span></div>
+      <div class="bar new" style="width:57%"><span>新 119 ms</span></div></div></div>
+    <div class="bar-row"><div class="lab">上下文 64k，新 8192</div>
+      <div class="bar-pair"><div class="bar old" style="width:64%"><span>旧 589 ms</span></div>
+      <div class="bar new" style="width:85%"><span>新 1695 ms</span></div></div></div>
+    <div class="bar-row"><div class="lab">上下文 64k，新 64k（首轮全量）</div>
+      <div class="bar-pair"><div class="bar old" style="width:88%"><span>旧 4559 ms</span></div>
+      <div class="bar new" style="width:100%"><span>新 12011 ms</span></div></div></div>
+  </div>
+  <p class="note">条形按毫秒数的对数等比画，长短只供比较，精确值看数字标签。每条是单请求 78 层的 prefill 计算时间。</p>
+
+  <table>
+    <caption>真实 trace 上的分布（Mooncake 三条 trace，共 39632 个请求）</caption>
+    <tr><th>trace</th><th class="num">请求数</th><th class="num">中位数</th><th class="num">p90</th><th class="num">p99</th><th class="num">新 ÷ 旧（总量）</th></tr>
+    <tr><td>conversation</td><td class="num">12031</td><td class="num">408 ms</td><td class="num">3181 ms</td><td class="num">13393 ms</td><td class="num">2.44</td></tr>
+    <tr><td>toolagent</td><td class="num">23608</td><td class="num">120 ms</td><td class="num">1642 ms</td><td class="num">8008 ms</td><td class="num">2.39</td></tr>
+    <tr><td>synthetic</td><td class="num">3993</td><td class="num">73 ms</td><td class="num">3173 ms</td><td class="num">8843 ms</td><td class="num">2.39</td></tr>
+  </table>
+
+  <details>
+    <summary>展开：bs 批处理的修正后行为（数据）</summary>
+    <p>上下文 65536、每卡 batch 增大时，每请求时间 ÷ 单请求时间：</p>
+    <table>
+      <tr><th>新 token 数</th><th class="num">bs=2</th><th class="num">bs=4</th><th class="num">bs=8</th><th>说明</th></tr>
+      <tr><td class="num">1</td><td class="num">0.68</td><td class="num">0.51</td><td class="num">0.43</td><td>访存受限：省料钱，但专家权重随卡数减半翻倍，省不满 1/N</td></tr>
+      <tr><td class="num">320</td><td class="num">0.94</td><td class="num">0.92</td><td class="num">0.91</td><td>换挡区</td></tr>
+      <tr><td class="num">8192</td><td class="num">1.00</td><td class="num">1.00</td><td class="num">1.00</td><td>算力受限：合批不省时</td></tr>
+    </table>
+    <p>守恒检查：每卡专家计算时间 ÷ bs 恒等于 425 微秒。计算量只随每卡 token 总数走，与分组方式无关。</p>
+  </details>
+
+  <p>结论变化只有一条：<b>「专家一家独大」不成立</b>。补齐漏掉的工序后，注意力加索引这一侧在 8k 上下文占 55%，64k 占 63%。长上下文时，打分的「新 token 数 × 上下文全长」二次项成为增长最快的部分。</p>
+</section>
+
+<section id="err">
+  <h2><span class="no">5</span>还剩多少误差</h2>
+  <p>误差分两层：模型内的假设，和模型外的系统开销。分开列。</p>
+
+  <h3>5.1 模型内的假设</h3>
+  <table>
+    <caption>保留的假设与影响（开关都写在脚本配置里）</caption>
+    <tr><th>假设</th><th>默认取值</th><th>影响</th><th>状态</th></tr>
+    <tr><td>KV 读取的复用程度</td><td>每层每请求的上下文至多读一遍（<code>kv_hbm_reuse=True</code>）</td><td>关掉开关则相关项大 30 到 40 倍</td><td>未确认：kernel 内精确复用因子。确认方法：读 kernel 源码或实测计数器</td></tr>
+    <tr><td>取 KV 与注意力各读一遍字节</td><td>沿用外部仿真器</td><td>两项都小（每层不超过 36 微秒）</td><td>保留，影响小</td></tr>
+    <tr><td>打分写回的数值格式</td><td>每对一个 32 位浮点</td><td>无影响（修正后这项只由乘加决定）</td><td>已验证：两种格式结果相同</td></tr>
+    <tr><td>GLM5 kernel 与 DeepSeek 参考实现同构</td><td>按参考实现算</td><td>若 GLM5 kernel 结构不同，打分与注意力两项要重算</td><td>未确认。确认方法：取 GLM5 kernel 规格</td></tr>
+    <tr><td>0.8 效率折扣</td><td>外部仿真器给定</td><td>线性影响全部计算项</td><td>未确认。确认方法：单算子实测</td></tr>
+  </table>
+
+  <h3>5.2 模型外的系统开销</h3>
+  <p>模型不含排队、专家负载不均、调度空洞、流水气泡、通信等待。对照真实生产数据：</p>
+  <table>
+    <caption>两个外部锚点</caption>
+    <tr><th>锚点</th><th>数值</th><th>与模型的关系</th></tr>
+    <tr><td>FlashMLA 稀疏 prefill，昇腾 950（kernel 级实测）</td><td class="num">410 TFLOPS＝峰值 95%</td><td>模型 FP16 有效算力 409.6 TFLOPS，与实测同值</td></tr>
+    <tr><td>DeepSeek-V3 生产集群，H800（系统级）</td><td>每节点 73700 token/s（含 56.3% 命中）</td><td>折算生产效率为峰值的 20% 到 30%。模型等效 63%</td></tr>
+  </table>
+  <p><b>使用边界</b>：比较两个方案、判断瓶颈在哪、排先后次序，结果可信。报告绝对时间或判定绝对 SLO，必须先用实测校准 0.8 折扣。校准前，把模型输出当作下界，真实系统再乘 2 到 3。</p>
+</section>
+
+<section id="proof">
+  <h2><span class="no">6</span>怎么知道修对了</h2>
+  <p>验证脚本 <code>prefill_time/validate_prefill_time.py</code> 一次运行产出全部证据。四道对账全部通过：</p>
+  <ol>
+    <li><b>与教科书对账</b>。独立数每道工序的乘加和字节，再算理论时间。算力受限区，脚本 ÷ 理论 = 1.000 到 1.07。多出的部分是固定开销，逐项可解释。</li>
+    <li><b>极限行为</b>。三段式曲线的换挡点落在解析值 320（见图 2）。公式是 算力 ÷（2 × 带宽）。</li>
+    <li><b>bs 自洽</b>。每卡专家计算时间 ÷ bs 恒定。「bs 个请求各 ut 个新 token」与「1 个请求 ut×bs 个新 token」在算力受限区比值 1.00 到 1.05。</li>
+    <li><b>外部锚点</b>。模型 FP16 有效算力 409.6 TFLOPS，与昇腾 950 上的实测 410 同值（见 5.2 表）。</li>
+  </ol>
+  <p>回归测试：仓库全量 <code>pytest tests/</code> 240 个用例通过，用时 488 秒。本次改动不进入 <code>sim/</code> 与 <code>tests/</code> 的任何代码路径。</p>
+</section>
+
+<section id="use">
+  <h2><span class="no">7</span>怎么用</h2>
+  <pre><code># 单请求：每行输出 per_layer_us（每层微秒）与 per_layer_kv_gb（每层 GB）
+python prefill_time/prefill_time_single.py [trace.jsonl]
+
+# 每卡 batch=4 跑同一条 trace（bs 超过 8 会告警）
+python prefill_time/prefill_time_batch.py [trace.jsonl] 4
+
+# 不带参数：默认读 mooncake_trace/derived/conversation_trace.jsonl.hit.jsonl</code></pre>
+  <p>代码调用：<code>per_request(input_length, u_tokens, bs)</code> 返回每层时间与每层 KV 字节；<code>per_batch([(il1, ut1), (il2, ut2)], bs)</code> 给长短混合的一批，按最长请求对齐计算（padding 上界），KV 按各请求精确求和。</p>
+  <p>输入 jsonl 必须含 <code>input_length</code> 与 <code>u_tokens</code> 两个字段。本仓库两套 trace 的口径：Mooncake 每 512 token 一块，AgentX 每 64 token 一块。容量与缓存结论不得跨 trace 互推。</p>
+</section>
+
+<section id="src">
+  <h2><span class="no">8</span>来源</h2>
+  <ol class="src">
+    <li>DeepSeek-V3.2 技术报告，arXiv:2512.02556。</li>
+    <li>DeepSeek-V3 技术报告（MLA 定义），arXiv:2412.19437。</li>
+    <li>vLLM 官方博文「DeepSeek-V3.2-Exp in vLLM」，2025-09-29，vllm.ai/blog/2025-09-29-deepseek-v3-2。</li>
+    <li>FlashMLA 仓库（稀疏 prefill 接口、昇腾 950 实测），github.com/deepseek-ai/FlashMLA。</li>
+    <li>DeepGEMM 仓库（mqa_logits 的头内归约），github.com/deepseek-ai/DeepGEMM。</li>
+    <li>DeepSeek-V3/R1 推理系统概览（生产吞吐与命中率），github.com/deepseek-ai/open-infra-index，2025 年 2 月开源周第 6 天。</li>
+    <li>本仓库验证文档 <code>docs/prefill_time计算时间仿真合理性验证-20261021.md</code> 与验证脚本 <code>prefill_time/validate_prefill_time.py</code>（提交 <code>1ad80ee</code>）。</li>
+  </ol>
+</section>
+
+</main>
+</body>
+</html>
