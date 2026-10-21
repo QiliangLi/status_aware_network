@@ -3,17 +3,12 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>prefill_time 仿真解释（2026-10-21）</title>
+<title>prefill_time 仿真解释（2026-10-21，第 2 版）</title>
 <style>
   :root {
-    --paper: #faf8f4;
-    --paper-2: #f1ede5;
-    --ink: #23272d;
-    --ink-2: #5b6470;
-    --line: #d8d2c6;
-    --accent: #0f6b62;        /* 青：新仿真 / 注意力侧 */
-    --accent-2: #b05518;      /* 橙：旧仿真 / 误差 */
-    --ok: #3a7d44;
+    --paper: #faf8f4; --paper-2: #f1ede5; --ink: #23272d; --ink-2: #5b6470;
+    --line: #d8d2c6; --accent: #0f6b62; --accent-soft: color-mix(in srgb, var(--accent) 10%, transparent);
+    --moe: #8a6d3b; --comm: #6b7280; --warn: #b05518; --ok: #3a7d44;
     --code-bg: #efeae0;
     --serif: "Songti SC", "Noto Serif CJK SC", serif;
     --sans: "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei", system-ui, sans-serif;
@@ -21,118 +16,156 @@
   @media (prefers-color-scheme: dark) {
     :root {
       --paper: #1c1f24; --paper-2: #24282f; --ink: #e6e3dc; --ink-2: #a7adb8;
-      --line: #3a4049; --accent: #4fc2b4; --accent-2: #e09a5d; --ok: #7ec98a;
-      --code-bg: #2a2f37;
+      --line: #3a4049; --accent: #4fc2b4; --accent-soft: color-mix(in srgb, #4fc2b4 12%, transparent);
+      --moe: #c9a56a; --comm: #9aa2af; --warn: #e09a5d; --ok: #7ec98a; --code-bg: #2a2f37;
     }
   }
   * { box-sizing: border-box; }
-  body {
-    margin: 0; background: var(--paper); color: var(--ink);
-    font-family: var(--sans); line-height: 1.75; font-size: 16px;
-  }
-  main { max-width: 920px; margin: 0 auto; padding: 0 20px 80px; }
+  body { margin: 0; background: var(--paper); color: var(--ink);
+         font-family: var(--sans); line-height: 1.8; font-size: 16px; }
+  main { max-width: 940px; margin: 0 auto; padding: 0 20px 80px; }
   header.hero { padding: 46px 0 10px; }
   .kicker { color: var(--accent); font-weight: 600; letter-spacing: .12em; font-size: 13px; }
-  h1 { font-family: var(--serif); font-size: 30px; line-height: 1.35; margin: 6px 0 4px; }
+  h1 { font-family: var(--serif); font-size: 29px; line-height: 1.4; margin: 6px 0 4px; }
   .meta { color: var(--ink-2); font-size: 13.5px; }
-  .meta code { font-size: 12.5px; }
-  nav.toc {
-    position: sticky; top: 0; z-index: 5; background: var(--paper);
-    border-bottom: 1px solid var(--line); margin: 18px -20px 0; padding: 8px 20px;
-    display: flex; gap: 4px 18px; flex-wrap: wrap; font-size: 13.5px;
-  }
+  nav.toc { position: sticky; top: 0; z-index: 5; background: var(--paper);
+            border-bottom: 1px solid var(--line); margin: 18px -20px 0; padding: 8px 20px;
+            display: flex; gap: 4px 18px; flex-wrap: wrap; font-size: 13.5px; }
   nav.toc a { color: var(--ink-2); text-decoration: none; white-space: nowrap; }
   nav.toc a:hover, nav.toc a:focus-visible { color: var(--accent); text-decoration: underline; }
-  h2 {
-    font-family: var(--serif); font-size: 22px; margin: 54px 0 6px;
-    border-bottom: 2px solid var(--line); padding-bottom: 6px;
-  }
-  section[id] { scroll-margin-top: 78px; }
+  h2 { font-family: var(--serif); font-size: 22px; margin: 56px 0 6px;
+       border-bottom: 2px solid var(--line); padding-bottom: 6px; }
   h2 .no { color: var(--accent); margin-right: 8px; font-family: var(--sans); font-size: 15px; }
-  h3 { font-size: 17px; margin: 26px 0 2px; }
+  h3 { font-size: 17px; margin: 28px 0 2px; }
   p { margin: 8px 0; }
-  section > p:first-of-type { margin-top: 10px; }
-  code { background: var(--code-bg); border-radius: 4px; padding: 1px 6px; font-size: 0.9em;
+  code { background: var(--code-bg); border-radius: 4px; padding: 1px 6px; font-size: .9em;
          font-family: "SF Mono", Menlo, Consolas, monospace; }
   pre { background: var(--code-bg); border-radius: 8px; padding: 14px 16px; overflow-x: auto;
         font-size: 13.5px; line-height: 1.7; }
   pre code { background: none; padding: 0; }
-  .verdict {
-    border: 1px solid var(--accent); border-left-width: 5px; border-radius: 8px;
-    background: color-mix(in srgb, var(--accent) 7%, transparent);
-    padding: 14px 18px; margin: 22px 0;
-  }
+  .verdict { border: 1px solid var(--accent); border-left-width: 5px; border-radius: 8px;
+             background: var(--accent-soft); padding: 14px 18px; margin: 22px 0; }
   .verdict h3 { margin: 0 0 6px; color: var(--accent); }
   .verdict ul { margin: 4px 0 2px; padding-left: 20px; }
-  .verdict li { margin: 4px 0; }
+  .verdict li { margin: 5px 0; }
   table { border-collapse: collapse; width: 100%; margin: 14px 0; font-size: 14px; }
   th, td { border: 1px solid var(--line); padding: 7px 10px; text-align: left; vertical-align: top; }
   th { background: var(--paper-2); font-weight: 600; }
   td.num, th.num { text-align: right; font-variant-numeric: tabular-nums; white-space: nowrap; }
   caption { caption-side: top; text-align: left; color: var(--ink-2); font-size: 13px; padding-bottom: 6px; }
-  figure { margin: 22px 0; }
+  figure { margin: 24px 0; }
   figure svg { width: 100%; height: auto; display: block; }
   figcaption { color: var(--ink-2); font-size: 13.5px; margin-top: 8px; }
   figcaption b { color: var(--ink); }
-  .dl { display: grid; grid-template-columns: 150px 1fr; gap: 8px 18px; margin: 12px 0; }
-  .dl dt { font-weight: 600; color: var(--ink); }
-  .dl dd { margin: 0; color: var(--ink); }
+  .dl { display: grid; grid-template-columns: 160px 1fr; gap: 8px 18px; margin: 12px 0; }
+  .dl dt { font-weight: 600; }
+  .dl dd { margin: 0; }
   .dl dt .en { color: var(--ink-2); font-weight: 400; font-size: 12.5px; }
-  .card { border: 1px solid var(--line); border-radius: 10px; padding: 14px 18px; margin: 14px 0; }
-  .card.warn { border-left: 5px solid var(--accent-2); }
+  .card { border: 1px solid var(--line); border-left: 5px solid var(--warn);
+          border-radius: 10px; padding: 14px 18px; margin: 14px 0; }
   .card h3 { margin-top: 0; }
-  .card .impact { color: var(--accent-2); font-weight: 600; }
+  .card .where { color: var(--accent); font-size: 13.5px; }
+  .card .impact { color: var(--warn); font-weight: 600; }
   .card .src { color: var(--ink-2); font-size: 13px; }
+  .note { color: var(--ink-2); font-size: 13.5px; }
+
+  /* ---- 结构图（一层内部） ---- */
+  .layermap { border: 1px solid var(--line); border-radius: 12px; padding: 18px 20px 8px; margin: 18px 0; }
+  .zone { border: 1px dashed var(--line); border-radius: 10px; padding: 12px 14px 10px; margin: 12px 0; position: relative; }
+  .zone.att { border-color: var(--accent); }
+  .zone.moe { border-color: var(--moe); }
+  .zone > .zlab { position: absolute; top: -13px; left: 14px; background: var(--paper);
+                  padding: 0 10px; font-weight: 700; font-size: 14px; }
+  .zone.att > .zlab { color: var(--accent); }
+  .zone.moe > .zlab { color: var(--moe); }
+  .step { display: grid; grid-template-columns: 30px 1fr; gap: 10px; padding: 8px 0; }
+  .step + .step { border-top: 1px dotted var(--line); }
+  .step .n { width: 26px; height: 26px; border-radius: 50%; background: var(--accent);
+             color: var(--paper); font-size: 13px; display: flex; align-items: center;
+             justify-content: center; font-weight: 700; margin-top: 2px; }
+  .zone.moe .step .n { background: var(--moe); }
+  .zone.comm .step .n { background: var(--comm); }
+  .step h4 { margin: 0; font-size: 15px; display: inline; }
+  .step p { margin: 3px 0 0; font-size: 14px; color: var(--ink); }
+  .dims { display: inline-block; margin-left: 8px; font-size: 12.5px; color: var(--ink-2);
+          font-variant-numeric: tabular-nums; }
+  .hs { display: flex; align-items: center; gap: 10px; margin: 6px 0; color: var(--ink-2); font-size: 13.5px; }
+  .hs .vec { border: 1.5px solid var(--ink-2); border-radius: 6px; padding: 1px 10px; font-variant-numeric: tabular-nums; }
+  .hs .arr { flex: none; }
+
+  /* ---- 交互计算器 ---- */
+  .calc { border: 1px solid var(--accent); border-radius: 12px; padding: 16px 20px; margin: 18px 0;
+          background: var(--accent-soft); }
+  .calc h3 { margin-top: 0; }
+  .calc .ctl { display: grid; grid-template-columns: 130px 1fr 96px; gap: 10px; align-items: center; margin: 10px 0; }
+  .calc label { font-size: 14px; }
+  .calc input[type=range] { width: 100%; accent-color: var(--accent); }
+  .calc .val { font-variant-numeric: tabular-nums; text-align: right; font-size: 14px; }
+  .presets { display: flex; gap: 8px; flex-wrap: wrap; margin: 8px 0 2px; }
+  .presets button { border: 1px solid var(--accent); background: var(--paper); color: var(--accent);
+                    border-radius: 99px; padding: 2px 12px; font-size: 13px; cursor: pointer; }
+  .presets button[aria-pressed="true"] { background: var(--accent); color: var(--paper); }
+  .presets button:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+  .calc .out { margin-top: 12px; }
+  .calc .headline { font-size: 15px; margin: 6px 0; }
+  .calc .headline b { font-variant-numeric: tabular-nums; }
+  .opbar { display: grid; grid-template-columns: 120px 1fr 86px; gap: 10px; align-items: center; margin: 5px 0; }
+  .opbar .lab { font-size: 13px; text-align: right; color: var(--ink-2); }
+  .opbar .track { background: var(--paper-2); border-radius: 4px; height: 15px; overflow: hidden; }
+  .opbar .fill { height: 15px; border-radius: 4px; }
+  .opbar .v { font-size: 13px; font-variant-numeric: tabular-nums; color: var(--ink-2); }
+
   .bars { margin: 10px 0; }
   .bar-row { display: grid; grid-template-columns: 210px 1fr; gap: 12px; align-items: center; margin: 9px 0; }
   .bar-row .lab { font-size: 13.5px; text-align: right; color: var(--ink-2); }
   .bar-pair { display: grid; grid-template-rows: 14px 14px; gap: 3px; padding-right: 92px; }
   .bar { height: 14px; border-radius: 3px; min-width: 2px; position: relative; }
-  .bar.old { background: var(--accent-2); opacity: .55; }
+  .bar.old { background: var(--warn); opacity: .55; }
   .bar.new { background: var(--accent); }
   .bar span { position: absolute; left: calc(100% + 8px); top: -3px; font-size: 12.5px;
               font-variant-numeric: tabular-nums; color: var(--ink-2); white-space: nowrap; }
   details { border: 1px solid var(--line); border-radius: 8px; padding: 10px 16px; margin: 12px 0; }
   summary { cursor: pointer; font-weight: 600; }
   summary:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
-  .note { color: var(--ink-2); font-size: 13.5px; }
-  .tag { display: inline-block; border: 1px solid var(--line); border-radius: 99px;
-         padding: 0 9px; font-size: 12px; color: var(--ink-2); margin-right: 6px; }
+  .worked { border-left: 4px solid var(--accent); background: var(--paper-2);
+            border-radius: 0 8px 8px 0; padding: 12px 16px; margin: 14px 0; }
+  .worked pre { background: var(--paper); margin: 8px 0 0; }
   ol.src { padding-left: 22px; font-size: 14px; }
   ol.src li { margin: 4px 0; word-break: break-all; }
+  section[id] { scroll-margin-top: 78px; }
   @media (max-width: 640px) {
     .dl { grid-template-columns: 1fr; gap: 2px 0; }
     .dl dd { margin-bottom: 8px; }
     .bar-row { grid-template-columns: 1fr; gap: 4px; }
     .bar-row .lab { text-align: left; }
     .bar-pair { padding-right: 72px; }
+    .calc .ctl { grid-template-columns: 96px 1fr 84px; }
+    .opbar { grid-template-columns: 92px 1fr 78px; }
     table { display: block; overflow-x: auto; }
     td.num { white-space: normal; }
   }
-  @media print {
-    nav.toc { display: none; }
-    body { background: #fff; }
-  }
+  @media print { nav.toc, .calc { display: none; } body { background: #fff; } }
 </style>
 </head>
 <body>
 <main>
 
 <header class="hero">
-  <div class="kicker">仿真解释文档</div>
-  <h1>prefill_time：这套计算时间仿真是怎么算的，旧版错在哪，还差多少</h1>
-  <p class="meta">日期 2026-10-21 ｜ 对象 <code>prefill_time/prefill_time_single.py</code>（单请求）与 <code>prefill_time_batch.py</code>（任意 batch） ｜ 修正提交 <code>1ad80ee</code> ｜ 原始版入库 <code>bd8422d</code> ｜ 详细验证见 <code>docs/prefill_time计算时间仿真合理性验证-20261021.md</code></p>
+  <div class="kicker">仿真解释文档 · 第 2 版（补模型结构）</div>
+  <h1>prefill_time：模型长什么样，时间为什么能这样算，旧版错在哪</h1>
+  <p class="meta">日期 2026-10-21 ｜ 对象 <code>prefill_time/prefill_time_single.py</code> 与 <code>prefill_time_batch.py</code> ｜ 修正提交 <code>1ad80ee</code> ｜ 详细验证 <code>docs/prefill_time计算时间仿真合理性验证-20261021.md</code></p>
 </header>
 
 <nav class="toc" aria-label="目录">
   <a href="#tldr">结论</a>
   <a href="#terms">术语</a>
-  <a href="#what">在算什么</a>
-  <a href="#how">仿真原理</a>
-  <a href="#old">旧版三个错误</a>
-  <a href="#new">修正后的仿真</a>
-  <a href="#err">还剩多少误差</a>
-  <a href="#proof">怎么知道修对了</a>
+  <a href="#model">模型结构</a>
+  <a href="#why">为什么能算</a>
+  <a href="#sim">仿真的原理</a>
+  <a href="#old">旧版错误</a>
+  <a href="#new">修正后的数字</a>
+  <a href="#err">剩余误差</a>
+  <a href="#proof">对账</a>
   <a href="#use">怎么用</a>
   <a href="#src">来源</a>
 </nav>
@@ -141,123 +174,162 @@
   <div class="verdict">
     <h3>三句话结论</h3>
     <ul>
-      <li>这套脚本回答一个问题：<b>一个请求（或一批请求）做 prefill，芯片要算多久、要从存储搬多少 KV 缓存</b>。它不算排队，不算网络，只算芯片上一层流水线的纯计算时间。</li>
-      <li>旧版把「逐字生成答案」的公式拿来算「一次算完新输入」，漏掉随新 token 数增长的全部注意力计算，还漏掉两道工序。修正后，真实 trace 上的 prefill 时延估计变为旧版的 <b>2.4 倍</b>。</li>
-      <li>修正版与教科书公式逐项对账通过。但它是「理想车间」的下界：真实生产系统还要慢 <b>2 到 3 倍</b>。用它比较方案快慢可信；用它报绝对时间，必须先校准。</li>
+      <li>GLM5 的全部计算都是<b>矩阵乘</b>。矩阵乘的代价只由形状决定。形状全部写在模型配置里。所以每个 token 的计算时间可以事先数出来——这就是仿真成立的原因（§2）。</li>
+      <li>旧版把「逐字生成」的公式拿来算「一次算完新输入」，又漏掉两道工序。修正后，真实 trace 上的 prefill 时延估计变为旧版的 <b>2.4 倍</b>（§4、§5）。</li>
+      <li>修正版与教科书逐项对账通过。但它是「理想车间」：不含排队与调度，真实生产系统再慢 <b>2 到 3 倍</b>（§6）。比较方案可信；报绝对时间必须先校准。</li>
     </ul>
   </div>
 </section>
 
 <section id="terms">
   <h2><span class="no">0</span>术语</h2>
-  <p>本文的专用词都在本节定义。定义按本文用法写。读者只读本文即可，不需要别的材料。</p>
+  <p>本文的专用词都在本节定义。读者只读本文即可。</p>
   <dl class="dl">
-    <dt>token <span class="en">／词元</span></dt><dd>模型读写的最小文字单位。一个汉字约等于一到两个 token。</dd>
-    <dt>上下文 <span class="en">／context</span></dt><dd>一次请求里已有的全部 token。模型回答问题前，先读完整段上下文。</dd>
-    <dt>prefill <span class="en">／预填充</span></dt><dd>把新收到的输入 token 一次算完。本文仿真的对象。输入越长，prefill 越久。</dd>
+    <dt>token</dt><dd>模型读写的最小文字单位。一个汉字约等于一到两个 token。</dd>
+    <dt>上下文</dt><dd>一次请求里已有的全部 token。模型回答前，先读完整段上下文。</dd>
+    <dt>prefill <span class="en">／预填充</span></dt><dd>把新收到的输入 token 一次算完。本文仿真的对象。</dd>
     <dt>decode <span class="en">／解码</span></dt><dd>答案逐字生成。每个步骤只算一个新 token。本文仿真不算 decode。</dd>
-    <dt>层 <span class="en">／layer</span></dt><dd>模型的计算单元。GLM5 有 78 层，全部串行。数据穿过 78 层，答案才出来。</dd>
-    <dt>注意力 <span class="en">／attention</span></dt><dd>每层的工序之一。每个新 token 回看上下文，找出与它相关的部分，再合并信息。</dd>
-    <dt>MLA</dt><dd>注意力用的压缩记忆格式。每个 token 的记忆压缩成 576 个数。本文称这段压缩记忆为「KV 向量」。</dd>
-    <dt>KV 缓存 <span class="en">／KV cache</span></dt><dd>已算过的上下文 token 的 KV 向量集合。存起来后，再次对话不必重算旧的部分。</dd>
-    <dt>前缀命中 <span class="en">／prefix hit</span></dt><dd>新请求的上下文开头与缓存里已有的一段完全相同。命中的部分不用重算，但它的 KV 向量必须搬进芯片内存。</dd>
-    <dt>DSA 稀疏注意力</dt><dd>GLM5 用的省力版注意力。新 token 不回看全文，只看打分最高的 2048 个 token。打分由「索引器」完成。</dd>
-    <dt>索引器 <span class="en">／lightning indexer</span></dt><dd>每层的小打分网络。它给上下文的每个 token 打一个分。之后取分数最高的 2048 个。</dd>
-    <dt>top-2048</dt><dd>每个新 token 实际回看的 token 数量上限。这是 DSA 的固定参数。</dd>
-    <dt>MoE 专家</dt><dd>每层有 256 个「专家」小网络。每个 token 只走 8 个，另加 1 个所有 token 都走的共享专家。选哪些专家由路由器决定。</dd>
-    <dt>NPU</dt><dd>算力芯片。本仿真用型号 D950PR：FP8 每秒 1024 万亿次乘加，FP16 每秒 512 万亿次，内存带宽每秒 1600 GB。</dd>
-    <dt>HBM <span class="en">／高速内存</span></dt><dd>NPU 卡上的内存。权重和 KV 向量都放在这里。带宽每秒 1600 GB（十进制）。</dd>
-    <dt>FLOPs</dt><dd>浮点乘加次数。乘一次加一次计 2 次。做一道乘法题的工作量单位。</dd>
-    <dt>算力受限</dt><dd>一道工序的用时由「做多少乘加」决定。料已在手边，手速不够。</dd>
-    <dt>访存受限</dt><dd>一道工序的用时由「搬多少字节」决定。手速够快，等料。</dd>
-    <dt>roofline</dt><dd>本文仿真的核心公式。一道工序的用时取两个值的较大者：乘加数 ÷ 算力，字节数 ÷ 带宽。</dd>
+    <dt>层</dt><dd>模型的计算单元。GLM5 有 78 层，串成一列。数据穿过 78 层，答案才出来。</dd>
+    <dt>隐状态</dt><dd>一个 token 在模型内部的表示：6144 个数组成的向量。每层把它变换一次。</dd>
+    <dt>矩阵乘 <span class="en">／GEMM</span></dt><dd>一组数乘一张权重表，得到一组新数。模型的全部计算由它拼成。</dd>
+    <dt>FLOPs</dt><dd>浮点乘加次数。乘一次加一次计 2 次。做一道矩阵乘的工作量单位。</dd>
+    <dt>FP8 / FP16</dt><dd>每个数占 1 字节 / 2 字节的浮点格式。</dd>
+    <dt>峰值算力</dt><dd>芯片每秒乘加次数的上限。D950PR：FP8 每秒 1024 万亿次，FP16 每秒 512 万亿次。</dd>
+    <dt>NPU</dt><dd>算力芯片。本仿真用型号 D950PR。</dd>
+    <dt>HBM</dt><dd>NPU 卡上的高速内存。权重和缓存都放在这里。带宽每秒 1600 GB（十进制）。</dd>
     <dt>kernel</dt><dd>芯片上执行一道工序的程序。启动一个 kernel 有 7 微秒固定开销。</dd>
-    <dt>DP <span class="en">／数据并行</span></dt><dd>32 张卡各拿不同的请求，各算各的。每张卡存全部权重。</dd>
-    <dt>EP <span class="en">／专家并行</span></dt><dd>256 个专家平摊到 32 张卡，每卡 8 个。token 的专家部分经互连总线送到专家所在的卡。</dd>
-    <dt>bs <span class="en">／每卡 batch</span></dt><dd>一张卡同时 prefill 的请求数。脚本约定：bs 增大时，DP 卡数 = 32 ÷ bs。全局并发恒为 32 个请求重新分组。</dd>
-    <dt>input_length</dt><dd>trace 里的字段。上下文全长，单位 token。含本次的新 token。</dd>
-    <dt>u_tokens</dt><dd>trace 里的字段。本次要 prefill 的新 token 数。等于上下文全长减去命中的部分。</dd>
+    <dt>注意力 <span class="en">／attention</span></dt><dd>每层的第一块。token 之间在这里交换信息：带着问题去查上下文。</dd>
+    <dt>头</dt><dd>注意力里并行的 64 套打分与加权。各自有自己的问句。</dd>
+    <dt>MLA</dt><dd>注意力用的压缩格式。一个 token 在一层的记忆压成 576 个数。</dd>
+    <dt>KV 向量</dt><dd>一个 token 在一层的压缩记忆：576 个数。全体上下文的 KV 向量合称 KV 缓存。</dd>
+    <dt>摘要</dt><dd>一个 token 留给打分器看的 128 个数。打分只看摘要，不看全文。</dd>
+    <dt>DSA 稀疏注意力</dt><dd>GLM5 的省力版注意力：先给全文打分，每个新 token 只细看分数最高的 2048 个 token。</dd>
+    <dt>索引器 <span class="en">／lightning indexer</span></dt><dd>每层的打分网络。给每个（新 token，旧 token）对打一个分。</dd>
+    <dt>top-2048</dt><dd>每个新 token 实际细看的 token 数上限。DSA 的固定参数。</dd>
+    <dt>MoE 专家</dt><dd>每层的第二块：256 个「专家」小网络。每个 token 只走 8 个，另加 1 个共享专家。</dd>
+    <dt>路由器 <span class="en">／router</span></dt><dd>每层开头的小网络。按 token 的隐状态挑 8 个专家。</dd>
+    <dt>DP <span class="en">／数据并行</span></dt><dd>32 张卡各拿不同的请求。每张卡存全部权重。</dd>
+    <dt>EP <span class="en">／专家并行</span></dt><dd>256 个专家平摊到 32 张卡，每卡 8 个。token 经互连总线送到专家所在的卡。</dd>
+    <dt>bs <span class="en">／每卡 batch</span></dt><dd>一张卡同时 prefill 的请求数。脚本约定：bs 增大时 DP 卡数 = 32 ÷ bs，全局并发恒为 32 个请求重新分组。</dd>
+    <dt>算力受限 / 访存受限</dt><dd>一道工序的用时由乘加数决定（料在手边，手速不够），或由搬运字节数决定（手速够快，等料）。</dd>
+    <dt>roofline</dt><dd>本文仿真的核心公式。工序用时取较大者：乘加数 ÷ 算力，字节数 ÷ 带宽。</dd>
+    <dt>input_length / u_tokens</dt><dd>trace 的两个字段。前者是上下文全长（含新 token），后者是本次要算的新 token 数。</dd>
   </dl>
 </section>
 
-<section id="what">
-  <h2><span class="no">1</span>这套仿真在算什么</h2>
-  <p>一个请求到达时，上下文有两部分。前缀命中的部分不必重算，但它的 KV 向量要从存储搬进 HBM。新到的部分（u_tokens 个）必须逐层算完。这套仿真回答两个数：</p>
-  <ul>
-    <li><b>每层计算时间</b>（微秒）。新 token 穿过一层流水线要多久。乘 78 层，得到这个请求的 prefill 计算时间。</li>
-    <li><b>每层 KV 加载量</b>（GB）。命中前缀的 KV 向量一共多少字节。这个数给存储调度研究用。</li>
-  </ul>
-  <p>数据穿过一层，要经过 7 道工序。下图按真实比例画出典型工况（上下文 8192、新 token 512）下每道工序的耗时。</p>
+<section id="model">
+  <h2><span class="no">1</span>模型长什么样</h2>
+  <p>要理解仿真，先要看清两件事：一个 token 在一层里走什么路；这条路要经过哪些矩阵乘。本节从零讲结构。</p>
 
+  <h3>1.1 全景：78 层的塔</h3>
+  <p>模型是一个函数：读一段 token，写出下一个 token。内部是 78 层完全相同的结构，串成一列。一个 token 进入模型后，不再是一个字，而是 6144 个数，叫隐状态。每层把隐状态变换一次。第 78 层之后，隐状态接词表，变成下一个 token 的概率。</p>
   <figure>
-    <svg viewBox="0 0 860 300" role="img" aria-label="一层流水线的七道工序耗时占比条形图">
+    <svg viewBox="0 0 860 210" role="img" aria-label="78 层串联的全景图">
       <style>
-        .seg { stroke: var(--paper); stroke-width: 2; }
-        .lbl { font: 12px var(--sans); fill: var(--ink); }
-        .sub { font: 11px var(--sans); fill: var(--ink-2); }
-        .axl { font: 600 13px var(--sans); fill: var(--ink); }
+        .bx { fill: var(--paper-2); stroke: var(--ink-2); }
+        .t1 { font: 13px var(--sans); fill: var(--ink); }
+        .t2 { font: 12px var(--sans); fill: var(--ink-2); }
       </style>
-      <text x="10" y="24" class="axl">一层 = 7 道工序，总耗时 1184 微秒（上下文 8192，新 token 512，单卡单请求）</text>
-      <!-- 占比条：注意力侧 657us(55%) | MoE 425us(36%) | 通信 103us(9%)，x 起点 10，总宽 840 -->
-      <g>
-        <rect x="10"  y="50" width="467" height="44" rx="6" fill="var(--accent)" class="seg"/>
-        <rect x="479" y="50" width="302" height="44" rx="6" fill="#8a6d3b" class="seg"/>
-        <rect x="783" y="50" width="65"  height="44" rx="6" fill="#6b7280" class="seg"/>
-        <text x="244" y="77" text-anchor="middle" fill="#fff" font-weight="600">注意力＋索引侧 55%</text>
-        <text x="630" y="77" text-anchor="middle" fill="#fff" font-weight="600">专家 36%</text>
-        <text x="815" y="77" text-anchor="middle" fill="#fff" font-weight="600">通信</text>
-      </g>
-      <!-- 明细：宽度按 657us 区间内占比 -->
-      <g>
-        <rect x="10"  y="140" width="7"   height="26" fill="var(--accent)"/>
-        <rect x="19"  y="140" width="34"  height="26" fill="var(--accent)" opacity=".85"/>
-        <rect x="55"  y="140" width="9"   height="26" fill="var(--accent)" opacity=".7"/>
-        <rect x="66"  y="140" width="258" height="26" fill="var(--accent)" opacity=".55"/>
-        <rect x="326" y="140" width="151" height="26" fill="var(--accent)" opacity=".4"/>
-        <rect x="479" y="140" width="302" height="26" fill="#8a6d3b"/>
-        <rect x="783" y="140" width="65"  height="26" fill="#6b7280"/>
-      </g>
-      <text x="10"  y="132" class="sub">① 索引器投影 10 微秒</text>
-      <text x="19"  y="188" class="sub">② 打分 48</text>
-      <text x="66"  y="188" class="sub">③ 取 KV 13</text>
-      <text x="90"  y="132" class="sub">④ 注意力核心 364 微秒（FP16）</text>
-      <text x="330" y="132" class="sub">⑤ MLA 投影 222</text>
-      <text x="480" y="132" class="sub">⑥ 专家（8 路由＋1 共享）425 微秒（FP8）</text>
-      <text x="786" y="188" class="sub">⑦ 通信 103</text>
-      <line x1="10" y1="210" x2="850" y2="210" stroke="var(--line)"/>
-      <text x="10" y="238" class="lbl">工序①② 打分：新 token 各自给全文打分，选 top-2048。</text>
-      <text x="10" y="262" class="lbl">工序③④ 只看选中的 2048 个 token：先把它们的 KV 向量取来，再做注意力。</text>
-      <text x="10" y="286" class="lbl">工序⑤⑥⑦ 把结果投影回原空间、过专家网络、卡间送取数据。</text>
+      <rect x="150" y="16"  width="240" height="26" rx="6" class="bx"/><text x="270" y="34" text-anchor="middle" class="t1">第 78 层（最后一层）</text>
+      <rect x="150" y="50"  width="240" height="26" rx="6" class="bx"/><text x="270" y="68" text-anchor="middle" class="t1">第 77 层</text>
+      <rect x="150" y="86"  width="240" height="26" rx="6" class="bx"/>
+      <text x="270" y="104" text-anchor="middle" class="t2">……同样结构共 78 层……</text>
+      <rect x="150" y="122" width="240" height="26" rx="6" class="bx"/><text x="270" y="140" text-anchor="middle" class="t1">第 2 层</text>
+      <rect x="150" y="156" width="240" height="26" rx="6" class="bx"/><text x="270" y="174" text-anchor="middle" class="t1">第 1 层</text>
+      <line x1="270" y1="196" x2="270" y2="190" stroke="var(--ink-2)"/>
+      <text x="120" y="174" text-anchor="end" class="t2">输入：token 进塔</text>
+      <text x="120" y="192" text-anchor="end" class="t2">每个 token 变成 6144 个数</text>
+      <text x="410" y="34" class="t2">出塔：隐状态接词表</text>
+      <text x="410" y="52" class="t2">得到下一个 token</text>
+      <text x="410" y="110" class="t2">每一层内部完全相同：</text>
+      <text x="410" y="128" class="t2">注意力块 ＋ 专家块（见下图）</text>
+      <text x="410" y="146" class="t2">时间 = 一层时间 × 78</text>
     </svg>
-    <figcaption><b>读法</b>：上条是三块大头，下条是七道工序的明细，宽度都按耗时等比。注意力加索引这一侧占 55%，专家占 36%。「旧版认为专家一家独大」的判断不成立。</figcaption>
+    <figcaption><b>读法</b>：78 层结构相同。仿真只需算清一层的两条路（注意力块、专家块），再乘 78。</figcaption>
   </figure>
 
-  <p>两个脚本只差一点：<code>prefill_time_single.py</code> 固定一张卡算一个请求；<code>prefill_time_batch.py</code> 允许一张卡同时算 bs 个请求，另给「一批长短不同的请求」的估法。两者的算子公式逐字相同。</p>
+  <h3>1.2 一层的内部：两条路</h3>
+  <p>隐状态进入一层后，先走<b>注意力块</b>，再走<b>专家块</b>，离开时仍是 6144 个数。注意力块让 token 之间传信息：新 token 带着问题，去查旧 token 的记忆。专家块对每个 token 独立加工：查完的信息在这里深度变换。两块都是矩阵乘的堆叠。</p>
+
+  <div class="layermap">
+    <div class="hs"><span class="vec">隐状态 6144 个数</span><span class="arr">→</span><span>进入本层</span></div>
+
+    <div class="zone att">
+      <span class="zlab">注意力块（新 token 查上下文）</span>
+      <div class="step"><div class="n">1</div><div>
+        <h4>造问句</h4><span class="dims">6144 → 2048 → 64 头 × 256 数</span>
+        <p>两次矩阵乘（q_a、q_b）。每个头得到自己的问句。问题决定了这个 token 要找什么。</p></div></div>
+      <div class="step"><div class="n">2</div><div>
+        <h4>逐个打分</h4><span class="dims">新 token 的问句 × 每个旧 token 的摘要（128 数）</span>
+        <p>索引器给上下文的每个 token 打一个分。上下文有多长，就打多少次分。这是唯一随上下文变长的乘法。</p></div></div>
+      <div class="step"><div class="n">3</div><div>
+        <h4>选 top-2048，取出记忆</h4><span class="dims">2048 份 × 576 数</span>
+        <p>按分数排序，取最高的 2048 个 token。从 KV 缓存取出它们的压缩记忆。</p></div></div>
+      <div class="step"><div class="n">4</div><div>
+        <h4>注意力核心：64 个头各自加权求和</h4><span class="dims">每头 2048 条 ×（问 576 ＋ 答 512）</span>
+        <p>每个头用自己的问句与 2048 份记忆逐条算相关度，再按相关度加权求和。这一步是注意力真正「读」内容的地方。</p></div></div>
+      <div class="step"><div class="n">5</div><div>
+        <h4>收尾投影，回到 6144</h4><span class="dims">每头 512 → 256，汇成 64 × 256 → 6144</span>
+        <p>两次矩阵乘（W_UV、o）。64 个头的结果合并，投影回隐状态的原尺寸。</p></div></div>
+    </div>
+
+    <div class="zone moe">
+      <span class="zlab">专家块（每个 token 独立加工）</span>
+      <div class="step"><div class="n">6</div><div>
+        <h4>路由器选 8 个专家，逐个加工</h4><span class="dims">每个专家：6144 → 2048 → 2048 → 6144</span>
+        <p>256 个专家里选 8 个，加 1 个共享专家。每个专家是三次矩阵乘。8 个专家的结果相加。</p></div></div>
+    </div>
+
+    <div class="zone comm" style="border-style:dashed">
+      <span class="zlab" style="color:var(--comm)">跨卡搬运（随专家块发生）</span>
+      <div class="step"><div class="n">7</div><div>
+        <h4>dispatch 与 combine</h4><span class="dims">每个 token 的 6144 个数 × 往返</span>
+        <p>专家分散在 32 张卡上。token 的数据先送去专家所在的卡，算完再接回来。走互连总线，不走 HBM。</p></div></div>
+    </div>
+
+    <div class="hs"><span class="arr">→</span><span class="vec">隐状态 6144 个数</span><span>交给下一层</span></div>
+  </div>
+  <p class="note">上图的 7 个编号就是仿真的 7 道工序。第 6 步每层只发生一次（token 的 8 个专家并行）。KV 缓存不占上图版面：它就是全部旧 token 的压缩记忆，放在 HBM 里，第 3 步从这里取。</p>
+
+  <h3>1.3 prefill 与 decode 走同一条路，但人数不同</h3>
+  <p>prefill 一次送来 u_tokens 个新 token。每个新 token 都要完整走一遍这 7 步：都要造问句、都要给全文打分、都要选 top-2048、都要过专家。这是理解旧版错误的钥匙：token 数量翻倍，这条路的计算量就翻倍。</p>
+  <p>decode 每次只有 1 个新 token 走这条路。旧版仿真抄来的公式，正是按「每次 1 个 token」写的。</p>
 </section>
 
-<section id="how">
-  <h2><span class="no">2</span>仿真原理</h2>
+<section id="why">
+  <h2><span class="no">2</span>为什么时间可以这样算</h2>
 
-  <h3>2.1 每道工序：roofline</h3>
-  <p>每道工序的用时取两个值的较大者：</p>
-  <pre><code>工序用时 = max( 乘加次数 ÷ 有效算力 , 搬运字节数 ÷ 有效带宽 ) ＋ 固定开销</code></pre>
-  <p>有效算力 = 峰值 × 0.8。这个 0.8 是外部仿真器给的折扣，代表 kernel 级效率。固定开销含每次 7 微秒的 kernel 启动，和每 128 条数据一次的流水线下限。roofline 说的是：料少时等料（访存受限），料多时比手速（算力受限）。交点在「每份权重摊到 320 个 token」附近。这个数有公式：算力 ÷（2 × 带宽）＝ 320。</p>
+  <h3>2.1 全部计算都是矩阵乘，矩阵乘的代价只由形状决定</h3>
+  <p>一条路再长，也只是矩阵乘的串联。一次矩阵乘的代价由两个数完全决定：</p>
+  <pre><code>乘加次数 = 2 × 输入个数 × 输出个数
+搬运字节 = 权重（输入个数 × 输出个数 × 每数字节）＋ 激活（输入 ＋ 输出）</code></pre>
+  <p>输入个数、输出个数都写在模型配置里，是常数。所以<b>每个新 token 在每层触发的乘加次数与搬运字节，全部可以事先数出来</b>。芯片速度也是常数。时间 = 工作量 ÷ 速度。没有别的来源。</p>
+
+  <div class="worked">
+    <p><b>手算一遍：第 5 步的 o 投影（每个 token）。</b>输入 64 头 × 256 数 = 16384 个数，输出 6144 个数，权重用 FP8（每数 1 字节）。</p>
+    <pre><code>乘加次数 = 2 × 16384 × 6144 = 2.01 亿次
+权重字节 = 16384 × 6144 × 1 字节 ≈ 100.7 MB
+时间上限一 = 2.01 亿 ÷ 8192 亿/秒 = 0.246 微秒   （有效算力 = 峰值 1024 × 0.8）
+时间上限二 = 100.7 MB ÷ 1280 GB/秒 = 0.079 微秒   （有效带宽 = 1600 × 0.8）
+o 投影用时 = max(0.246, 0.079) = 0.246 微秒       （算力受限）</code></pre>
+    <p class="note">仿真器对每道工序做同样的三行计算，全部工序相加，再乘 78 层。这就是仿真的全部原理。</p>
+  </div>
+
+  <h3>2.2 roofline：先等料，还是先比手速</h3>
+  <p>一次矩阵乘的时间取两个上限的较大者。token 少时，权重读是主导：一张 100 MB 的权重表，摊给 1 个 token 还是摊给 1000 个 token，差别巨大。token 多时，乘加是主导：每个 token 的乘加数固定，加 token 只加手速时间。换挡点在「每份权重摊到 320 个 token」，公式是 算力 ÷（2 × 带宽）＝ 320。</p>
 
   <figure>
-    <svg viewBox="0 0 860 330" role="img" aria-label="每 token 耗时随 token 数的三段式曲线与 roofline 两条边界线">
+    <svg viewBox="0 0 860 330" role="img" aria-label="每 token 耗时随 token 数的三段式曲线">
       <style>
         .ax { stroke: var(--ink-2); stroke-width: 1; }
-        .grid { stroke: var(--line); stroke-width: .7; stroke-dasharray: 3 4; }
         .lbl { font: 12px var(--sans); fill: var(--ink-2); }
         .lbl-ink { font: 12px var(--sans); fill: var(--ink); }
         .tlt { font: 600 13px var(--sans); fill: var(--ink); }
       </style>
-      <!-- 坐标区 x:70..830, y:30..260; x=log2(M) 0..16; y=log10(us) 0..3 -->
       <line class="ax" x1="70" y1="260" x2="830" y2="260"/>
       <line class="ax" x1="70" y1="260" x2="70" y2="30"/>
       <text class="tlt" x="450" y="316" text-anchor="middle">每份权重摊到的 token 数（对数轴）</text>
       <text class="tlt" x="26" y="150" transform="rotate(-90 26 150)" text-anchor="middle">每 token 每层耗时（微秒，对数轴）</text>
-      <!-- x 刻度 1,8,64,320,1024,8192,65536 -> log2 = 0,3,6,8.32,10,13,16 -->
       <g>
         <text class="lbl" x="70"  y="278" text-anchor="middle">1</text>
         <text class="lbl" x="212" y="278" text-anchor="middle">8</text>
@@ -266,22 +338,17 @@
         <text class="lbl" x="548" y="278" text-anchor="middle">1024</text>
         <text class="lbl" x="690" y="278" text-anchor="middle">8192</text>
         <text class="lbl" x="830" y="278" text-anchor="middle">65536</text>
-        <!-- y 刻度 1,10,100,1000 -->
         <text class="lbl" x="60" y="264" text-anchor="end">1</text>
         <text class="lbl" x="60" y="191" text-anchor="end">10</text>
         <text class="lbl" x="60" y="117" text-anchor="end">100</text>
         <text class="lbl" x="60" y="44"  text-anchor="end">1000</text>
       </g>
-      <!-- ridge 竖线 M=320 -> x=465 -->
       <line x1="465" y1="30" x2="465" y2="260" stroke="var(--accent)" stroke-width="1.2" stroke-dasharray="5 4"/>
       <text class="lbl-ink" x="473" y="44" fill="var(--accent)">ridge ≈ 320</text>
-      <!-- 访存摊薄线 402/M: M=1:402us(y=?) log10(402)=2.604 -> y=260-2.604/3*230=60.3; M=8:50.3->176.1; M=64:6.3->227.5; M=155:2.59->248.1 -->
-      <path d="M 70 60 L 212 176 L 355 228 L 452 248" fill="none" stroke="var(--accent-2)" stroke-width="1.6" stroke-dasharray="7 5"/>
-      <text x="86" y="70" class="lbl" fill="var(--accent-2)">访存摊薄线：权重读 ÷ token 数</text>
-      <!-- 算力平台线 2.3us -> log10=0.362 -> y=232.3 -->
-      <line x1="70" y1="232" x2="830" y2="232" stroke="var(--accent-2)" stroke-width="1.6" stroke-dasharray="7 5"/>
-      <text x="620" y="226" class="lbl" fill="var(--accent-2)">算力平台线：乘加数 ÷ 算力</text>
-      <!-- 脚本真实点 (M,us): 1:616->log=2.79,y=46.4; 8:77.5->1.889,y=115.1; 64:10.8->1.033,y=180.8; 320:3.02->0.480,y=223.2; 1024:2.67->0.427,y=227.3; 8192:2.58->0.412,y=228.4; 65536:2.29->0.360,y=232.4 -->
+      <path d="M 70 60 L 212 176 L 355 228 L 452 248" fill="none" stroke="var(--warn)" stroke-width="1.6" stroke-dasharray="7 5"/>
+      <text x="86" y="70" class="lbl" fill="var(--warn)">访存摊薄线：权重读 ÷ token 数</text>
+      <line x1="70" y1="232" x2="830" y2="232" stroke="var(--warn)" stroke-width="1.6" stroke-dasharray="7 5"/>
+      <text x="620" y="226" class="lbl" fill="var(--warn)">算力平台线：乘加数 ÷ 算力</text>
       <g fill="var(--ink)">
         <circle cx="70"  cy="46"  r="4"/><circle cx="212" cy="115" r="4"/>
         <circle cx="355" cy="181" r="4"/><circle cx="465" cy="223" r="4"/>
@@ -293,7 +360,6 @@
       <text x="363" y="177" class="lbl-ink">10.8</text>
       <text x="473" y="215" class="lbl-ink">3.02</text>
       <text x="698" y="222" class="lbl-ink">2.58</text>
-      <!-- 区域标注 -->
       <text x="150" y="150" class="lbl-ink">访存受限区</text>
       <text x="150" y="167" class="lbl">等料：加 token 就省料钱</text>
       <text x="600" y="255" class="lbl-ink">算力受限区</text>
@@ -302,69 +368,109 @@
     <figcaption><b>读法</b>：点是脚本输出（上下文 65536，单卡单请求），虚线是 roofline 的两条边界。左侧点贴着访存摊薄线，右侧点贴着算力平台线，中间 320 附近换挡。点高出虚线的部分是固定开销（kernel 启动与流水线下限）。</figcaption>
   </figure>
 
-  <h3>2.2 两个输入怎么影响工序</h3>
+  <h3>2.3 三个为什么</h3>
   <table>
-    <caption>输入字段与各工序的关系（逐 token 的工作量）</caption>
-    <tr><th>工序</th><th>乘加量由什么决定</th><th>每 token 每层乘加</th><th>精度</th></tr>
-    <tr><td>① 索引器投影</td><td>固定</td><td class="num">17 MFLOPs</td><td>FP8</td></tr>
-    <tr><td>② 打分</td><td>新 token 数 × 上下文全长（唯一的二次项）</td><td class="num">65（上下文 8k）到 536（64k）</td><td>FP8</td></tr>
-    <tr><td>③ 取 KV</td><td>最多 2048 条，且不超过上下文</td><td class="num">—（按字节计）</td><td>FP8 字节</td></tr>
-    <tr><td>④ 注意力核心</td><td>固定：2048 条 × 64 头 ×（576＋512）维</td><td class="num">285 MFLOPs</td><td>FP16</td></tr>
-    <tr><td>⑤ MLA 投影</td><td>固定：6 个投影矩阵</td><td class="num">330 MFLOPs</td><td>FP8</td></tr>
-    <tr><td>⑥ 专家</td><td>固定：9 个专家 × 3 个矩阵</td><td class="num">680 MFLOPs</td><td>FP8</td></tr>
-    <tr><td>⑦ 通信</td><td>新 token 数（卡间送取）</td><td class="num">—（按字节计）</td><td>—</td></tr>
+    <tr><th>问题</th><th>答案</th></tr>
+    <tr><td>为什么每个新 token 的计算量相同？</td><td>同一条路、同一批矩阵。路里唯一的变量是上下文长度：它只影响第 2 步打分。</td></tr>
+    <tr><td>为什么上下文变长，只有注意力侧变贵？</td><td>第 2 步要给每个旧 token 打分：乘加 = 新 token 数 × 上下文全长。专家块只看当前 token，与上下文无关。</td></tr>
+    <tr><td>为什么一层的工序可以直接相加？</td><td>工序串行，一层的时间是各工序时间之和。78 层结构相同，再乘 78。</td></tr>
   </table>
-  <p>线性部分（①⑤⑥，加 dense 层的 MLP）折合每 token 乘以 79.6 亿次乘加，相当于激活参数 397 亿。同类的 DeepSeek-V3 是 370 亿。数量级一致。</p>
+</section>
 
-  <h3>2.3 bs 语义</h3>
-  <p>脚本约定：bs 是每卡请求数。bs 增大时，DP 卡数按 32 ÷ bs 减少，全局仍是 32 个请求重新分组。两个后果：</p>
+<section id="sim">
+  <h2><span class="no">3</span>仿真 = 把结构翻译成公式</h2>
+
+  <h3>3.1 七道工序的映射表</h3>
+  <table>
+    <caption>结构部件 ↔ 工序 ↔ 形状 ↔ 每个 token 每层的乘加</caption>
+    <tr><th>结构部件</th><th>形状（每 token）</th><th class="num">乘加</th><th>精度</th></tr>
+    <tr><td>① 造问句（索引器自己的小问句）</td><td>2048 → 4096</td><td class="num">1700 万</td><td>FP8</td></tr>
+    <tr><td>② 打分（索引器核心）</td><td>4096 × 上下文全长</td><td class="num">6.5 亿（上下文 8k）到 53.6 亿（64k）</td><td>FP8</td></tr>
+    <tr><td>③ 选 top-2048、取记忆</td><td>2048 份 × 576 数</td><td class="num">按字节计</td><td>FP8 字节</td></tr>
+    <tr><td>④ 注意力核心</td><td>64 头 × 2048 ×（576＋512）</td><td class="num">2.85 亿</td><td>FP16</td></tr>
+    <tr><td>⑤ 收尾与造问的全部投影</td><td>6 个矩阵（见 §1.2）</td><td class="num">3.30 亿</td><td>FP8</td></tr>
+    <tr><td>⑥ 专家（8 路由＋1 共享）</td><td>9 × 三次矩阵乘</td><td class="num">6.80 亿</td><td>FP8</td></tr>
+    <tr><td>⑦ 跨卡搬运</td><td>6144 数 × 往返</td><td class="num">按字节计</td><td>—</td></tr>
+  </table>
+  <p>第 ⑤ 行合计 6 个矩阵：q_a、q_b、W_UK（问句进潜空间）、kv_a（造记忆）、W_UV、o。对照 §1.2 的结构图逐个可见。线性部分（①⑤⑥）折合每 token 乘 79.6 亿次乘加，相当于激活参数 397 亿。同类的 DeepSeek-V3 是 370 亿。</p>
+
+  <h3>3.2 亲手算：交互计算器</h3>
+  <p>下面计算器用的是与两个脚本<b>完全相同</b>的公式（含固定开销）。拖动滑块，看两件事：新 token 数翻倍时哪些工序翻倍；上下文变长时只有打分在涨。</p>
+
+  <div class="calc">
+    <h3>一层时间计算器（单卡单请求，bs=1）</h3>
+    <div class="presets" role="group" aria-label="典型工况">
+      <button type="button" data-il="8192"  data-ut="512">多轮命中：8k／512</button>
+      <button type="button" data-il="8192"  data-ut="64">高命中：8k／64</button>
+      <button type="button" data-il="65536" data-ut="8192">长上下文：64k／8k</button>
+      <button type="button" data-il="8192"  data-ut="8192">首轮全量：8k／8k</button>
+    </div>
+    <div class="ctl">
+      <label for="ilRange">上下文全长</label>
+      <input id="ilRange" type="range" min="10" max="17" step="1" value="13">
+      <span class="val" id="ilVal">8192</span>
+    </div>
+    <div class="ctl">
+      <label for="utRange">新 token 数</label>
+      <input id="utRange" type="range" min="1" max="17" step="1" value="9">
+      <span class="val" id="utVal">512</span>
+    </div>
+    <div class="out" id="calcOut" aria-live="polite"></div>
+  </div>
+  <p class="note">计算器已用四组工况与 Python 脚本对数：工况（8192, 512）一层 1184 微秒、78 层 91.6 毫秒，与脚本输出一致。</p>
+
+  <h3>3.3 两个脚本与 bs 语义</h3>
+  <p><code>prefill_time_single.py</code> 固定一张卡算一个请求。<code>prefill_time_batch.py</code> 允许一张卡同时算 bs 个请求。两者的算子公式逐字相同。</p>
+  <p>bs 的语义要看清：bs 增大时，DP 卡数按 32 ÷ bs 减少。全局仍是 32 个请求重新分组，每卡本地专家数变为 8 × bs。后果有两条：</p>
   <ul>
-    <li>每卡的专家数变为 8 × bs。访存受限时，每卡要读的专家权重也变为 bs 倍。</li>
-    <li>每卡的总 token 数 = bs × 新 token 数。计算量只随这个总数走，与分组方式无关。</li>
+    <li>每卡的 token 总数 = bs × 新 token 数。计算量只随这个总数走，与分组无关（守恒检查见 §7）。</li>
+    <li>访存受限时，每卡要读的专家权重变为 bs 倍。所以批处理只在访存受限区省时间。</li>
   </ul>
-  <p>因此，批处理只在访存受限区省时间。新 token 多的时候（算力受限），合批不省时间。这符合推理服务的常识：合批对逐字生成收益大，对长输入 prefill 收益小。</p>
 
-  <h3>2.4 KV 加载量</h3>
-  <p>命中前缀有 1408 字节每 token 每层（MLA 向量 1152 ＋ 索引 K 256）。全部 78 层相加，得到这个请求要从存储搬的总字节数。这个口径与仓库存储调度实验（E23 系列）一致。</p>
+  <h3>3.4 KV 加载量</h3>
+  <p>命中前缀的每个 token 每层 1408 字节（压缩记忆 576 数 × 2 字节，加摘要 128 数 × 2 字节）。78 层相加得到总加载量。这个口径与仓库存储调度实验（E23 系列）一致，供存储侧研究用。</p>
 </section>
 
 <section id="old">
-  <h2><span class="no">3</span>旧版仿真错在哪</h2>
-  <p>旧版抄自外部仿真器（文件 GBK 编码，在 Python 3 下无法运行，已修）。除编码外，有三个大错误和三个小错误。每个错误写四项：错在哪、差多少、怎么发现、依据。</p>
+  <h2><span class="no">4</span>旧版仿真错在哪</h2>
+  <p>旧版抄自外部仿真器（文件 GBK 编码，在 Python 3 下无法运行，已修）。对照 §1.2 的结构图，三个大错误和三个小错误都落在具体位置上。</p>
 
-  <div class="card warn">
-    <h3>大错误一：拿「逐字生成」的公式算「一次算完新输入」（F1）</h3>
-    <p><b>错在哪</b>：旧版的打分、取 KV、注意力核心都不随新 token 数增长。那是 decode 的算法：每步只算一个 token。prefill 的新 token 有几百到几万个，每个都要打分、选 top-2048、做注意力。</p>
-    <p><b>差多少</b>：上下文 8192、新 token 512 的工况，注意力加索引侧从 64 微秒变为 657 微秒（每层）。这是三个错误里影响最大的一个。</p>
-    <p class="src"><b>依据</b>：DeepSeek-V3.2 报告（arXiv:2512.02556）；vLLM 官方博文 2025-09-29；FlashMLA 仓库的接口（每个 token 各带一份 2048 选中项）。</p>
+  <div class="card">
+    <h3>大错误一：把「每次 1 个 token」的公式用于「一次 ut 个 token」（F1）</h3>
+    <p class="where">结构位置：①②③④ 全部。§1.3 说过，每个新 token 都要完整走一遍这条路。</p>
+    <p><b>错在哪</b>：旧版的打分、取记忆、注意力核心不随新 token 数增长。那是 decode 的算法（每次 1 个 token）。prefill 的新 token 有几百到几万个。</p>
+    <p><b>差多少</b>：上下文 8192、新 token 512 的工况，注意力加索引侧从 64 微秒变为 657 微秒（每层）。三个错误里影响最大。</p>
+    <p class="src"><b>依据</b>：DeepSeek-V3.2 报告（arXiv:2512.02556）；vLLM 官方博文 2025-09-29；FlashMLA 接口（每个 token 各带一份 2048 选中项）。</p>
   </div>
 
-  <div class="card warn">
-    <h3>大错误二：漏了两道工序（F10），注意力口径也错（F11）</h3>
-    <p><b>错在哪</b>：其一，一层里 6 个投影矩阵（把数据送进注意力、再送回来）完全没算。其二，注意力核心按「每头 192＋256 维」数乘加，但它读的料是 576 维压缩格式。按真实 kernel 的口径（576＋512 维），乘加量是旧口径的 2.1 倍。</p>
-    <p><b>差多少</b>：投影每 token 每层 3.3 亿次乘加，占线性工序的三分之一。两项合计，旧版少算全部乘加的四分之一到三分之一。</p>
+  <div class="card">
+    <h3>大错误二：漏了第 ⑤ 步的投影（F10），第 ④ 步口径也错（F11）</h3>
+    <p class="where">结构位置：⑤ 的 6 个矩阵没算；④ 按「每头 192＋256」数乘加，但读的料是 576 维压缩记忆。</p>
+    <p><b>错在哪</b>：6 个投影矩阵全部漏掉。第 ④ 步的真实 kernel 在压缩空间工作（576＋512 维），乘加量是旧口径的 2.1 倍。</p>
+    <p><b>差多少</b>：投影每 token 每层 3.3 亿次乘加，占线性工序三分之一。两项合计，旧版少算全部乘加的四分之一到三分之一。</p>
     <p class="src"><b>依据</b>：MLA 定义见 DeepSeek-V3 报告（arXiv:2412.19437）；kernel 口径见 FlashMLA 稀疏 prefill 接口（输入 576 维，输出 512 维）。</p>
   </div>
 
-  <div class="card warn">
-    <h3>大错误三：打分结果的写回量高估 16 倍（F9）</h3>
-    <p><b>错在哪</b>：旧版按「32 个头各写一份打分」计字节。真实 kernel 在内部把 32 个头加成一个分。每个（新 token，上下文 token）对只写一个数，不写 32 个。</p>
-    <p><b>差多少</b>：长上下文工况，这一项从每层 1686 微秒变为 341 微秒。修正后这项只由乘加决定，写多少字节不再影响结果。</p>
-    <p class="src"><b>依据</b>：DeepGEMM 仓库的 mqa_logits 说明（输出形状是二维，头在 kernel 内归约）。</p>
+  <div class="card">
+    <h3>大错误三：打分写回量高估 16 倍（F9）</h3>
+    <p class="where">结构位置：② 的收尾动作——把分数写回内存。</p>
+    <p><b>错在哪</b>：旧版按「32 个头各写一份分数」计字节。真实 kernel 在内部把 32 个头加成一个分。每个（新 token，旧 token）对只写一个数。</p>
+    <p><b>差多少</b>：长上下文工况，这一项从每层 1686 微秒变为 341 微秒。修正后这项只由乘加决定。</p>
+    <p class="src"><b>依据</b>：DeepGEMM 仓库的 mqa_logits 说明（输出是二维，头在 kernel 内归约）。</p>
   </div>
 
   <table>
     <caption>三个小错误</caption>
-    <tr><th>编号</th><th>错在哪</th><th>差多少</th></tr>
-    <tr><td>F5 单位</td><td>字节数按 1024 进制折算，带宽按 1000 进制给。两种进制混用。</td><td class="num">访存项低估 7%</td></tr>
-    <tr><td>F6 因果性</td><td>打分一律扫全文。第 i 个新 token 只看得到它前面的部分。</td><td class="num">首轮长输入高估到 2 倍</td></tr>
-    <tr><td>F4 通信</td><td>前 3 个 dense 层没有专家，却计了专家互连通信。</td><td class="num">3 层，量小</td></tr>
+    <tr><th>编号</th><th>结构位置</th><th>错在哪</th><th class="num">差多少</th></tr>
+    <tr><td>F5 单位</td><td>全部工序</td><td>字节数按 1024 进制折算，带宽按 1000 进制给。</td><td class="num">访存项低估 7%</td></tr>
+    <tr><td>F6 因果性</td><td>② 打分</td><td>一律扫全文。第 i 个新 token 只看得到它前面的部分。</td><td class="num">首轮长输入高估到 2 倍</td></tr>
+    <tr><td>F4 通信</td><td>⑦ 搬运</td><td>前 3 层没有专家，却计了专家搬运。</td><td class="num">3 层，量小</td></tr>
   </table>
 </section>
 
 <section id="new">
-  <h2><span class="no">4</span>修正后的仿真</h2>
-  <p>修正共 11 项，编号 F1 到 F11，全部记录在两个脚本的文件头。每项写明依据，可以对照来源复查。修正后的数字如下。</p>
+  <h2><span class="no">5</span>修正后的数字</h2>
+  <p>修正共 11 项，编号 F1 到 F11，全部记录在脚本文件头，每项写明依据。修正前后对比如下。</p>
 
   <div class="bars">
     <div class="bar-row"><div class="lab">上下文 8k，新 64（多轮命中）</div>
@@ -386,7 +492,7 @@
       <div class="bar-pair"><div class="bar old" style="width:88%"><span>旧 4559 ms</span></div>
       <div class="bar new" style="width:100%"><span>新 12011 ms</span></div></div></div>
   </div>
-  <p class="note">条形按毫秒数的对数等比画，长短只供比较，精确值看数字标签。每条是单请求 78 层的 prefill 计算时间。</p>
+  <p class="note">条形按毫秒数的对数等比画，精确值看数字标签。每条是单请求 78 层的 prefill 计算时间。</p>
 
   <table>
     <caption>真实 trace 上的分布（Mooncake 三条 trace，共 39632 个请求）</caption>
@@ -401,56 +507,55 @@
     <p>上下文 65536、每卡 batch 增大时，每请求时间 ÷ 单请求时间：</p>
     <table>
       <tr><th>新 token 数</th><th class="num">bs=2</th><th class="num">bs=4</th><th class="num">bs=8</th><th>说明</th></tr>
-      <tr><td class="num">1</td><td class="num">0.68</td><td class="num">0.51</td><td class="num">0.43</td><td>访存受限：省料钱，但专家权重随卡数减半翻倍，省不满 1/N</td></tr>
-      <tr><td class="num">320</td><td class="num">0.94</td><td class="num">0.92</td><td class="num">0.91</td><td>换挡区</td></tr>
-      <tr><td class="num">8192</td><td class="num">1.00</td><td class="num">1.00</td><td class="num">1.00</td><td>算力受限：合批不省时</td></tr>
+      <tr><td class="num">1</td><td class="num">0.68</td><td class="num">0.51</td><td class="num">0.43</td><td>访存受限：省料钱。专家权重随卡数减少翻倍，省不满 1/N。</td></tr>
+      <tr><td class="num">320</td><td class="num">0.94</td><td class="num">0.92</td><td class="num">0.91</td><td>换挡区。</td></tr>
+      <tr><td class="num">8192</td><td class="num">1.00</td><td class="num">1.00</td><td class="num">1.00</td><td>算力受限：合批不省时。</td></tr>
     </table>
-    <p>守恒检查：每卡专家计算时间 ÷ bs 恒等于 425 微秒。计算量只随每卡 token 总数走，与分组方式无关。</p>
+    <p>守恒检查：每卡专家计算时间 ÷ bs 恒等于 425 微秒。计算量只随每卡 token 总数走。</p>
   </details>
 
-  <p>结论变化只有一条：<b>「专家一家独大」不成立</b>。补齐漏掉的工序后，注意力加索引这一侧在 8k 上下文占 55%，64k 占 63%。长上下文时，打分的「新 token 数 × 上下文全长」二次项成为增长最快的部分。</p>
+  <p>结论变化只有一条：<b>「专家一家独大」不成立</b>。补齐漏掉的工序后，注意力加索引这一侧在 8k 上下文占 55%，64k 占 63%。长上下文时，第 ② 步打分的「新 token 数 × 上下文全长」二次项成为增长最快的部分。</p>
 </section>
 
 <section id="err">
-  <h2><span class="no">5</span>还剩多少误差</h2>
-  <p>误差分两层：模型内的假设，和模型外的系统开销。分开列。</p>
+  <h2><span class="no">6</span>还剩多少误差</h2>
 
-  <h3>5.1 模型内的假设</h3>
+  <h3>6.1 模型内的假设</h3>
   <table>
-    <caption>保留的假设与影响（开关都写在脚本配置里）</caption>
+    <caption>保留的假设与影响（开关写在脚本配置里）</caption>
     <tr><th>假设</th><th>默认取值</th><th>影响</th><th>状态</th></tr>
-    <tr><td>KV 读取的复用程度</td><td>每层每请求的上下文至多读一遍（<code>kv_hbm_reuse=True</code>）</td><td>关掉开关则相关项大 30 到 40 倍</td><td>未确认：kernel 内精确复用因子。确认方法：读 kernel 源码或实测计数器</td></tr>
-    <tr><td>取 KV 与注意力各读一遍字节</td><td>沿用外部仿真器</td><td>两项都小（每层不超过 36 微秒）</td><td>保留，影响小</td></tr>
-    <tr><td>打分写回的数值格式</td><td>每对一个 32 位浮点</td><td>无影响（修正后这项只由乘加决定）</td><td>已验证：两种格式结果相同</td></tr>
-    <tr><td>GLM5 kernel 与 DeepSeek 参考实现同构</td><td>按参考实现算</td><td>若 GLM5 kernel 结构不同，打分与注意力两项要重算</td><td>未确认。确认方法：取 GLM5 kernel 规格</td></tr>
-    <tr><td>0.8 效率折扣</td><td>外部仿真器给定</td><td>线性影响全部计算项</td><td>未确认。确认方法：单算子实测</td></tr>
+    <tr><td>KV 读取的复用程度</td><td>每层每请求的上下文至多读一遍（<code>kv_hbm_reuse=True</code>）</td><td>关掉开关则相关项大 30 到 40 倍</td><td>未确认：kernel 内精确复用因子。确认方法：读 kernel 源码或实测计数器。</td></tr>
+    <tr><td>第 ③ 步与第 ④ 步各读一遍字节</td><td>沿用外部仿真器</td><td>两项都小（每层不超过 36 微秒）</td><td>保留，影响小。</td></tr>
+    <tr><td>打分写回的数值格式</td><td>每对一个 32 位浮点</td><td>无影响（修正后这项只由乘加决定）</td><td>已验证：两种格式结果相同。</td></tr>
+    <tr><td>GLM5 kernel 与 DeepSeek 参考实现同构</td><td>按参考实现算</td><td>若 GLM5 kernel 结构不同，第 ②④ 步要重算</td><td>未确认。确认方法：取 GLM5 kernel 规格。</td></tr>
+    <tr><td>0.8 效率折扣</td><td>外部仿真器给定</td><td>线性影响全部计算项</td><td>未确认。确认方法：单算子实测。</td></tr>
   </table>
 
-  <h3>5.2 模型外的系统开销</h3>
+  <h3>6.2 模型外的系统开销</h3>
   <p>模型不含排队、专家负载不均、调度空洞、流水气泡、通信等待。对照真实生产数据：</p>
   <table>
     <caption>两个外部锚点</caption>
     <tr><th>锚点</th><th>数值</th><th>与模型的关系</th></tr>
-    <tr><td>FlashMLA 稀疏 prefill，昇腾 950（kernel 级实测）</td><td class="num">410 TFLOPS＝峰值 95%</td><td>模型 FP16 有效算力 409.6 TFLOPS，与实测同值</td></tr>
-    <tr><td>DeepSeek-V3 生产集群，H800（系统级）</td><td>每节点 73700 token/s（含 56.3% 命中）</td><td>折算生产效率为峰值的 20% 到 30%。模型等效 63%</td></tr>
+    <tr><td>FlashMLA 稀疏 prefill，昇腾 950（kernel 级实测）</td><td class="num">410 TFLOPS＝峰值 95%</td><td>模型 FP16 有效算力 409.6 TFLOPS，与实测同值。</td></tr>
+    <tr><td>DeepSeek-V3 生产集群，H800（系统级）</td><td>每节点 73700 token/s（含 56.3% 命中）</td><td>折算生产效率为峰值的 20% 到 30%。模型等效 63%。</td></tr>
   </table>
   <p><b>使用边界</b>：比较两个方案、判断瓶颈在哪、排先后次序，结果可信。报告绝对时间或判定绝对 SLO，必须先用实测校准 0.8 折扣。校准前，把模型输出当作下界，真实系统再乘 2 到 3。</p>
 </section>
 
 <section id="proof">
-  <h2><span class="no">6</span>怎么知道修对了</h2>
+  <h2><span class="no">7</span>怎么知道修对了</h2>
   <p>验证脚本 <code>prefill_time/validate_prefill_time.py</code> 一次运行产出全部证据。四道对账全部通过：</p>
   <ol>
-    <li><b>与教科书对账</b>。独立数每道工序的乘加和字节，再算理论时间。算力受限区，脚本 ÷ 理论 = 1.000 到 1.07。多出的部分是固定开销，逐项可解释。</li>
-    <li><b>极限行为</b>。三段式曲线的换挡点落在解析值 320（见图 2）。公式是 算力 ÷（2 × 带宽）。</li>
+    <li><b>与教科书对账</b>。独立数每道工序的乘加和字节，再算理论时间。算力受限区，脚本 ÷ 理论 = 1.000 到 1.07。多出部分是固定开销，逐项可解释。</li>
+    <li><b>极限行为</b>。三段式曲线的换挡点落在解析值 320（见 §2.2 图）。</li>
     <li><b>bs 自洽</b>。每卡专家计算时间 ÷ bs 恒定。「bs 个请求各 ut 个新 token」与「1 个请求 ut×bs 个新 token」在算力受限区比值 1.00 到 1.05。</li>
-    <li><b>外部锚点</b>。模型 FP16 有效算力 409.6 TFLOPS，与昇腾 950 上的实测 410 同值（见 5.2 表）。</li>
+    <li><b>外部锚点</b>。模型 FP16 有效算力 409.6 TFLOPS，与昇腾 950 实测 410 同值（见 §6.2）。</li>
   </ol>
   <p>回归测试：仓库全量 <code>pytest tests/</code> 240 个用例通过，用时 488 秒。本次改动不进入 <code>sim/</code> 与 <code>tests/</code> 的任何代码路径。</p>
 </section>
 
 <section id="use">
-  <h2><span class="no">7</span>怎么用</h2>
+  <h2><span class="no">8</span>怎么用</h2>
   <pre><code># 单请求：每行输出 per_layer_us（每层微秒）与 per_layer_kv_gb（每层 GB）
 python prefill_time/prefill_time_single.py [trace.jsonl]
 
@@ -458,12 +563,12 @@ python prefill_time/prefill_time_single.py [trace.jsonl]
 python prefill_time/prefill_time_batch.py [trace.jsonl] 4
 
 # 不带参数：默认读 mooncake_trace/derived/conversation_trace.jsonl.hit.jsonl</code></pre>
-  <p>代码调用：<code>per_request(input_length, u_tokens, bs)</code> 返回每层时间与每层 KV 字节；<code>per_batch([(il1, ut1), (il2, ut2)], bs)</code> 给长短混合的一批，按最长请求对齐计算（padding 上界），KV 按各请求精确求和。</p>
+  <p>代码调用：<code>per_request(input_length, u_tokens, bs)</code> 返回每层时间与每层 KV 字节；<code>per_batch([(il1, ut1), (il2, ut2)], bs)</code> 给长短混合的一批，按最长请求对齐计算，KV 按各请求精确求和。</p>
   <p>输入 jsonl 必须含 <code>input_length</code> 与 <code>u_tokens</code> 两个字段。本仓库两套 trace 的口径：Mooncake 每 512 token 一块，AgentX 每 64 token 一块。容量与缓存结论不得跨 trace 互推。</p>
 </section>
 
 <section id="src">
-  <h2><span class="no">8</span>来源</h2>
+  <h2><span class="no">9</span>来源</h2>
   <ol class="src">
     <li>DeepSeek-V3.2 技术报告，arXiv:2512.02556。</li>
     <li>DeepSeek-V3 技术报告（MLA 定义），arXiv:2412.19437。</li>
@@ -474,6 +579,127 @@ python prefill_time/prefill_time_batch.py [trace.jsonl] 4
     <li>本仓库验证文档 <code>docs/prefill_time计算时间仿真合理性验证-20261021.md</code> 与验证脚本 <code>prefill_time/validate_prefill_time.py</code>（提交 <code>1ad80ee</code>）。</li>
   </ol>
 </section>
+
+<script>
+(function () {
+  "use strict";
+  // 与 prefill_time_batch.py 相同的公式（bs=1，dp=ep=32，tp=1），含固定开销。
+  var F8 = 819.2e12, F16 = 409.6e12, B = 1280e9, NL = 2000e9, ST = 350e9;
+  var LAUNCH = 7, FLOOR_MLA = 0.35, FLOOR_MOE = 0.55;
+  function roof(cal, bytes) {           // bytes 已含每数字节
+    return Math.max(cal / F8 * 1e6, bytes / B * 1e6);
+  }
+  function computeOps(il, ut) {
+    var nq = ut;
+    var sl = Math.max(1, il - ut / 2);
+    var entries = Math.min(ut * 2048, il);        // KV 并集条目
+    // ① 索引器问句投影
+    var iq = roof(2 * nq * 2048 * 4096, nq * (2048 + 4096) + 2048 * 4096);
+    // ② 打分（cal 受限为主；tile 结构与脚本一致）
+    var cal2 = 2 * nq * 32 * 128 * sl;
+    var byt2 = nq * 4096 + sl * 128 + nq * sl * 4;
+    var ni = Math.max(1, Math.ceil(sl / 128));
+    var score = ni * Math.max(cal2 / F8 * 1e6 / ni, byt2 / B * 1e6 / ni, FLOOR_MLA) + LAUNCH;
+    // ③ 取 KV（并集条目）
+    var data3 = entries * 576;
+    var ti = entries / 1e12 * 1e6, tb = data3 / B * 1e6;
+    var gather = 16 * Math.max(ti / 16, tb / 16, FLOOR_MLA) + LAUNCH;
+    // ④ 注意力核心（absorb：576＋512，FP16）
+    var cal4 = 2 * nq * 64 * 2048 * (576 + 512);
+    var byt4 = nq * 64 * 576 * 2 + entries * 576 + nq * 64 * 512 * 2;
+    var attn = 16 * Math.max(cal4 / F16 * 1e6 / 16, byt4 / B * 1e6 / 16, FLOOR_MOE) + LAUNCH;
+    // ⑤ 六个投影＋索引器 K 投影（FP8）
+    var dims = [[6144, 2048], [2048, 16384], [12288, 512], [6144, 576], [32768, 256], [16384, 6144], [6144, 128]];
+    var proj = 0;
+    dims.forEach(function (d) {
+      proj += roof(2 * nq * d[0] * d[1], nq * (d[0] + d[1]) + d[0] * d[1]);
+    });
+    // ⑥ 专家（8 路由＋1 共享；每 token 每 256/32=8 个本地专家各 1 份）
+    var dim = 6144, mi = 2048, bsr = Math.max(ut, 1), bss = ut, nr = 8;
+    var moe = roof(2*bss*dim*mi, bss*dim + dim*mi + bss*mi)
+            + roof(2*bss*dim*mi, bss*mi + dim*mi + bss*dim)
+            + roof(2*bss*dim*mi, bss*dim + dim*mi + bss*mi);
+    [[bsr*dim+dim*mi, bsr*mi], [bsr*mi+dim*mi, bsr*dim], [bsr*dim+dim*mi, bsr*mi]].forEach(function (g) {
+      moe += roof(2 * bsr * dim * mi, g[0] + g[1]) * nr;
+    });
+    // dense 层的 MLP（代替专家）
+    var inter = 12288;
+    var mlp = roof(2*ut*dim*inter, ut*dim + dim*inter + ut*inter)
+            + roof(2*ut*dim*inter, ut*inter + dim*inter + ut*dim)
+            + roof(2*ut*inter*dim, ut*inter + dim*inter + ut*dim);
+    // ⑦ 通信：dispatch＋combine（MoE 层）与稀疏 KV 拉取
+    var skv = entries * 576 * 2 * 0.2 / ST * 1e6;
+    var comm = 30 + 8 * (1 * bsr * dim / NL) * 1e6
+             + 30 + 8 * (2 * bsr * dim / NL) * 1e6
+             + skv;
+    var attnSide = iq + score + gather + attn + proj;
+    var Lm = attnSide + moe + comm;              // MoE 层
+    var Ld = attnSide + mlp + skv;               // dense 层（无 dispatch/combine）
+    return {
+      ops: [
+        ["① 造问句", iq, "var(--accent)"],
+        ["② 打分", score, "var(--accent)"],
+        ["③ 取记忆", gather, "var(--accent)"],
+        ["④ 注意力核心", attn, "var(--accent)"],
+        ["⑤ 投影", proj, "var(--accent)"],
+        ["⑥ 专家", moe, "var(--moe)"],
+        ["⑦ 通信", comm, "var(--comm)"]
+      ],
+      Lm: Lm, Ld: Ld,
+      perLayer: (3 * Ld + 75 * Lm) / 78,
+      totalMs: (3 * Ld + 75 * Lm) / 1e3,
+      attShare: attnSide / Lm
+    };
+  }
+
+  var ilRange = document.getElementById("ilRange");
+  var utRange = document.getElementById("utRange");
+  var ilVal = document.getElementById("ilVal");
+  var utVal = document.getElementById("utVal");
+  var out = document.getElementById("calcOut");
+
+  function clampUt() {
+    var maxUt = Number(ilRange.value);
+    if (Number(utRange.value) > maxUt) utRange.value = maxUt;
+    utRange.max = ilRange.value;
+  }
+  function fmt(n) {
+    return n >= 1000 ? (n / 1000).toFixed(1) + " ms" : n.toFixed(1) + " us";
+  }
+  function render() {
+    clampUt();
+    var il = Math.pow(2, Number(ilRange.value));
+    var ut = Math.pow(2, Number(utRange.value));
+    ilVal.textContent = il.toLocaleString("zh-CN");
+    utVal.textContent = ut.toLocaleString("zh-CN");
+    var r = computeOps(il, ut);
+    var mx = Math.max.apply(null, r.ops.map(function (o) { return o[1]; }));
+    var html = "";
+    r.ops.forEach(function (o) {
+      html += '<div class="opbar"><div class="lab">' + o[0] + '</div>'
+        + '<div class="track"><div class="fill" style="width:' + (o[1] / mx * 100).toFixed(1)
+        + '%;background:' + o[2] + '"></div></div>'
+        + '<div class="v">' + o[1].toFixed(1) + ' us</div></div>';
+    });
+    html += '<p class="headline">一层合计 <b>' + r.Lm.toFixed(0) + ' 微秒</b>（MoE 层口径）。'
+      + '注意力＋索引侧占 <b>' + (r.attShare * 100).toFixed(0) + '%</b>。'
+      + '78 层总计 <b>' + (r.totalMs).toFixed(1) + ' 毫秒</b>（含 3 个 dense 层）。</p>';
+    out.innerHTML = html;
+  }
+  ilRange.addEventListener("input", render);
+  utRange.addEventListener("input", render);
+  document.querySelectorAll(".presets button").forEach(function (b) {
+    b.addEventListener("click", function () {
+      ilRange.value = Math.log2(Number(b.dataset.il));
+      utRange.value = Math.log2(Number(b.dataset.ut));
+      document.querySelectorAll(".presets button").forEach(function (x) { x.setAttribute("aria-pressed", "false"); });
+      b.setAttribute("aria-pressed", "true");
+      render();
+    });
+  });
+  render();
+})();
+</script>
 
 </main>
 </body>
