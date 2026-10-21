@@ -69,6 +69,11 @@
 | 实验图 | `docs/figures/` | `fig_{a..k}_{实验名}.png`（v1 用字母，v2 用 e5–e9） |
 | 实验 | `sim/experiments/` | `e{N}_{主题}.py` |
 | v1 策略 / v2 策略 | `sim/policies/` / `sim/policies2.py` | v2 策略名以 `2` 结尾（如 `joint2`） |
+| prefill 计算时间估算（GLM5+D950PR，独立工具，不入 sim/） | `prefill_time/` | `prefill_time_single.py`（单请求）/ `prefill_time_batch.py`（任意每卡 bs）/ `validate_prefill_time.py`（验证） |
+
+注意：`prefill_time/` 的口径与外部仿真器不同——字节用十进制 GB（1e9，非 1024^3），
+注意力路径已按 prefill 语义修正（F1–F11，见脚本文件头），输出是 kernel 级 roofline
+下界（真实生产约再乘 2–3）。与外部 sim 对数前先读 `prefill_time/README.md`。
 
 ## 9. trace 资产（两套）
 

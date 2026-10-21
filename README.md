@@ -13,6 +13,7 @@ KV 存储压力感知调度（KV Storage Pressure-Aware Cross-Layer Inference Sc
 - [实验结果-E17-20260904.md](实验结果-E17-20260904.md) — 改进方案 III 实验（问题⑩⑪：会话预取证伪+机制重归因、副本可见性闭环）
 - [实验结果-E18-20260904.md](实验结果-E18-20260904.md) — 改进方案 IV 实验（问题⑫⑬：预取保护零浪费字节、流体最优背书协同定位）
 - `tools/calibrate.py` — 真实系统标定脚手架（LMCache 指标 / prefill 曲线 / RDMA 路径）
+- `prefill_time/` — GLM5+D950PR 逐层 prefill 计算时间估算（独立工具，kernel 级 roofline 下界；用法与口径见 [prefill_time/README.md](prefill_time/README.md)）
 - `sim/` — 离散事件仿真器（Python + SimPy），v1 与 v2 两套拓扑
 - `tests/` — 不变量单元测试（解析解吻合 / 字节守恒 / 确定性 / 策略单调性 / v2 拓扑与策略）
 - `results/` — 实验输出（gitignored）
