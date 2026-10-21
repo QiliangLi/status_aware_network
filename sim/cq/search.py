@@ -368,10 +368,12 @@ class _IndependentBWStorage(StorageSim):
         cap = self.b_at(t)
         for f in sorted(self.flows.values(), key=lambda x: x.submit_seq):
             f.rate_gbps = min(f.q_gbps, cap)
-            if self.uses_groups:
-                factor = (f.rate_gbps / f.V_gb) if f.V_gb else self.zero
-                for g in self.groups[f.submit_seq]:
-                    g.rate_gbps = g.total_gb * factor
+            gs = self.groups.get(f.submit_seq)
+            if not gs:
+                continue    # 组已摘空、流尚未移除的窗口期
+            factor = (f.rate_gbps / f.V_gb) if f.V_gb else self.zero
+            for g in gs:
+                g.rate_gbps = g.total_gb * factor
 
 
 class _HoldPi:
