@@ -1,0 +1,6 @@
+# 运行依赖(v1 simpy 事件内核、数值与绘图;均为既有环境实际使用,无新增)
+numpy
+matplotlib
+simpy
+# 测试(AGENTS.md §4:提交前全量 pytest)
+pytest
