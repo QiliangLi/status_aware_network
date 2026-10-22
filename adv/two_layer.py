@@ -60,6 +60,7 @@ class TwoLayerPolicy:
     ready_aging_w: float = 0.5  # 老化折扣（等待每秒 slack 视作减这么多秒）
     light_gate_e: bool = False  # 防御项 D12：E 层轻流加载也设上限
     bp_hyst: bool = False       # 防御项 D11：反压迟滞（高关低开 BP/2）
+    bp_loadbased: bool = False  # 防御项 D13：反压判据改加载位（Wave1 发现）
     # --- 引擎物理（同代版本共享，不作为策略旋钮） ---
     admit_dt: float = 0.012
     slow_k: float = 0.5
@@ -232,9 +233,10 @@ class TwoLayerEngine:
                         r.t_done = now
                         inst["batch"].remove(r)
                         self.done.append(r)
-        # 6. 统计
+        # 6. 统计（账本差 = 在途滞留：已下发仍压在 waiting 的重流数）
         iss, act, inf, Cq, _ = self.ledger()
-        self.gap_sum += (iss - act); self.gap_n += 1
+        self.gap_sum += inf; self.gap_n += 1
+        self.iss_sum = getattr(self, 'iss_sum', 0.0) + iss
         self.n_loads_hist.append(n)
         self.bw_sum += (n * rate / self.pipe if n else 0.0); self.bw_n += 1
         self.bs_sum += sum(len(i["batch"]) for i in self.insts) / self.m
@@ -322,9 +324,18 @@ class TwoLayerEngine:
             inst["admit_cd"] += p.admit_dt * (1 + p.slow_k * len(inst["batch"]))
 
     def _bp_update(self):
-        """反压状态机：默认即时（>BP 关）；bp_hyst 时迟滞（<BP/2 才开）。"""
+        """反压状态机：默认即时（>BP 关）；bp_hyst 迟滞（<BP/2 开）；
+        bp_loadbased（D13）判据改「该实例重流加载位已满」——轻流把 waiting
+        撑深不再误触反压（Wave1：C 流 λ=60~100/s 使全实例常闭、重流中央
+        等待 4.8~8.2s）。"""
         p = self.pol
+        _, C = self.triage()
+        cap_i = max(1, round(C / self.m))
         for inst in self.insts:
+            if p.bp_loadbased:
+                h_load = sum(1 for r in inst["loading"] if r.heavy)
+                inst["bp_open"] = h_load < cap_i
+                continue
             depth = len(inst["waiting"])
             if inst["bp_open"]:
                 if depth > p.backpressure:
@@ -368,6 +379,7 @@ class TwoLayerEngine:
             "ttft_mean": sum(ttfts) / len(ttfts) if ttfts else float("nan"),
             "cw_heavy_mean": sum(cw_h) / len(cw_h) if cw_h else 0.0,
             "gap_mean": self.gap_sum / max(self.gap_n, 1),
+            "issued_mean": getattr(self, 'iss_sum', 0.0) / max(self.gap_n, 1),
             "bw_mean": self.bw_sum / max(self.bw_n, 1),
             "bs_mean": self.bs_sum / max(self.bs_n, 1),
             "stall_frac": self.stall_sum / max(self.stall_n, 1),
@@ -391,13 +403,19 @@ def judge_two(tfs2: Dict, baselines: Dict, C_hint: int = 4) -> Tuple[bool, str]:
             return True, f"类{c} SLO {v:.3f} vs 基线最优 {max(bl_c):.3f}"
         if v <= 0.02 and max(bl_c) >= 0.30:
             return True, f"类{c} 饿死(0%)（基线最优 {max(bl_c):.3f}）"
+    # 账本差/中央等待只在伴随 SLO 回退时才算击杀（20261023 Wave1 修正：
+    # 单独的 gap 大是缓冲形态证据，不是调度效果差——tfs2 曾以 6~10 倍
+    # SLO 优势被 gap 口径误杀）
     sing = baselines.get("single")
-    if sing and tfs2["cw_heavy_mean"] > 1.5 * max(sing["cw_heavy_mean"], 1e-9) \
-            and tfs2["cw_heavy_mean"] > 0.3:
-        return True, (f"重流中央等待 {tfs2['cw_heavy_mean']*1e3:.0f}ms "
-                      f"> 单层 {sing['cw_heavy_mean']*1e3:.0f}ms 的 1.5 倍")
-    if tfs2["gap_mean"] >= max(1, C_hint) / 2.0:
-        return True, f"账本差 {tfs2['gap_mean']:.2f} ≥ C/2"
+    if sing:
+        worse = tfs2["slo"] < sing["slo"] - 0.05
+        if worse and tfs2["cw_heavy_mean"] > 1.5 * max(sing["cw_heavy_mean"], 1e-9) \
+                and tfs2["cw_heavy_mean"] > 0.3:
+            return True, (f"中央等待 {tfs2['cw_heavy_mean']*1e3:.0f}ms 且总SLO回退 "
+                          f"({tfs2['slo']:.3f}<{sing['slo']:.3f})")
+        if worse and tfs2["gap_mean"] >= max(1, C_hint) / 2.0:
+            return True, (f"账本差 {tfs2['gap_mean']:.2f} 且总SLO回退 "
+                          f"({tfs2['slo']:.3f}<{sing['slo']:.3f})")
     return False, ""
 
 

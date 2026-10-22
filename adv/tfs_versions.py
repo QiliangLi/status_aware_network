@@ -11,6 +11,10 @@
 - dsync(D9)     WAIT 相位去同步（+1.5ms×(wid%4)）
 - hardage(D4')  升级项：wait≥2×guard_w 的锚点无条件豁免（不要求无更小 slack 者）
 - keymode       'slack'（原版）| 'dslack'（升级项：deadline 为主、slack tie-break）
+- captol(升级)  cap 容差 ×1.10（Wave1 G5 归因：2×64.94=129.9 > 120 把毒丸
+                串行化、毒窗×2；10% 容差换 8% 超订、读拉伸被期限余量吸收）
+- wl×active 联动：账本只计仍在读的重流（D1×D2 正交叠加，Wave1 G2/G4
+  波量化损失的修复——波内早读者的末层计算期放行下一条）
 
 信息边界：只用 ObservableSnapshot 公开字段 + 策略自持状态；零推演；
 O(n log n)。母工况（E26f：b 恒 120、σ=0、e=0、类内 d 同质、guard_w=0）
@@ -31,6 +35,7 @@ class TFSAdv(TFS):
     TIGHT, WIDE = 0.5, 1.0
     DN_RATIO, DN_K = 0.90, 2
     UP_RATIO, UP_K = 1.25, 3
+    CAP_TOL = 1.10
 
     def __init__(self, flags=None, keymode="slack", hist=None):
         super().__init__(hist)
@@ -137,6 +142,8 @@ class TFSAdv(TFS):
         d, d_heavy, C, heavy_run, wake = self._d_map(snap)
         if "wl" in f:
             cap = self._cap(snap, d_heavy)
+            if "captol" in f:
+                cap *= self.CAP_TOL
         now = float(snap.now)
         acc, release = heavy_run, None
         if "active" in f:
@@ -147,9 +154,11 @@ class TFSAdv(TFS):
         # 在跑重流账本（D1 的 Σd 初值）
         led = 0.0
         if "wl" in f:
+            L = snap._profile_cfg.L
             for pw in snap.workers:
-                if pw.members and self._is_heavy(snap, pw.members[0], d, d_heavy) \
-                        and d.get(pw.members[0], 0.0) >= d_heavy:
+                if pw.members and d.get(pw.members[0], 0.0) >= d_heavy:
+                    if "active" in f and pw.layers_done >= L:
+                        continue          # 末层计算期：读取已完成，不计账本
                     led += d.get(pw.members[0], 0.0)
         hv = {r.rid: self._is_heavy(snap, r.rid, d, d_heavy)
               for r in snap.requests if r.rid in snap.queued}
@@ -237,6 +246,7 @@ def make_two_version(flags=None) -> dict:
     e_ready_aging(D10)  就绪重流老化提升（饿死有界）
     bp_hyst(D11)        反压迟滞（高关低开）
     e_byte_share(D12)   E2 字节份额含轻流
+    bp_loadbased(D13)   反压判据改加载位（Wave1 发现）
     """
     fl = set(flags or [])
     return {
@@ -245,5 +255,6 @@ def make_two_version(flags=None) -> dict:
             "ready_aging": "e_ready_aging" in fl,
             "light_gate_e": "e_byte_share" in fl,
             "bp_hyst": "bp_hyst" in fl,
+            "bp_loadbased": "bp_loadbased" in fl,
         },
     }
