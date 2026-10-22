@@ -37,7 +37,7 @@
 ## 4. 测试与回归
 
 - 新机制必须配**不变量单元测试**（解析解吻合、守恒、确定性、策略单调性、行为断言），放 `tests/`。
-- 每次提交前跑全量 `.venv/bin/python -m pytest tests/ -q`，全绿才提交。
+- 每次提交前跑全量 pytest（mac 用 `.venv/bin/python -m pytest tests/ -q`，win 用 `.venv/Scripts/python -m pytest tests/ -q`），全绿才提交。纯文档/配置类改动且不碰 Python 时可豁免，但须在提交信息中注明。
 - 改动 v1/v2 共享代码（`metrics.py`、`request.py`、`simrun.py`、`config.py`、`storage.py` 等）时，**以 1–2 种子、缩短 duration 跑全 v1 四件套（e1a/e1b/e2/e3/e4）**，核对结论方向不变。不得按"改了哪个文件"挑选实验子集——文件↔实验的映射会过时且易漏（v2 期间的真实风险源是重写的 `metrics.py`，而非未动的 `storage.py`）。
 
 ## 5. 实验执行与场景调优
@@ -58,7 +58,7 @@
 - Commit message 用中文 conventional 风格（`feat(sim):` / `docs:` / `fix:` / `tests:`），正文说明动机与要点，参照 `git log` 既有风格。
 - 提交粒度示例：v2 仿真器核心与 E5–E9 实验分属两个 commit（`aa9d479`、`8f95cc5`）。
 - `results/` 不入库（gitignored）；`docs/figures/` 入库。**严禁**用少量种子的重跑覆盖已入库的正式图——回归验证后若图被改写，用 `git checkout --` 恢复。
-- 推送走 https 远端（代理 `127.0.0.1:6478`，仓库与全局 git config 已配好，20260908 更新）；失败时可用 `git push git@github.com:QiliangLi/status_aware_network.git main` 兜底。
+- 推送通道按机器各配各的（git 配置是机器本地的，不随仓库同步）：mac 走 https 远端 + 本机代理 `127.0.0.1:6478`（仅 mac 本地 git config，20260908 更新）；win 走 SSH 直连 `github.com`（20261022 验证）。失败时可用 `git push git@github.com:QiliangLi/status_aware_network.git main` 兜底。
 
 ## 8. 命名与放置速查
 
@@ -84,3 +84,19 @@
 
 - 两套 trace 负载特征差异大（AgentX 长上下文多轮、理想前缀命中率中位数 99.1%（全量 98827 请求实测，样本期为 98.8%）；Mooncake 短上下文单轮），**容量/缓存结论不可互推**。
 - 接入 AgentX trace 前先读 `AgentX及trace转换分析/AgentX trace转换说明.md` §3.3：块大小 64 ≠ Mooncake 的 512（AIPerf 回放须 `--isl-block-size 64`）、时间戳为会话内相对时间（多会话起点近 0，需加偏移才构成全局到达节奏）、hash_ids 已全局重编号无需再处理。AgentX 背景调研见同目录 `AgentX调研.md`；Mooncake 命中口径见 `docs/MooncakeTrace命中模型首现判定-变更设计-20260915.md`。
+
+## 10. 双机协作（mac + win，经 GitHub 同步）
+
+仓库由两台机器交替开发（常规白天/夜间各一台，交接点可能有长仿真仍在跑）。任务由用户统一下发、用户知晓各机状态，重叠开发时用户主动开分支隔离——**机制不做任何自动协调，唯一要求是在 main 上工作前有意识地取到最新代码**：
+
+- **单元边界同步铁律**：每个 session 开始、每个逻辑单元开始前与结束后 `git fetch origin`；若 `HEAD..origin/main` 非空，先 `git pull --rebase origin main` 再继续。push 被拒同样先 pull --rebase 再推。
+- 日常都在 main（trunk-based）；临时分支的创建与合入时机由用户显式驱动，**未获用户命令不得合入 main**。分支上同样遵守同步铁律，并在单元结束处 rebase 到最新 `origin/main`。
+- 长仿真启动前依赖代码必须已 commit+push（记录运行基线；运行基于工作区快照，不受 main 后续更新影响）。`results/` 不跨机：谁启动谁收尾；兜底可同种子重跑（CRN 确定性）。
+- 换机交接前确保无未推送提交（收不了尾的打 `wip(scope):` 提交推上去）。
+
+**机器清单**（新机器接入时在此登记一行；机制细节与被否决方案见 `docs/双机协作机制-20261022.md`）：
+
+| 代号 | hostname | 平台 | venv 解释器 | 推送通道 |
+|---|---|---|---|---|
+| mac | （待补） | macOS | `.venv/bin/python` | https + 本机代理 `127.0.0.1:6478` |
+| win | DESKTOP-TJL427K | Windows 11 | `.venv/Scripts/python` | SSH 直连（20261022 验证） |

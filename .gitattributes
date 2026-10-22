@@ -1,0 +1,10 @@
+# 统一仓库内行尾（防 Windows/Mac 跨机差异搅脏 diff）：文本入库归一为 LF，二进制显式标注。
+# 20261022 双机协作机制首次入库；未对存量文件 renormalize，存量不动、新增自然归一。
+* text=auto
+*.png binary
+*.jpg binary
+*.jpeg binary
+*.gif binary
+*.pdf binary
+*.xlsx binary
+*.jsonl -text

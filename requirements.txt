@@ -1,0 +1,7 @@
+# 依赖清单：2026-10-22 win 新机接入时由全仓 import 扫描生成（覆盖 sim/ tests/ tools/ prefill_time/）。
+# 研究仓库，版本宽松不钉死；如需精确口径，mac 侧可 pip freeze 校准后更新此文件。
+numpy
+matplotlib
+pandas
+simpy
+pytest
