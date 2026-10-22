@@ -22,3 +22,7 @@ AgentX及trace转换分析/转换结果/agentx_mooncake_full.jsonl
 # 编辑器
 .idea/
 .vscode/
+
+# 工具验收残留（visual-check 截图/包装页/JSON 与视频插件目录）
+*.visual-check.*
+.video_agent/

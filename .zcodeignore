@@ -19,6 +19,10 @@ results/
 .idea/
 .vscode/
 
+# 工具验收残留（visual-check 截图/包装页/JSON 与视频插件目录）
+*.visual-check.*
+.video_agent/
+
 # ===== ↑ 以上同步自 .gitignore（「从 .gitignore 同步」只重写以上部分）=====
 .git/
 .hg/
