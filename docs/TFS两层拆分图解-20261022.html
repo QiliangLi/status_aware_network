@@ -1,0 +1,692 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>TFS 两层拆分图解：调度层（Dynamo·TFS-G）× 引擎层（vLLM·TFS-E）</title>
+<style>
+  :root{
+    --bg:#f7f6f3; --panel:#ffffff; --ink:#1c1917; --muted:#78716c; --line:#e7e5e4;
+    --a:#c2410c; --a-soft:#fed7aa; --b:#1d4ed8; --b-soft:#bfdbfe; --c:#15803d; --c-soft:#bbf7d0;
+    --pipe:#0e7490; --pipe-soft:#cffafe; --bad:#dc2626; --ok:#16a34a; --wait:#a8a29e;
+    --mono:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;
+  }
+  @media (prefers-color-scheme: dark){
+    :root{
+      --bg:#1c1917; --panel:#292524; --ink:#f5f5f4; --muted:#a8a29e; --line:#44403c;
+      --a:#fb923c; --a-soft:#7c2d12; --b:#60a5fa; --b-soft:#1e3a8a; --c:#4ade80; --c-soft:#14532d;
+      --pipe:#22d3ee; --pipe-soft:#164e63; --bad:#f87171; --ok:#4ade80; --wait:#78716c;
+    }
+  }
+  *{box-sizing:border-box}
+  body{margin:0;background:var(--bg);color:var(--ink);font:15px/1.65 -apple-system,"PingFang SC","Hiragino Sans GB","Microsoft YaHei",sans-serif;}
+  main{max-width:1100px;margin:0 auto;padding:28px 20px 64px;}
+  h1{font-size:24px;line-height:1.35;margin:0 0 6px;}
+  h2{font-size:18px;margin:44px 0 12px;padding-top:18px;border-top:1px solid var(--line);}
+  .verdict{color:var(--muted);margin:0 0 10px;max-width:64em;}
+  .badge{display:inline-block;font-size:12px;padding:1px 9px;border:1px solid var(--a);color:var(--a);border-radius:99px;vertical-align:2px;}
+  .panel{background:var(--panel);border:1px solid var(--line);border-radius:10px;padding:14px 16px;}
+  .controls{display:flex;flex-wrap:wrap;gap:14px 22px;align-items:end;margin:14px 0 12px;}
+  .ctl{display:flex;flex-direction:column;gap:4px;font-size:13px;color:var(--muted);}
+  .ctl b{color:var(--ink);font-weight:600;}
+  .seg{display:inline-flex;border:1px solid var(--line);border-radius:8px;overflow:hidden;}
+  .seg label{padding:6px 14px;cursor:pointer;font-size:14px;color:var(--muted);border:0;background:transparent;}
+  .seg input{position:absolute;opacity:0;pointer-events:none;}
+  .seg label:has(input:checked){background:var(--ink);color:var(--panel);}
+  .seg label:not(:last-child){border-right:1px solid var(--line);}
+  input[type=range]{width:150px;accent-color:var(--pipe);}
+  button{font:inherit;padding:6px 16px;border:1px solid var(--line);border-radius:8px;background:var(--panel);color:var(--ink);cursor:pointer;}
+  button.primary{background:var(--ink);color:var(--panel);border-color:var(--ink);}
+  button:focus-visible,input:focus-visible,label:focus-visible{outline:2px solid var(--pipe);outline-offset:2px;}
+  select{font:inherit;padding:5px 8px;border:1px solid var(--line);border-radius:8px;background:var(--panel);color:var(--ink);}
+
+  .stage{display:flex;flex-direction:column;gap:10px;}
+  .lane{display:flex;align-items:center;gap:8px;min-height:44px;}
+  .lane-tag{flex:0 0 118px;font-size:12px;color:var(--muted);line-height:1.4;}
+  .chips{display:flex;flex-wrap:wrap;gap:4px;flex:1;align-items:center;}
+  .chip{width:22px;height:22px;border-radius:50%;display:inline-flex;align-items:center;justify-content:center;
+        font:600 11px/1 var(--mono);color:#fff;flex:0 0 auto;transition:opacity .2s;}
+  .chip.A{background:var(--a);} .chip.B{background:var(--b);} .chip.C{background:var(--c);}
+  .chip.late{box-shadow:0 0 0 2px var(--bad);}
+  .chip.dead{opacity:.38;box-shadow:0 0 0 2px var(--bad);}
+  .more{font-size:11px;color:var(--muted);}
+  .box{border:1px solid var(--line);border-radius:10px;background:var(--panel);padding:10px 14px;}
+  .box header{display:flex;flex-wrap:wrap;align-items:baseline;gap:8px 14px;margin-bottom:8px;}
+  .box header .t{font-weight:700;font-size:14px;}
+  .box header .sub{font-size:12px;color:var(--muted);}
+  .ledger{display:flex;gap:16px;flex-wrap:wrap;font:600 13px/1 var(--mono);margin:2px 0 8px;}
+  .ledger .item{display:flex;align-items:center;gap:6px;color:var(--muted);font-weight:400;}
+  .ledger .item b{font-size:16px;color:var(--ink);}
+  .dot{width:10px;height:10px;border-radius:50%;display:inline-block;}
+  .dot.active{background:var(--a);}
+  .dot.issued{background:transparent;border:2px dashed var(--a);}
+  .dot.inflight{background:var(--wait);}
+  .rules{display:flex;gap:6px;flex-wrap:wrap;margin-top:4px;}
+  .rule{font-size:11px;padding:2px 9px;border-radius:99px;border:1px solid var(--line);color:var(--muted);}
+  .rule.on{border-color:var(--pipe);color:var(--pipe);background:var(--pipe-soft);}
+  .instances{display:grid;grid-template-columns:1fr 1fr;gap:10px;}
+  @media (max-width:760px){.instances{grid-template-columns:1fr;}.lane-tag{flex-basis:92px;}}
+  .inst header{display:flex;justify-content:space-between;align-items:baseline;}
+  .badge-e{font-size:11px;padding:1px 8px;border-radius:99px;border:1px solid var(--c);color:var(--c);}
+  .badge-e.off{border-color:var(--line);color:var(--muted);}
+  .irow{display:flex;gap:8px;margin-top:6px;font-size:12px;color:var(--muted);align-items:center;flex-wrap:wrap;}
+  .irow .lbl{flex:0 0 58px;}
+  .loadbars{display:flex;gap:4px;flex:1;flex-wrap:wrap;min-height:14px;align-items:center;}
+  .lbar{height:10px;border-radius:5px;background:var(--line);overflow:hidden;flex:1 1 60px;min-width:40px;position:relative;}
+  .lbar i{position:absolute;inset:0;width:0%;border-radius:5px;}
+  .lbar.A i{background:var(--a);} .lbar.B i{background:var(--b);}
+  .slots{display:grid;grid-template-columns:repeat(8,1fr);gap:4px;flex:1;}
+  .slot{height:26px;border:1px dashed var(--line);border-radius:5px;position:relative;overflow:hidden;
+        display:flex;align-items:center;justify-content:center;font:600 11px var(--mono);color:var(--ink);}
+  .slot .fill{position:absolute;left:0;bottom:0;width:100%;background:var(--line);opacity:.55;}
+  .slot.A .fill{background:var(--a-soft);} .slot.B .fill{background:var(--b-soft);} .slot.C .fill{background:var(--c-soft);}
+  .slot.load{border-style:solid;border-color:var(--a);}
+  .stall{font-size:11px;color:var(--bad);}
+  .pipe-wrap{position:relative;}
+  .pipe{height:26px;border:1px solid var(--line);border-radius:6px;background:var(--panel);display:flex;overflow:hidden;position:relative;}
+  .pipe .segm{height:100%;}
+  .pipe .mark{position:absolute;top:-4px;bottom:-4px;width:0;border-left:2px dashed var(--pipe);}
+  .pipe .mark span{position:absolute;top:-18px;left:6px;font-size:10px;color:var(--pipe);white-space:nowrap;}
+  .pipe-cap{font:600 11px var(--mono);color:var(--muted);}
+  .metrics{display:grid;grid-template-columns:repeat(auto-fit,minmax(128px,1fr));gap:8px;margin-top:12px;}
+  .m{border:1px solid var(--line);border-radius:8px;padding:8px 10px;background:var(--panel);}
+  .m .k{font-size:11px;color:var(--muted);}
+  .m .v{font:600 19px/1.3 var(--mono);}
+  .m .v small{font-size:11px;font-weight:400;color:var(--muted);}
+  .v.good{color:var(--ok);} .v.bad{color:var(--bad);}
+  canvas{width:100%;height:120px;display:block;margin-top:10px;}
+  .legend{display:flex;gap:16px;font-size:12px;color:var(--muted);margin-top:6px;flex-wrap:wrap;}
+  .legend i{display:inline-block;width:18px;height:0;border-top:3px solid;vertical-align:3px;margin-right:5px;border-radius:2px;}
+  table{border-collapse:collapse;width:100%;font-size:13.5px;}
+  th,td{border:1px solid var(--line);padding:7px 10px;text-align:left;vertical-align:top;}
+  th{background:var(--panel);font-size:12.5px;color:var(--muted);font-weight:600;}
+  td .who{display:inline-block;font-size:11px;font-weight:700;padding:1px 8px;border-radius:99px;margin-right:6px;}
+  .who.G{background:var(--a-soft);color:var(--a);} .who.E{background:var(--c-soft);color:var(--c);}
+  .who.GE{background:var(--pipe-soft);color:var(--pipe);}
+  .life{display:grid;grid-template-columns:repeat(4,1fr);gap:0;border:1px solid var(--line);border-radius:8px;overflow:hidden;margin:10px 0 6px;}
+  .ph{padding:8px 10px;font-size:12.5px;color:var(--muted);border-right:1px solid var(--line);position:relative;min-height:74px;}
+  .ph:last-child{border-right:0;}
+  .ph b{display:block;color:var(--ink);font-size:13px;margin-bottom:2px;}
+  .bracket{height:14px;border-radius:7px;margin-top:6px;}
+  .bracket.issued{background:repeating-linear-gradient(45deg,var(--a),var(--a) 4px,transparent 4px,transparent 8px);border:1px dashed var(--a);}
+  .bracket.active{background:var(--a);opacity:.85;}
+  .brow{display:flex;align-items:center;gap:10px;font-size:12.5px;color:var(--muted);margin-top:4px;}
+  .brow .bar{flex:1;height:14px;}
+  .note{font-size:13px;color:var(--muted);}
+  .note b{color:var(--ink);}
+  ul.tips{padding-left:20px;margin:8px 0;}
+  ul.tips li{margin:4px 0;}
+  a{color:var(--pipe);}
+  footer{margin-top:44px;padding-top:14px;border-top:1px solid var(--line);font-size:12.5px;color:var(--muted);}
+  .flexline{display:flex;gap:10px;flex-wrap:wrap;align-items:center;}
+  .paused-tip{font-size:12px;color:var(--muted);}
+  @media (prefers-reduced-motion: reduce){
+    .chip{transition:none;}
+  }
+</style>
+</head>
+<body>
+<main>
+  <h1>TFS 两层拆分图解：调度层（Dynamo·TFS-G）× 引擎层（vLLM·TFS-E）</h1>
+  <p class="verdict">单层 TFS 把「已下发」当「已占用」：账本高估 → 少下发 → 在飞读取反而快，歪打正着但无人掌控。
+    两层拆分把这本账拆成两半：<b>上层（TFS-G）只数真正在读的，下层（TFS-E）管一次读几条</b>。配套设计文档见
+    <a href="TFS工况边界与两层拆分设计-20261022.md">TFS工况边界与两层拆分设计-20261022.md</a>。</p>
+  <p><span class="badge">示意模拟 · 参数为演示值，非实验数据</span></p>
+
+  <!-- ============ 模拟器 ============ -->
+  <section aria-label="两层流水线示意模拟">
+    <div class="panel">
+      <div class="controls">
+        <div class="ctl"><b>策略模式</b>
+          <div class="seg" role="radiogroup" aria-label="策略模式">
+            <label><input type="radio" name="mode" value="immediate"><span>直接提交</span></label>
+            <label><input type="radio" name="mode" value="single" checked><span>TFS 单层（现状）</span></label>
+            <label><input type="radio" name="mode" value="two"><span>TFS 两层（本设计）</span></label>
+          </div>
+        </div>
+        <div class="ctl"><label for="r-lam"><b>到达率</b> <span id="v-lam">60 条/s</span></label>
+          <input type="range" id="r-lam" min="10" max="90" step="5" value="60"></div>
+        <div class="ctl"><label for="r-hf"><b>重读占比</b> <span id="v-hf">33%</span></label>
+          <input type="range" id="r-hf" min="10" max="70" step="5" value="33"></div>
+        <div class="ctl"><label for="r-bs"><b>max_num_seqs</b> <span id="v-bs">8</span></label>
+          <input type="range" id="r-bs" min="1" max="8" step="1" value="8"></div>
+        <div class="ctl"><b>运行</b>
+          <div class="flexline">
+            <button id="btn-play" class="primary">播放</button>
+            <button id="btn-step">单步</button>
+            <button id="btn-reset">重置</button>
+            <select id="sel-speed" aria-label="速度">
+              <option value="0.5">0.5×</option><option value="1" selected>1×</option>
+              <option value="2">2×</option><option value="4">4×</option>
+            </select>
+            <span class="paused-tip" id="t-sim">t = 0.0 s</span>
+          </div>
+        </div>
+      </div>
+
+      <div class="stage">
+        <div class="lane"><div class="lane-tag">到达<br>（Dynamo 之前）</div><div class="chips" id="arrivals"></div></div>
+
+        <div class="box" id="dynamo">
+          <header>
+            <span class="t">调度层 · Dynamo</span>
+            <span class="sub" id="dynamo-sub">TFS：请求级准入（现状 = 单层）</span>
+          </header>
+          <div class="ledger" id="ledger">
+            <span class="item"><span class="dot issued"></span>issued 已下发重流 <b id="n-issued">0</b></span>
+            <span class="item"><span class="dot active"></span>active 真在读重流 <b id="n-active">0</b></span>
+            <span class="item"><span class="dot inflight"></span>在途（下发未开读）<b id="n-inflight">0</b></span>
+            <span class="item">配额 C <b id="n-quota">4</b></span>
+          </div>
+          <div class="lane" style="min-height:34px"><div class="lane-tag">准入等待中</div><div class="chips" id="dynamo-wait"></div></div>
+          <div class="rules" id="rules">
+            <span class="rule" data-r="G1">G1 填空：轻/零流恒可派</span>
+            <span class="rule" data-r="G2">G2 守门：重流计数</span>
+            <span class="rule" data-r="G4">G4 错峰：WAIT 至释放</span>
+            <span class="rule" data-r="G5">G5 反压：实例排队过深停收重流</span>
+          </div>
+        </div>
+
+        <div class="instances" id="instances"></div>
+
+        <div class="box pipe-wrap">
+          <header><span class="t">存储带宽管道</span><span class="pipe-cap">120 GB/s（示意）</span></header>
+          <div class="pipe" id="pipe"><div class="mark" id="pipe-mark" style="left:97%"><span>配额目标 C×d</span></div></div>
+          <div class="legend">
+            <span><i style="border-color:var(--a)"></i>重流（A）读取</span>
+            <span><i style="border-color:var(--b)"></i>轻流（B）读取</span>
+            <span>虚线 = 配额目标占用（C 条重流的需求合计 ≈ 117 GB/s）</span>
+          </div>
+        </div>
+      </div>
+
+      <div class="metrics" id="metrics">
+        <div class="m"><div class="k">总 SLO（TTFT≤4T0）</div><div class="v" id="m-slo">—</div></div>
+        <div class="m"><div class="k">重流（A）SLO</div><div class="v" id="m-sloA">—</div></div>
+        <div class="m"><div class="k">零读（C）SLO</div><div class="v" id="m-sloC">—</div></div>
+        <div class="m"><div class="k">平均 TTFT</div><div class="v" id="m-ttft">—</div></div>
+        <div class="m"><div class="k">重流中央等待</div><div class="v" id="m-cw">—</div></div>
+        <div class="m"><div class="k">账本差 issued−active</div><div class="v" id="m-gap">—</div></div>
+        <div class="m"><div class="k">带宽占用</div><div class="v" id="m-bw">—</div></div>
+        <div class="m"><div class="k">平均 batch</div><div class="v" id="m-bs">—</div></div>
+      </div>
+
+      <canvas id="chart" width="1040" height="120" aria-label="issued 与 active 重流计数时间序列" role="img"></canvas>
+      <div class="legend">
+        <span><i style="border-color:var(--a);border-top-style:dashed"></i>issued（单层 TFS 的账本口径）</span>
+        <span><i style="border-color:var(--a)"></i>active（真正在读）</span>
+        <span><i style="border-color:var(--muted);border-top-style:dotted"></i>配额 C = 4</span>
+      </div>
+      <p class="note">读法：单层模式下 issued 常顶在 4 而 active 低于它——差值就是「已下发、还压在引擎 waiting 队列里」的重流数。
+        batch 越大（max_num_seqs 调高）、重读占比越高，这条缝越宽，下发就越保守。两层模式按 active 记账：它的缝是刻意留在引擎内的在途缓冲，单层的缝才是无人受益的真空闲。分辨两者看「重流中央等待」：单层的缝变成调度层压单（等待高），两层的缝只停在引擎内（等待低）。
+        A 类按每簇 16 条同刻到达（示意 E26f/DV 的 A 簇发），B/C 泊松到达。</p>
+    </div>
+  </section>
+
+  <!-- ============ 三律归属 ============ -->
+  <h2>三律各归其层</h2>
+  <table>
+    <thead><tr><th style="width:15%">动作</th><th>TFS-G（Dynamo，全局）</th><th>TFS-E（vLLM，实例内）</th></tr></thead>
+    <tbody>
+      <tr><td><b>分诊</b></td>
+        <td><span class="who G">G</span>d、门槛 P75、配额 C——d 分布是全局量，只有上层看得全。</td>
+        <td><span class="who E">E</span>沿用上层下发的重/轻标签，不重算。</td></tr>
+      <tr><td><b>填空</b></td>
+        <td><span class="who G">G</span>轻/零流恒可派：准入不拦（G1）。</td>
+        <td><span class="who E">E</span>批内不阻塞：未就绪的重流不得挡住已就绪的轻/零流（E3 就绪优先）。</td></tr>
+      <tr><td><b>错峰</b></td>
+        <td><span class="who G">G</span>全局 active 账本 + 在途预算，重流并发 ≤ C（G2）。</td>
+        <td><span class="who E">E</span>实例内加载并发上限（E2），字节口径——同一物理约束的另一半控制权。</td></tr>
+      <tr><td><b>账本</b></td>
+        <td><span class="who G">G</span>持有并决策；口径从 issued 改为 active。</td>
+        <td><span class="who E">E</span>每步上报：正在加载集合、剩余字节、waiting 深度（E4）。</td></tr>
+      <tr><td><b>唤醒</b></td>
+        <td><span class="who G">G</span>WAIT 至「最早 active 完成」估计（剩余字节 ÷ 近期速率，G4）。</td>
+        <td>—</td></tr>
+      <tr><td><b>反压</b></td>
+        <td><span class="who G">G</span>实例 waiting 深度超阈值 → 停收重流（G5）。</td>
+        <td><span class="who E">E</span>队列序按 slack，替代 FIFO（E1）。</td></tr>
+    </tbody>
+  </table>
+
+  <!-- ============ 旅程 ============ -->
+  <h2>一条重读请求的旅程：两种账本口径差在哪</h2>
+  <div class="life" role="img" aria-label="重读请求四个阶段：调度层排队、引擎 waiting 排队、加载、计算">
+    <div class="ph"><b>① 调度层排队</b>等 TFS-G 放行（中央等待）<div class="bracket" style="background:transparent"></div></div>
+    <div class="ph"><b>② 引擎 waiting</b>已下发，还没轮到读（batch 不为 1 时滞留在此）<div class="bracket issued"></div></div>
+    <div class="ph"><b>③ 加载中</b>真正占带宽<div class="bracket active"></div></div>
+    <div class="ph"><b>④ 计算</b>数据就绪后算 T0<div class="bracket" style="background:transparent"></div></div>
+  </div>
+  <div class="brow"><span style="flex:0 0 118px"></span>
+    <span>issued 口径把 ②+③ 都算「占用」</span><div class="bar bracket issued" style="flex:1.4"></div>
+    <span>active 口径只数 ③</span><div class="bar bracket active" style="flex:0.7"></div>
+  </div>
+  <p class="note">外部旁证：vLLM 官方 RFC <a href="https://github.com/vllm-project/vllm/issues/62532">#62532</a> 实测，
+    异步 KV 拉取的墙钟 <b>80% 以上是 ② 这段调度排队</b>，传输（③）只占零头——1.0~1.8s 总时延里线路传输仅 208~283ms。
+    batch 越大，② 越长，单层 TFS 的高估越重。本图解中的机理在 DV 工具上的实测属于验证方案（设计文档 §5 假设 H2）。</p>
+
+  <h2>怎么用这个页面</h2>
+  <ul class="tips">
+    <li><b>看保守代价</b>：固定参数，比较「TFS 单层」与「TFS 两层」的重流中央等待——两层模式账本不再高估，重流更早下发。</li>
+    <li><b>看自洽抵消</b>：「直接提交」模式下管道常被打满、每条加载变慢、零读类被加载中的重流卡住（计算位显示「批等待」）。</li>
+    <li><b>看退化路径 R1</b>：把重读占比拉到 60% 以上再对比三种模式——单层的账本差与中央等待放大得最快。</li>
+    <li><b>看 batch 的影响</b>：max_num_seqs 调小 → 引擎一次能同时处理的请求变少，下发滞留（账本差）变大；调大则接近「下发即开读」。</li>
+  </ul>
+
+  <footer>
+    <p><b>状态口径</b>：页面中的模拟为机理示意（演示参数：2 实例、A 类每簇 16 条、引擎准入节奏随批繁忙度放慢（token 预算的示意化）），不对应任何实验数据；
+      「现象已验证 / 机理未验证」的划分见设计文档 §2.1。接口事实（Dynamo SelectionService、vLLM V1 双队列与异步 KV 拉取）来源见设计文档 §4.1 与来源清单。</p>
+    <p>配套文档：<a href="TFS工况边界与两层拆分设计-20261022.md">TFS工况边界与两层拆分设计-20261022.md</a> ·
+      <a href="多级速率tfs对照-20261020.md">多级速率tfs对照-20261020.md</a>（DV 工具）·
+      <a href="TFS局限性深入分析-20261018.md">TFS局限性深入分析-20261018.md</a></p>
+    <p>2026-10-22 · 生成于 status_aware_network 仓库</p>
+  </footer>
+</main>
+
+<script>
+/* ================= 纯模拟核心（无 DOM 依赖，可独立运行） ================= */
+const DEMO = {
+  PIPE: 120,            // GB/s
+  N_INST: 2,            // 示意实例数（真实 32）
+  CLUSTER_K: 16,        // A 类每簇条数（对应真实 E26f/DV 的 k=16 簇发）
+  ADMIT_DT: 0.012,      // 引擎准入节奏：每 12ms 放一条（token 预算的示意化）
+  INFLIGHT_BOUND: 2,    // 两层模式在途预算
+  BP_WAITING: 6,        // 反压阈值：实例 waiting 超过则停收重流（安全阀，非常态约束）
+  CLS: {
+    A: { V: 1.4,  T0: 0.048, heavy: true  },   // 重读：d = 1.4/0.048 ≈ 29.2 GB/s
+    B: { V: 0.05, T0: 0.049, heavy: false },   // 轻读
+    C: { V: 0,    T0: 0.048, heavy: false }    // 零读
+  }
+};
+DEMO.QUOTA = Math.floor(DEMO.PIPE / (DEMO.CLS.A.V / DEMO.CLS.A.T0)); // = 4
+DEMO.E_CAP = Math.max(1, Math.round(DEMO.QUOTA / DEMO.N_INST));      // 每实例重流加载上限 = 2
+
+function mulberry32(seed){ return function(){ let t = seed += 0x6D2B79F5;
+  t = Math.imul(t ^ t >>> 15, t | 1); t ^= t + Math.imul(t ^ t >>> 7, t | 61);
+  return ((t ^ t >>> 14) >>> 0) / 4294967296; }; }
+
+class Sim {
+  constructor(opts){
+    this.o = Object.assign({ mode:'single', lam:60, hf:0.33, bs:8, seed:42 }, opts);
+    this.rng = mulberry32(this.o.seed);
+    this.t = 0; this.nextId = 1;
+    this.arrivalQ = [];
+    this.insts = Array.from({length: DEMO.N_INST}, () => ({ waiting:[], loading:[], batch:[], admitCd:0 }));
+    this.done = [];
+    this.acc = { gapSum:0, gapN:0, bwSum:0, bwN:0, bsSum:0, bsN:0 };
+    this.hist = [];
+    this.nextArr = { A: this._exp('A') * DEMO.CLUSTER_K, B: this._exp('B'), C: this._exp('C') };
+  }
+  _exp(cls){
+    const lamC = cls === 'A' ? this.o.lam * this.o.hf
+              : this.o.lam * (1 - this.o.hf) / 2;
+    return -Math.log(1 - this.rng()) / Math.max(lamC, 0.01);
+  }
+  _mk(cls, tArr){
+    const spec = DEMO.CLS[cls];
+    return { id:this.nextId++, cls, V:spec.V, T0:spec.T0, heavy:spec.heavy,
+      tArr, tDisp:null, tLoadS:null, tLoadE:null,
+      bytes: spec.V, compP:0, phase:'arrived' };
+  }
+  step(dt){
+    const o = this.o, now = this.t;
+    /* 1. 到达：A 每簇 K 条同刻；B/C 泊松 */
+    this.nextArr.A -= dt;
+    while (this.nextArr.A <= 0){
+      for (let i = 0; i < DEMO.CLUSTER_K; i++)
+        this.arrivalQ.push(this._mk('A', now + this.nextArr.A));
+      this.nextArr.A += this._exp('A') * DEMO.CLUSTER_K;
+    }
+    for (const cls of ['B','C']){
+      this.nextArr[cls] -= dt;
+      while (this.nextArr[cls] <= 0){
+        this.arrivalQ.push(this._mk(cls, now + this.nextArr[cls]));
+        this.nextArr[cls] += this._exp(cls);
+      }
+    }
+    /* 2. 调度层（Dynamo）准入 */
+    const issued = this._count(r => r.heavy && r.tDisp !== null && r.phase !== 'done');
+    const slack = r => 4 * r.T0 - (now - r.tArr) - r.T0;
+    const bySlack = (a,b) => slack(a) - slack(b) || a.id - b.id;
+    let queue = this.arrivalQ.slice().sort(bySlack);
+    let heavyAdm = 0; // 本 tick 已放行的重流数（issued 在 tick 内不自动更新）
+    for (const r of queue){
+      let go = true;
+      if (o.mode === 'immediate'){ go = true; }
+      else if (o.mode === 'single'){
+        go = !r.heavy || issued + heavyAdm < DEMO.QUOTA;
+      } else { // two
+        const act = this._count(x => x.phase === 'loading' && x.heavy);
+        const inf = this._count(x => x.heavy && x.phase === 'waiting' && x.tDisp !== null);
+        go = !r.heavy || act + inf + heavyAdm < DEMO.QUOTA + DEMO.INFLIGHT_BOUND;
+        if (go && r.heavy &&
+            this.insts.every(i => i.waiting.length > DEMO.BP_WAITING)){ go = false; } // G5 反压
+      }
+      if (!go) continue;
+      const idx = this.arrivalQ.indexOf(r);
+      if (idx < 0) continue;
+      this.arrivalQ.splice(idx, 1);
+      r.tDisp = now; r.phase = 'waiting';
+      const tgt = this._pickInst(r.heavy);
+      if (tgt < 0) continue; // 全部实例被反压：留在调度层
+      this.insts[tgt].waiting.push(r);
+      if (r.heavy) heavyAdm++;
+    }
+    /* 3. 引擎层（vLLM 实例） */
+    const loads = [];
+    for (const inst of this.insts){
+      const tfsE = o.mode === 'two';
+      inst.waiting.sort(tfsE
+        ? (a,b) => (a.phase === 'ready' ? 0 : 1) - (b.phase === 'ready' ? 0 : 1) || bySlack(a,b) // E3 就绪优先 + E1 slack 序
+        : (a,b) => a.id - b.id);                                                               // 原生 FIFO
+      if (tfsE){
+        /* E 模式：异步加载位不等计算预算（对应 load_kv 与 running 解耦），
+           仅受 E2 重流上限约束；被上限挡住的重流不阻塞后面的轻流 */
+        let hLoad = inst.loading.filter(x => x.heavy).length;
+        for (let i = 0; i < inst.waiting.length; ){
+          const w = inst.waiting[i];
+          if (w.V > 0 && w.phase !== 'ready'){
+            if (w.heavy && hLoad >= DEMO.E_CAP){ i++; continue; }
+            inst.waiting.splice(i, 1);
+            w.phase = 'loading'; w.tLoadS = now; inst.loading.push(w);
+            if (w.heavy) hLoad++;
+          } else i++;
+        }
+        /* 计算位准入：节奏化（token 预算示意化）+ 就绪优先；零读的 C 直接走这里 */
+        inst.admitCd -= dt;
+        let guard = 8;
+        while (inst.admitCd <= 0 && guard--){
+          if (inst.batch.length >= o.bs) break;
+          let pick = -1;
+          for (let i = 0; i < inst.waiting.length; i++){
+            const w = inst.waiting[i];
+            if (w.phase === 'ready' || w.V === 0){ pick = i; break; }
+          }
+          if (pick < 0) break;
+          const w = inst.waiting.splice(pick, 1)[0];
+          if (w.phase !== 'ready'){ w.phase = 'ready'; w.tLoadE = now; }
+          inst.batch.push(w);
+          inst.admitCd += DEMO.ADMIT_DT * (1 + 0.5 * inst.batch.length);
+        }
+      } else {
+        /* 原生：FIFO 进计算位，加载占位且整批可被加载成员卡住（批等待） */
+        inst.admitCd -= dt;
+        let guard = 8;
+        while (inst.admitCd <= 0 && guard--){
+          if (inst.batch.length >= o.bs) break;
+          const w = inst.waiting.shift();
+          if (!w) break;
+          if (w.V > 0){ w.phase = 'loading'; w.tLoadS = now; }
+          else { w.phase = 'ready'; w.tLoadE = now; }
+          inst.batch.push(w);
+          inst.admitCd += DEMO.ADMIT_DT * (1 + 0.5 * inst.batch.length);
+        }
+      }
+      for (const r of inst.loading) loads.push(r);
+      for (const r of inst.batch) if (r.phase === 'loading') loads.push(r);
+    }
+    /* 4. 带宽分摊与加载推进 */
+    const n = loads.length;
+    const rate = n > 0 ? DEMO.PIPE / n : 0;
+    for (const inst of this.insts){
+      const advance = r => { r.bytes -= rate * dt;
+        if (r.bytes <= 0){ r.bytes = 0; r.tLoadE = now; r.phase = 'ready'; } };
+      for (let i = inst.loading.length - 1; i >= 0; i--){
+        const r = inst.loading[i]; advance(r);
+        if (r.phase === 'ready'){
+          inst.loading.splice(i, 1);
+          if (inst.batch.length < o.bs) inst.batch.push(r);       // E3：就绪直接进计算位
+          else inst.waiting.unshift(r);                            // 暂无空位，回队首
+        }
+      }
+      for (let i = inst.batch.length - 1; i >= 0; i--){
+        const r = inst.batch[i];
+        if (r.phase === 'loading') advance(r);
+      }
+      /* 5. 计算：原生模式整批被加载中的成员卡住（批等待）；两层模式不卡（加载不在计算位） */
+      const stalled = o.mode !== 'two' && inst.batch.some(r => r.phase === 'loading');
+      inst.stalled = stalled;
+      for (let i = inst.batch.length - 1; i >= 0; i--){
+        const r = inst.batch[i];
+        if (r.phase === 'ready' && !stalled){
+          r.compP += dt / r.T0;
+          if (r.compP >= 1){
+            inst.batch.splice(i, 1);
+            r.phase = 'done';
+            this.done.push({ cls:r.cls,
+              ttft: now - r.tArr, met: (now - r.tArr) <= 4 * r.T0,
+              centralWait: r.tDisp !== null ? r.tDisp - r.tArr : 0 });
+          }
+        }
+      }
+    }
+    /* 6. 统计采样 */
+    const issuedN = this._count(r => r.heavy && r.tDisp !== null && r.phase !== 'done');
+    const activeN = this._count(r => r.phase === 'loading' && r.heavy);
+    const bw = n > 0 ? Math.min(1, n * rate / DEMO.PIPE) : 0;
+    this.acc.gapSum += (issuedN - activeN); this.acc.gapN++;
+    this.acc.bwSum += bw; this.acc.bwN++;
+    let bsAcc = 0; for (const inst of this.insts) bsAcc += inst.batch.length;
+    this.acc.bsSum += bsAcc / DEMO.N_INST; this.acc.bsN++;
+    if (!this.hist.length || now - this.hist[this.hist.length-1].t >= 0.1)
+      this.hist.push({ t: now, issued: issuedN, active: activeN });
+    if (this.hist.length > 900) this.hist.splice(0, 100);
+    this.t += dt;
+  }
+  _count(f){ let k = 0;
+    for (const r of this.arrivalQ) if (f(r)) k++;
+    for (const inst of this.insts){
+      for (const r of inst.waiting) if (f(r)) k++;
+      for (const r of inst.loading) if (f(r)) k++;
+      for (const r of inst.batch) if (f(r)) k++;
+    } return k; }
+  _pickInst(heavy){
+    let best = -1, bestS = Infinity;
+    for (let i = 0; i < this.insts.length; i++){
+      const inst = this.insts[i];
+      if (heavy && this.o.mode === 'two' && inst.waiting.length > DEMO.BP_WAITING) continue;
+      const s = inst.waiting.length + inst.loading.length + inst.batch.length * 0.5 + this.rng() * 0.01;
+      if (s < bestS){ bestS = s; best = i; }
+    } return best;
+  }
+  stats(){
+    const per = cls => { const d = this.done.filter(x => !cls || x.cls === cls);
+      return d.length ? d.filter(x => x.met).length / d.length : NaN; };
+    const avg = (arr, f) => arr.length ? arr.reduce((s,x) => s + f(x), 0) / arr.length : NaN;
+    const heavyDone = this.done.filter(x => x.cls === 'A');
+    return {
+      n: this.done.length, slo: per(null), sloA: per('A'), sloC: per('C'),
+      ttft: avg(this.done, x => x.ttft) * 1000,
+      cw: avg(heavyDone, x => x.centralWait) * 1000,
+      gap: this.acc.gapN ? this.acc.gapSum / this.acc.gapN : 0,
+      bw: this.acc.bwN ? this.acc.bwSum / this.acc.bwN : 0,
+      bs: this.acc.bsN ? this.acc.bsSum / this.acc.bsN : 0
+    };
+  }
+  ledgerNow(){
+    return {
+      issued: this._count(r => r.heavy && r.tDisp !== null && r.phase !== 'done'),
+      active: this._count(r => r.phase === 'loading' && r.heavy),
+      inflight: this._count(r => r.heavy && r.phase === 'waiting' && r.tDisp !== null)
+    };
+  }
+}
+
+/* ================= UI 绑定（浏览器内才执行） ================= */
+if (typeof document !== 'undefined' && document.getElementById('instances')){
+
+  const ui = {
+    mode: 'single', lam: 50, hf: 0.33, bs: 8, speed: 1, playing: false,
+    sim: null, raf: null, lastTs: null, acc: 0
+  };
+  const DT = 0.01; // 模拟步长 10ms
+
+  function newSim(){ ui.sim = new Sim({ mode: ui.mode, lam: ui.lam, hf: ui.hf, bs: ui.bs, seed: 42 }); }
+  function chip(r, late){
+    const el = document.createElement('span');
+    el.className = 'chip ' + r.cls + (late ? (late < 0 ? ' dead' : ' late') : '');
+    el.textContent = r.cls;
+    el.title = '#' + r.id + ' ' + r.cls + ' 到达 ' + (r.tArr*1000|0) + 'ms';
+    return el;
+  }
+  function renderChips(host, reqs, cap){
+    host.textContent = '';
+    const now = ui.sim.t;
+    for (const r of reqs.slice(0, cap)){
+      const slack = 4 * r.T0 - (now - r.tArr) - r.T0;
+      host.appendChild(chip(r, slack < 0.02 ? (slack < 0 ? -1 : 1) : 0));
+    }
+    if (reqs.length > cap){ const m = document.createElement('span'); m.className = 'more';
+      m.textContent = '+' + (reqs.length - cap); host.appendChild(m); }
+  }
+
+  function render(){
+    const s = ui.sim, o = s.o;
+    document.getElementById('t-sim').textContent = 't = ' + s.t.toFixed(1) + ' s';
+    renderChips(document.getElementById('arrivals'), s.arrivalQ, 26);
+    const led = s.ledgerNow();
+    document.getElementById('n-issued').textContent = led.issued;
+    document.getElementById('n-active').textContent = led.active;
+    document.getElementById('n-inflight').textContent = led.inflight;
+    document.getElementById('n-quota').textContent = DEMO.QUOTA;
+    document.getElementById('dynamo-sub').textContent =
+      o.mode === 'immediate' ? '直接提交：到达即下发（无准入）' :
+      o.mode === 'single' ? 'TFS 单层（现状）：重流按 issued 账本限发' :
+      'TFS-G：重流按 active 账本 + 在途预算限发，带实例反压';
+    const dwHost = document.getElementById('dynamo-wait');
+    dwHost.textContent = o.mode === 'immediate' ? '（不做准入，直接下发）' : '';
+    if (o.mode !== 'immediate') renderChips(dwHost, s.arrivalQ, 18);
+    for (const [rid, on] of [
+      ['G1', o.mode !== 'immediate'], ['G2', o.mode !== 'immediate'],
+      ['G4', o.mode === 'single' || o.mode === 'two'], ['G5', o.mode === 'two']
+    ]) document.querySelector('.rule[data-r="' + rid + '"]').classList.toggle('on', on);
+    const host = document.getElementById('instances');
+    host.textContent = '';
+    for (let i = 0; i < s.insts.length; i++){
+      const inst = s.insts[i];
+      const box = document.createElement('div'); box.className = 'box inst';
+      const eBadge = o.mode === 'two'
+        ? '<span class="badge-e">TFS-E 开</span>' : '<span class="badge-e off">引擎原生</span>';
+      box.innerHTML = '<header><span class="t">vLLM 实例 ' + (i+1) + '</span>' + eBadge + '</header>';
+      const wRow = document.createElement('div'); wRow.className = 'irow';
+      wRow.innerHTML = '<span class="lbl">waiting</span>';
+      const wChips = document.createElement('div'); wChips.className = 'chips';
+      renderChips(wChips, inst.waiting, 14); wRow.appendChild(wChips); box.appendChild(wRow);
+      const lRow = document.createElement('div'); lRow.className = 'irow';
+      lRow.innerHTML = '<span class="lbl">' + (o.mode === 'two' ? '加载位' : '加载中') +
+        (o.mode === 'two' ? '（重流≤' + DEMO.E_cap + '）' : '') + '</span>';
+      const lb = document.createElement('div'); lb.className = 'loadbars';
+      const src = o.mode === 'two' ? inst.loading : inst.batch.filter(r => r.phase === 'loading');
+      for (const r of src){
+        const bar = document.createElement('div'); bar.className = 'lbar ' + r.cls;
+        const f = document.createElement('i');
+        f.style.width = r.V > 0 ? (100 * (1 - r.bytes / r.V)).toFixed(1) + '%' : '100%';
+        bar.appendChild(f); lb.appendChild(bar);
+      }
+      if (!src.length) lb.innerHTML = '<span class="more">—</span>';
+      lRow.appendChild(lb); box.appendChild(lRow);
+      const bRow = document.createElement('div'); bRow.className = 'irow';
+      bRow.innerHTML = '<span class="lbl">计算位' + (inst.stalled ? ' <span class="stall">批等待</span>' : '') + '</span>';
+      const slots = document.createElement('div'); slots.className = 'slots';
+      for (let k = 0; k < o.bs; k++){
+        const r = inst.batch[k];
+        const slot = document.createElement('div');
+        if (r){ slot.className = 'slot ' + r.cls + (r.phase === 'loading' ? ' load' : '');
+          slot.textContent = r.cls + (r.phase === 'loading' ? '…' : '');
+          const fill = document.createElement('div'); fill.className = 'fill';
+          fill.style.height = r.phase === 'ready' ? (100 * Math.min(1, r.compP)).toFixed(0) + '%' : '0%';
+          slot.appendChild(fill);
+        } else slot.textContent = '·';
+        slots.appendChild(slot);
+      }
+      bRow.appendChild(slots); box.appendChild(bRow);
+      host.appendChild(box);
+    }
+    const pipe = document.getElementById('pipe');
+    pipe.querySelectorAll('.segm').forEach(e => e.remove());
+    const loads = [];
+    for (const inst of s.insts){
+      for (const r of inst.loading) loads.push(r);
+      for (const r of inst.batch) if (r.phase === 'loading') loads.push(r);
+    }
+    const share = loads.length ? 100 / loads.length : 0;
+    for (const r of loads){
+      const d = document.createElement('div');
+      d.className = 'segm'; d.style.width = share + '%';
+      d.style.background = r.cls === 'A' ? 'var(--a)' : 'var(--b)';
+      d.title = '#' + r.id + ' ' + r.cls;
+      pipe.insertBefore(d, document.getElementById('pipe-mark'));
+    }
+    const st = s.stats();
+    const set = (id, v, cls) => { const el = document.getElementById(id);
+      el.textContent = v; el.className = 'v' + (cls ? ' ' + cls : ''); };
+    const pct = x => isNaN(x) ? '—' : (100 * x).toFixed(1) + '%';
+    set('m-slo', pct(st.slo), st.slo >= 0.7 ? 'good' : (st.slo < 0.4 ? 'bad' : ''));
+    set('m-sloA', pct(st.sloA)); set('m-sloC', pct(st.sloC));
+    set('m-ttft', isNaN(st.ttft) ? '—' : st.ttft.toFixed(0) + ' ms');
+    set('m-cw', isNaN(st.cw) ? '—' : st.cw.toFixed(0) + ' ms', st.cw > 150 ? 'bad' : '');
+    set('m-gap', st.gap.toFixed(2) + ' 条', st.gap > 1 ? 'bad' : 'good');
+    set('m-bw', (100 * st.bw).toFixed(0) + '%');
+    set('m-bs', st.bs.toFixed(2));
+    drawChart();
+  }
+
+  function drawChart(){
+    const cv = document.getElementById('chart'), ctx = cv.getContext('2d');
+    const W = cv.width, H = cv.height;
+    const css = getComputedStyle(document.documentElement);
+    const cA = css.getPropertyValue('--a').trim(), cM = css.getPropertyValue('--muted').trim();
+    ctx.clearRect(0, 0, W, H);
+    const s = ui.sim; if (s.hist.length < 2) return;
+    const t0 = s.hist[0].t, t1 = Math.max(s.hist[s.hist.length-1].t, t0 + 1);
+    const maxY = Math.max(4, DEMO.QUOTA + 2, ...s.hist.map(h => Math.max(h.issued, h.active))) + 0.5;
+    const X = t => 8 + (W - 16) * (t - t0) / (t1 - t0);
+    const Y = v => H - 10 - (H - 20) * v / maxY;
+    ctx.strokeStyle = cM; ctx.setLineDash([2,4]); ctx.globalAlpha = 0.6;
+    ctx.beginPath(); ctx.moveTo(8, Y(DEMO.QUOTA)); ctx.lineTo(W-8, Y(DEMO.QUOTA)); ctx.stroke();
+    ctx.setLineDash([]); ctx.globalAlpha = 1;
+    const line = (key, color, dash) => {
+      ctx.strokeStyle = color; ctx.lineWidth = 2; ctx.setLineDash(dash || []);
+      ctx.beginPath();
+      s.hist.forEach((h, i) => i ? ctx.lineTo(X(h.t), Y(h[key])) : ctx.moveTo(X(h.t), Y(h[key])));
+      ctx.stroke(); ctx.setLineDash([]);
+    };
+    line('issued', cA, [6,4]);
+    line('active', cA, []);
+  }
+
+  function reset(){ if (ui.raf) cancelAnimationFrame(ui.raf); ui.raf = null; ui.lastTs = null; ui.acc = 0; newSim(); render(); }
+  document.querySelectorAll('input[name=mode]').forEach(r => r.addEventListener('change', e => {
+    ui.mode = e.target.value; reset(); }));
+  const bind = (id, vid, fmt, f) => { const el = document.getElementById(id);
+    el.addEventListener('input', () => { f(+el.value);
+      document.getElementById(vid).textContent = fmt(el.value); reset(); }); };
+  bind('r-lam', 'v-lam', v => v + ' 条/s', v => ui.lam = v);
+  bind('r-hf', 'v-hf', v => v + '%', v => ui.hf = v / 100);
+  bind('r-bs', 'v-bs', v => v, v => ui.bs = v);
+  document.getElementById('sel-speed').addEventListener('change', e => ui.speed = +e.target.value);
+  document.getElementById('btn-reset').addEventListener('click', reset);
+  document.getElementById('btn-step').addEventListener('click', () => { ui.sim.step(DT * 20); render(); });
+  const playBtn = document.getElementById('btn-play');
+  playBtn.addEventListener('click', () => {
+    ui.playing = !ui.playing; playBtn.textContent = ui.playing ? '暂停' : '播放'; });
+
+  function frame(ts){
+    if (ui.lastTs === null) ui.lastTs = ts;
+    const real = Math.min(0.1, (ts - ui.lastTs) / 1000); ui.lastTs = ts;
+    if (ui.playing){
+      ui.acc += real * ui.speed * 0.5; // 1× = 每 1 实秒推进 0.5 模拟秒
+      let guard = 400;
+      while (ui.acc >= DT && guard--){ ui.sim.step(DT); ui.acc -= DT; }
+      render();
+    }
+    ui.raf = requestAnimationFrame(frame);
+  }
+  const reduced = matchMedia('(prefers-reduced-motion: reduce)').matches;
+  newSim(); render();
+  if (!reduced){ ui.playing = true; playBtn.textContent = '暂停'; }
+  ui.raf = requestAnimationFrame(frame);
+}
+</script>
+</body>
+</html>
