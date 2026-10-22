@@ -14,6 +14,9 @@ import random
 
 from adv.core import ADV_ROOT, build_scenario, evaluate, base_policies, judge_tfs
 from adv.generators import SINGLE_GENS, TWO_GENS
+from adv.generators_w3 import W_SINGLE, W_TWO
+SINGLE_GENS = {**SINGLE_GENS, **W_SINGLE}
+TWO_GENS = {**TWO_GENS, **W_TWO}
 from adv.tfs_versions import make_single
 from adv.two_layer import (TwoLayerEngine, TwoLayerPolicy, judge_two,
                            policy_immediate, policy_single)
@@ -24,9 +27,19 @@ HOME_SEEDS = [416, 417, 418]
 
 
 def run_single_round(gen_name, payload, wave, tfs_factory, rnd, seed=0):
+    from fractions import Fraction as F
+    kw = {}
+    if payload.get("b_sched"):
+        kw["b_schedule"] = tuple((F(int(t * 1000)), F(int(v)))
+                                 for t, v in payload["b_sched"])
+    if payload.get("sigma"):
+        from sim.cq.config import ObservationConfig
+        kw["observation"] = ObservationConfig(sigma=F(payload["sigma"]).limit_denominator(10**6))
+    if payload.get("alloc"):
+        kw["alloc"] = payload["alloc"]
     scn = build_scenario(b_gbps=payload.get("B", 120.0),
                          b_ref=payload.get("b_ref", None),
-                         guard_w=payload.get("guard_w", 0.0))
+                         guard_w=payload.get("guard_w", 0.0), **kw)
     res = evaluate(payload["specs"], scn, base_policies(tfs_factory))
     v = judge_tfs(res, payload["specs"])
     return {
@@ -147,6 +160,7 @@ def main():
                 rec["verdict"] = "kill_verified"
                 rec["verify_seeds"] = votes
                 kills.append(rec)
+                log(JSONL, rec)   # 确认后回写（含 kill_verified 与复核票）
                 log(KILLS, {"wave": args.wave, "gen": g, "seed": seed,
                             "params": rec.get("params", {}),
                             "detail": rec.get("detail", ""),

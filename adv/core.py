@@ -24,20 +24,25 @@ ADV_ROOT = os.path.join("results", "adv")  # results/ gitignored，JSONL 落此�
 
 def build_scenario(b_gbps: float = 120.0, m_workers: int = M_WORKERS,
                    alpha: float = 4.0, alloc: str = "fcfs",
-                   b_ref: float = None, guard_w: float = 0.0) -> CqScenario:
+                   b_ref: float = None, guard_w: float = 0.0,
+                   b_schedule=None, observation=None) -> CqScenario:
     """对抗场景：默认与 E26f 母实验同物理（B=120、q_max=200、b_ref=120、L=8、n_max=1）。
 
     b_ref 允许与物理 B 脱钩（G6 参考带宽过期攻击）；guard_w 启用老化锚点。"""
     from fractions import Fraction as F
+    kw = {}
+    if observation is not None:
+        kw["observation"] = observation
     return CqScenario(
         scenario_name=f"adv_B{b_gbps:g}", profile=E26_PROFILE,
-        storage=StorageConfig(b_schedule=((F(0), F(int(b_gbps))),),
-                              q_max_gbps=F(200),
-                              b_ref_gbps=F(int(b_ref if b_ref else b_gbps)),
-                              alloc=alloc),
+        storage=StorageConfig(
+            b_schedule=b_schedule or ((F(0), F(int(b_gbps))),),
+            q_max_gbps=F(200),
+            b_ref_gbps=F(int(b_ref if b_ref else b_gbps)),
+            alloc=alloc),
         limits=E26_LIMITS, m_workers=m_workers, alpha_slo=F(int(alpha)),
         guard_w=F(guard_w) if guard_w else F(0),
-        source_kind="synthetic", trace_key="adv")
+        source_kind="synthetic", trace_key="adv", **kw)
 
 
 # ---------------------------------------------------------------------------
@@ -153,11 +158,15 @@ def judge_tfs(res: Dict[str, RunMetrics], specs,
         if tfs_c <= 0.02 and best_c >= 0.30 and tfs.busy_frac < 1 - IDLE_STARVE:
             return Verdict(True, "starve",
                            f"类{c} 饿死(0%)且空闲 {1-tfs.busy_frac:.0%}", (best_c - tfs_c) * 100)
+    # 20261023 Wave3 修正：填空律击杀需可行性护栏——至少一个基线在该类做到
+    # ≥95%，否则是过载无解（W6 在 λ=450/s 时全策略 14% 被误判击杀）。
     for c in zero_read_classes(specs):
         z = tfs.cls_slo.get(c, 1.0)
-        if z < FILL_ZERO_READ and tfs.busy_frac < 0.90:
+        best_z = max((b.cls_slo.get(c, 0.0) for b in bl.values()), default=0.0)
+        if z < FILL_ZERO_READ and tfs.busy_frac < 0.90 and best_z >= 0.95:
             return Verdict(True, "fill",
-                           f"零读类{c} SLO {z:.1%}（填空律破）", (1 - z) * 100)
+                           f"零读类{c} SLO {z:.1%}（填空律破，基线可达 {best_z:.0%}）",
+                           (1 - z) * 100)
     return Verdict(False, "none", "", 0.0)
 
 

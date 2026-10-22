@@ -13,6 +13,12 @@
 - keymode       'slack'（原版）| 'dslack'（升级项：deadline 为主、slack tie-break）
 - captol(升级)  cap 容差 ×1.10（Wave1 G5 归因：2×64.94=129.9 > 120 把毒丸
                 串行化、毒窗×2；10% 容差换 8% 超订、读拉伸被期限余量吸收）
+- dnmed(升级)   下修用近 5 份报价中位数、阈值 0.85、底 0.75×b_ref（Wave3 W5：
+                σ=15 时 0.9 阈值落在噪声带内、双份迟滞不够，低点把 cap 拖到
+                ~105 → 4 并发降 3 → 近容量负载 0.018 vs 基线 1.000）
+- ovswitch(升级) 过载切换：排队深度 >2m 持续 3 次决策 → 排序切 deadline 主序
+                （Wave3 W6：非稳态过载突发期 slack 序的滚动活流窗口饿死受害者，
+                稳态不可能定理不覆盖此形态；深度 <m 时切回）
 - wl×active 联动：账本只计仍在读的重流（D1×D2 正交叠加，Wave1 G2/G4
   波量化损失的修复——波内早读者的末层计算期放行下一条）
 
@@ -35,6 +41,8 @@ class TFSAdv(TFS):
     TIGHT, WIDE = 0.5, 1.0
     DN_RATIO, DN_K = 0.90, 2
     UP_RATIO, UP_K = 1.25, 3
+    DN_MED_N, DN_MED_RATIO, DN_FLOOR_X = 9, 0.80, 0.75
+    OV_ON, OV_K = 1.0, 3        # 深度>1×m 持续 3 决策 → 切；<0.5×m → 切回
     CAP_TOL = 1.10
 
     def __init__(self, flags=None, keymode="slack", hist=None):
@@ -45,6 +53,8 @@ class TFSAdv(TFS):
         self._prev_q = None       # D7 报价差分
         self._sat_run = 0
         self._dn = 0; self._up = 0; self._cap_up = None
+        self._bw_ring = []        # dnmed：近 DN_MED_N 份 bw_hat
+        self._ov_run = 0; self._ov_on = False   # ovswitch 状态
 
     # -- D6：偏差修正版 d 计算 --
     def _d_map(self, snap):
@@ -71,24 +81,35 @@ class TFSAdv(TFS):
                 self._heavy[rid] = (d[rid] >= d_heavy) or (d[rid] >= d_abs)
         return self._heavy[rid]
 
-    # -- D1：观测钳制 cap --
+    # -- D1：观测钳制 cap（v3：中位数下修 + 上修保留）--
     def _cap(self, snap, d_heavy: float) -> float:
         b_ref = float(snap.b_ref)
         cap = b_ref
         if snap.quote is not None:
             bw = float(snap.quote.bw_hat_gbps)
-            if bw < self.DN_RATIO * b_ref:
-                self._dn += 1
+            if "dnmed" in self.flags:
+                self._bw_ring.append(bw)
+                if len(self._bw_ring) > self.DN_MED_N:
+                    self._bw_ring.pop(0)
+                if len(self._bw_ring) >= self.DN_MED_N:
+                    med = sorted(self._bw_ring)[len(self._bw_ring) // 2]
+                    if med < self.DN_MED_RATIO * b_ref:
+                        cap = min(cap, max(med, self.DN_FLOOR_X * b_ref))
             else:
-                self._dn = 0
-            if self._dn >= self.DN_K:
-                cap = min(cap, bw)
+                if bw < self.DN_RATIO * b_ref:
+                    self._dn += 1
+                else:
+                    self._dn = 0
+                if self._dn >= self.DN_K:
+                    cap = min(cap, bw)
+            # 上修路径（G6 参考带宽过期的修复）：与下修正交
             if bw >= self.UP_RATIO * b_ref:
                 self._up += 1
                 if self._up >= self.UP_K:
                     self._cap_up = bw if self._cap_up is None else min(self._cap_up, bw)
             else:
-                self._up = 0; self._cap_up = None
+                self._up = 0
+                self._cap_up = None
             if self._cap_up is not None:
                 cap = max(cap, min(self._cap_up, 2.0 * b_ref))
         return max(cap, d_heavy)
@@ -165,8 +186,25 @@ class TFSAdv(TFS):
         queued = [r for r in snap.requests if r.rid in snap.queued]
         slack = {r.rid: float(r.deadline_s) - now - float(r.T0_s) for r in queued}
 
+        # ovswitch：过载突发期切 deadline 主序（slack 序的稳态防饿死不覆盖
+        # 非稳态；深度迟滞防抖动）
+        if "ovswitch" in f:
+            depth = len(queued)
+            m = max(1, len(snap.workers))
+            if depth > self.OV_ON * m:
+                self._ov_run += 1
+            elif depth < 0.5 * m:
+                self._ov_run = 0
+                self._ov_on = False
+            if self._ov_run >= self.OV_K:
+                self._ov_on = True
+
         def key(r):
             sl = slack[r.rid]
+            if self._ov_on:
+                if "hope" in f and sl <= -1.0 * float(r.T0_s):
+                    return (1, float(r.arrival_s), r.rid)
+                return (0, float(r.deadline_s), r.rid)
             if self.keymode == "dslack":
                 return (float(r.deadline_s), sl, r.rid)
             if "hope" in f and sl <= -1.0 * float(r.T0_s):
