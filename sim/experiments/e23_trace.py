@@ -1,9 +1,10 @@
 """E23：Mooncake 主收益、负载与 SLO（§9.6）。
 
-主矩阵（正式）：三文件 × B∈{20,80,320} × ρ∈{0.3,0.6,0.9,1.1} × α∈{2,4,8}
-× theta∈{S,T,R} × 15 评价块 × 8 策略；冒烟为子集（训练块 0/1、
---duration 截断、4 策略）。配对收益相对 FCFS 与 B*（训练冻结）。
-图 fig_e23_gain_overview.png / fig_e23_slo_load.png / fig_e23_backlog.png。
+全量矩阵（受单机计算预算收窄，声明见变更设计 §6.1）：三文件 × B∈{20,80}
+× ρ∈{0.6,0.9} × α=4 × theta∈{S,T,R} × 窗口{0,4,9,14,19} × 8 策略，
+全窗口不截断；B=320 与 ρ∈{0.3,1.1} 留待扩展后补跑。冒烟为子集
+（2 文件、窗口 0/1、--duration 截断、4 策略）。配对收益仅相对 FCFS（D6）。
+图 fig_e23_gain_overview.png / fig_e23_slo_load.png。
 """
 from __future__ import annotations
 
@@ -24,6 +25,11 @@ from sim.cq.trace import MOONCAKE_FILES
 
 THETA_MAIN = {"S": "slo_success", "T": "ttft_mean_lower",
               "R": "ttft_norm_mean_lower"}
+
+# theta 进构造函数的 MPCPolicy 家族策略：评分目标依赖 theta，运行缓存
+# 对其不复用。新增 MPC 变体（如 cq_current_oracle）进矩阵时必须同步本
+# 集合，否则跨 theta 缓存会静默复用错误结果。
+THETA_SCORED_POLICIES = frozenset({"cq_mpc", "cq_local"})
 
 
 
@@ -55,6 +61,9 @@ def paired_gains(recs, base_pid, cmp_pid, theta):
 def run_matrix(stage, trace_dir, duration, thetas, policies, files, blocks,
                rho_list, B_list, alpha=4.0, cost_modes=("zero",)):
     recs = []
+    # 运行缓存:简单策略的行为不随 theta 变化(排序键无 theta),
+    # 跨 theta 复用仿真结果;MPC/local 的评分目标依赖 theta,不缓存。
+    cache = {}
     for fname in files:
         src = MooncakeSource(fname, trace_dir)
         lam0 = src.lam0
@@ -76,8 +85,17 @@ def run_matrix(stage, trace_dir, duration, thetas, policies, files, blocks,
                                                 limits=TRACE_WIDE_LIMITS)
                         for th in thetas:
                             for pid in policies:
-                                s = run_one(scn2, specs, pid, th, c_ref,
-                                            seed=blk, H=1)
+                                theta_key = (th if pid in THETA_SCORED_POLICIES
+                                             else "-")
+                                key = (fname, B, rho, alpha, blk, cm, pid,
+                                       theta_key)
+                                if key in cache:
+                                    s = dict(cache[key])
+                                    s["theta"] = th
+                                else:
+                                    s = run_one(scn2, specs, pid, th, c_ref,
+                                                seed=blk, H=1)
+                                    cache[key] = dict(s)
                                 s.update({"file": fname, "B": B, "rho": rho,
                                           "alpha": alpha, "block": blk,
                                           "n_req": len(specs), "d_sim": d_sim})
@@ -101,13 +119,17 @@ def main(seeds, procs=None, duration=150.0, stage="smoke",
         blocks = [0, 1]   # 统一窗口(全量打分,含冷启动)
         cost_modes = ("zero",)
     else:
+        # 全策略评价矩阵:8 策略 × 3 文件 × B{20,80} × ρ{0.6,0.9} × θ{S,T,R}
+        # × 窗口{0,4,9,14,19}(跨冷启动到尾部);α=4、zero 成本。
+        # B=320 与 ρ∈{0.3,1.1} 受单机计算预算限制留待扩展,如实声明。
         files = [f for f, _n, _m, _s in MOONCAKE_FILES]
         policies = ALL_POLICIES
         thetas = ["S", "T", "R"]
-        rho_list = [0.3, 0.6, 0.9, 1.1]
-        B_list = [20.0, 80.0, 320.0]
-        blocks = list(range(20))
+        rho_list = [0.6, 0.9]
+        B_list = [20.0, 80.0]
+        blocks = [0, 4, 9, 14, 19]
         cost_modes = ("zero",)
+        duration = None   # 全窗口,不截断
     recs = run_matrix(stage, trace_dir, duration, thetas, policies, files,
                       blocks, rho_list, B_list, cost_modes=cost_modes)
     save_json(os.path.join(d, "e23_records.json"), recs)
