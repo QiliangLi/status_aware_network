@@ -236,7 +236,7 @@
         <td><span class="who E">E</span>批内不阻塞：未就绪的重流不得挡住已就绪的轻/零流（E3 就绪优先）。</td></tr>
       <tr><td><b>错峰</b></td>
         <td><span class="who G">G</span>全局 active 账本 + 在途预算，重流并发 ≤ C（G2）。</td>
-        <td><span class="who E">E</span>实例内加载并发上限（E2），字节口径——同一物理约束的另一半控制权。</td></tr>
+        <td><span class="who E">E</span>实例内加载并发上限（E2），按字节设上限（估计有误差时不跳档）——同一物理约束的另一半控制权。</td></tr>
       <tr><td><b>账本</b></td>
         <td><span class="who G">G</span>持有并决策；口径从 issued 改为 active。</td>
         <td><span class="who E">E</span>每步上报：正在加载集合、剩余字节、waiting 深度（E4）。</td></tr>
@@ -262,7 +262,7 @@
     <span>active 口径只数 ③</span><div class="bar bracket active" style="flex:0.7"></div>
   </div>
   <p class="note">外部旁证：vLLM 官方 RFC <a href="https://github.com/vllm-project/vllm/issues/62532">#62532</a> 实测，
-    异步 KV 拉取的墙钟 <b>80% 以上是 ② 这段调度排队</b>，传输（③）只占零头——1.0~1.8s 总时延里线路传输仅 208~283ms。
+    一次异步 KV 拉取的总耗时（墙钟）里，<b>80% 以上花在 ② 这段排队上</b>——真正读数据不到两成：总耗时 1.0~1.8s，其中传输仅 208~283ms。
     batch 越大，② 越长，单层 TFS 的高估越重。本图解中的机理在 DV 工具上的实测属于验证方案（设计文档 §5 假设 H2）。</p>
 
   <h2>怎么用这个页面</h2>
@@ -279,7 +279,7 @@
     <p>配套文档：<a href="TFS工况边界与两层拆分设计-20261022.md">TFS工况边界与两层拆分设计-20261022.md</a> ·
       <a href="多级速率tfs对照-20261020.md">多级速率tfs对照-20261020.md</a>（DV 工具）·
       <a href="TFS局限性深入分析-20261018.md">TFS局限性深入分析-20261018.md</a></p>
-    <p>2026-10-22 · 生成于 status_aware_network 仓库</p>
+    <p>2026-10-22 生成 · 2026-10-23 表达微调（术语与设计文档对齐） · status_aware_network 仓库</p>
   </footer>
 </main>
 
