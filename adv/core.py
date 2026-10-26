@@ -180,6 +180,16 @@ def log_round(path: str, rec: dict):
         f.write(json.dumps(rec, ensure_ascii=False) + "\n")
 
 
+def make_fcfs_mod():
+    from sim.cq.policies import make_fcfs
+    return make_fcfs()
+
+
+def make_edf_mod():
+    from sim.cq.policies import make_edf
+    return make_edf()
+
+
 def base_policies(tfs_factory=None):
     """基线三件 + 当前 TFS 版本。tfs_factory 每轮新造（策略有自持历史）。"""
     return {
