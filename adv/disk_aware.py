@@ -71,6 +71,8 @@ class TFSDisk(TFSAdv):
     def decide(self, snap, scn) -> JointAction:
         if scn.storage.alloc != "max_min_disk":
             return super().decide(snap, scn)   # 非盘物理：回退 v3
+        if getattr(self, "feas_mode", False):
+            return self._decide_feas(snap, scn)
         disks = self._disks_of(scn)
         d, d_heavy, C, _hr, wake = self._d_map(snap)
         cap_d = self._disk_caps(snap, disks)
@@ -158,6 +160,119 @@ class TFSDisk(TFSAdv):
                 if f:
                     for dd, fr in f.items():
                         led[dd] += d[pick] * fr
+        return JointAction(tuple(acts))
+
+
+class TFSDiskFeas(TFSDisk):
+    """每盘期限可行性放行（容差两难的解法设计，20261026）。
+
+    静态份额账本的根因：把「满需求份额」恒定记账，用一条全局容差代理
+    「拉伸可否被期限吸收」——P1（在住者宽松，拉伸无害）需要松、P4（在住
+    者紧、对齐簇）需要紧，无常量可兼顾。解法：容差不设常量，直接按每盘
+    waterfill 比例缩放的代数预测做期限算术——
+      放行 c ⇔ 对每个盘 d：新 Σ需求 Σ'=D_d+d_c·f_cd，缩放 s=max(1,Σ'/cap_d)；
+      候选与所有在住者 i 的预测完成时刻 now + s·(剩余读量/d_i) ≤ 各自期限。
+    仍是零推演（一步代数，非模拟）；全部公开量。"""
+
+    feas_mode = True
+
+    def _decide_feas(self, snap, scn) -> JointAction:
+        disks = self._disks_of(scn)
+        d, d_heavy, C, _hr, wake = self._d_map(snap)
+        cap_d = self._disk_caps(snap, disks) / self.DISK_TOL  # 回除容差=纯容量
+        now = float(snap.now)
+        L = snap._profile_cfg.L
+        req = {r.rid: r for r in snap.requests}
+        queued = [r for r in snap.requests if r.rid in snap.queued]
+        slack = {r.rid: float(r.deadline_s) - now - float(r.T0_s)
+                 for r in queued}
+
+        def key(r):
+            return (0, slack[r.rid], float(r.deadline_s), r.rid)
+
+        order = sorted(queued, key=key)
+        # 在住者状态：每盘需求份额、剩余读量、期限
+        members = []          # (d_i, frac, rem_read_time, deadline, layers_done)
+        D = [0.0] * disks
+        for pw in snap.workers:
+            if not pw.members:
+                continue
+            rid0 = pw.members[0]
+            r0 = req.get(rid0)
+            if r0 is None:
+                continue
+            di = d.get(rid0, 0.0)
+            if di <= 0 or pw.layers_done >= L:
+                continue
+            f = self._fracs(r0.class_id, r0.h_tokens, disks)
+            if not f:
+                continue
+            rem_layers = L - pw.layers_done
+            rem_read = rem_layers / L * (float(r0.T0_s) * di and 1)  # 占位，下行算
+            # 自然读时间 = 剩余读量 / d；剩余读量 = V·rem_layers/L，V/d = T0 的读部分
+            # 用 V/d = (T0 − 纯算) 近似：直接 rem_layers × (V_layer/d)
+            V_layer = float(snap._profile_cfg.kappa_gb_per_token_layer) * r0.h_tokens
+            rem_read = rem_layers * V_layer / di
+            members.append((di, f, rem_read, float(r0.deadline_s)))
+            for dd, fr in f.items():
+                D[dd] += di * fr
+
+        def admit(cand) -> bool:
+            dc = d.get(cand.rid, 0.0)
+            if dc <= 0:
+                return True                      # 零读恒可行
+            f = self._fracs(cand.class_id, cand.h_tokens, disks)
+            if not f:
+                return True
+            prof = snap._profile_cfg
+            V_layer_c = float(prof.kappa_gb_per_token_layer) * cand.h_tokens
+            nat = L * V_layer_c / dc             # 候选自然读时间（=Σ层 V/d）
+            # 短路 1：候选加入后所有涉及盘都不超容量 → 无拉伸，直接放行
+            stretched = [dd for dd, fr in f.items()
+                         if D[dd] + dc * fr > cap_d]
+            if not stretched:
+                return True
+            # 候选自身：now + s·nat ≤ deadline
+            for dd in stretched:
+                s_str = (D[dd] + dc * f[dd]) / cap_d
+                if now + s_str * nat > float(cand.deadline_s):
+                    return False
+            # 短路 2：只查被拉伸盘上有份额的在住者
+            for di, fm, rem_read, dl in members:
+                hit = [dd for dd in fm if dd in stretched and fm[dd] > 0]
+                if not hit:
+                    continue
+                dd0 = max(hit, key=lambda x: (D[x] + dc * f.get(x, 0.0)) / cap_d)
+                s_str = (D[dd0] + dc * f.get(dd0, 0.0)) / cap_d
+                if now + s_str * rem_read > dl:
+                    return False
+            return True
+
+        acts, used = [], set()
+        for wid in sorted(snap.idle_workers):
+            pick = None
+            for r in order:
+                if r.rid in used:
+                    continue
+                if admit(r):
+                    pick = r.rid
+                    break
+            if pick is None:
+                acts.append(Action("WAIT", wid, (), wake))
+                continue
+            acts.append(Action("DISPATCH", wid, (pick,)))
+            used.add(pick)
+            # 放行后即时更新在住者视图（同刻多 worker）
+            r0 = req[pick]
+            di = d.get(pick, 0.0)
+            if di > 0:
+                f = self._fracs(r0.class_id, r0.h_tokens, disks)
+                prof = snap._profile_cfg
+                V_layer = float(prof.kappa_gb_per_token_layer) * r0.h_tokens
+                members.append((di, f, L * V_layer / di, float(r0.deadline_s)))
+                if f:
+                    for dd, fr in f.items():
+                        D[dd] += di * fr
         return JointAction(tuple(acts))
 
 
