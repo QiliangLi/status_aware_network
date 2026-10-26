@@ -177,10 +177,16 @@ class TFSAdv(TFS):
         if "wl" in f:
             L = snap._profile_cfg.L
             for pw in snap.workers:
-                if pw.members and d.get(pw.members[0], 0.0) >= d_heavy:
-                    if "active" in f and pw.layers_done >= L:
-                        continue          # 末层计算期：读取已完成，不计账本
-                    led += d.get(pw.members[0], 0.0)
+                if pw.members:
+                    dm = d.get(pw.members[0], 0.0)
+                    if "nolabel" in f:
+                        if pw.layers_done >= L:
+                            continue      # 末层不读：不计（active 联动）
+                        led += dm
+                    elif dm >= d_heavy:
+                        if "active" in f and pw.layers_done >= L:
+                            continue
+                        led += dm
         hv = {r.rid: self._is_heavy(snap, r.rid, d, d_heavy)
               for r in snap.requests if r.rid in snap.queued}
         queued = [r for r in snap.requests if r.rid in snap.queued]
@@ -224,7 +230,10 @@ class TFSAdv(TFS):
                 if r.rid in used:
                     continue
                 heavy = hv[r.rid]
-                if heavy:
+                if "nolabel" in f:
+                    if led > 1e-9 and led + d[r.rid] > cap:
+                        continue          # 无分类：人人过账本；账本空保底放一条
+                elif heavy:
                     if "wl" in f:
                         if led + d[r.rid] > cap:
                             continue
